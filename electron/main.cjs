@@ -510,6 +510,17 @@ function setupAutoUpdater() {
 		reportUpdateStatus("disabled");
 		return;
 	}
+	// Side-tutor fork builds (electron-builder.side-tutor.yml) ship without an
+	// update feed: the official release must never install over them.
+	try {
+		if (require("../package.json").lhAutoUpdate === false) {
+			log("auto-update: disabled for this build (lhAutoUpdate:false)");
+			reportUpdateStatus("disabled");
+			return;
+		}
+	} catch {
+		/* no package.json metadata — keep the normal updater */
+	}
 	try {
 		autoUpdater = require("electron-updater").autoUpdater;
 	} catch (err) {

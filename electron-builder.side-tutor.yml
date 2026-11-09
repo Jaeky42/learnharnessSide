@@ -1,0 +1,30 @@
+# LearnHarness Side Tutor — a SEPARATE Windows build of this fork.
+#
+# Mixes in the main config, then changes only what makes it a distinct app:
+#   - its own appId/productName → installs NEXT TO the official LearnHarness
+#     (own install folder, Start-menu entry and uninstaller) instead of
+#     replacing it;
+#   - no update feed, and lhAutoUpdate:false read by electron/main.cjs →
+#     the official release can never install over it and drop the side tutor.
+# Data is SHARED on purpose: electron/main.cjs pins app.setName("LearnHarness"),
+# so userData (sessions, settings, auth.json) is the official app's folder.
+# Sharing userData also shares the single-instance lock, so the two apps can
+# never run at once and write the same files.
+extends: ./electron-builder.yml
+appId: com.learnharness.SideTutor
+productName: LearnHarness Side Tutor
+extraMetadata:
+  lhAutoUpdate: false
+publish: null
+win:
+  icon: build/icon.ico
+  executableName: LearnHarnessSideTutor
+  # (target inherited: nsis x64 — arrays from the parent are concatenated)
+  artifactName: "LearnHarness-Side-Tutor-${version}-${arch}-setup.${ext}"
+  signExecutable: false
+  verifyUpdateCodeSignature: false
+nsis:
+  oneClick: true
+  perMachine: false
+  # Never: the data folder belongs to the official app too.
+  deleteAppDataOnUninstall: false

@@ -1,0 +1,69 @@
+name: Side Tutor Windows build
+
+# Builds the "LearnHarness Side Tutor" installer on GitHub's Windows machines
+# and attaches it to the run as a downloadable artifact. Never publishes a
+# release. Mirrors the Windows leg of release.yml.
+on:
+  push:
+    branches: [side-tutor]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: side-tutor-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NEXT_TELEMETRY_DISABLED: "1"
+
+jobs:
+  windows:
+    runs-on: windows-2025
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "26"
+          cache: npm
+      - run: npm ci
+      - name: Side-tutor tests on Windows
+        run: npx tsx --test tests/side-tutor.test.ts
+        env:
+          NODE_ENV: test
+      - name: Native renderer tests on Windows
+        run: npx electron --import tsx --test tests/pdf-native-render.test.ts tests/pdf-ops.test.ts tests/svg-native-render.test.ts tests/browser-service.test.ts
+        env:
+          NODE_ENV: test
+          ELECTRON_RUN_AS_NODE: "1"
+      - run: npm run build
+      - run: node scripts/smoke-provider-runtime.mjs
+      - run: node scripts/build-server.mjs
+      - run: node scripts/smoke-server.mjs --electron
+      - name: Package the installer (no publish)
+        run: npx electron-builder --win --x64 --publish never --config electron-builder.side-tutor.yml
+      - name: Smoke the packaged app
+        run: |
+          payload="dist/win-unpacked/resources/server/standalone"
+          runtime="dist/win-unpacked/LearnHarnessSideTutor.exe"
+          node scripts/smoke-provider-runtime.mjs --standalone "$payload"
+          node scripts/smoke-provider-runtime.mjs --standalone "$payload" --runtime "$runtime"
+          node scripts/smoke-demo-runtime.mjs --standalone "$payload" --runtime "$runtime" --browser
+      - name: No update feed shipped
+        run: |
+          if [ -f dist/win-unpacked/resources/app-update.yml ]; then
+            echo "::warning::app-update.yml present; main.cjs lhAutoUpdate guard still disables updates"
+          fi
+          node -e "const asar=require('@electron/asar'); const p=JSON.parse(asar.extractFile('dist/win-unpacked/resources/app.asar','package.json').toString()); if (p.lhAutoUpdate!==false) { console.error('lhAutoUpdate missing from packaged package.json'); process.exit(1) } console.log(p.productName ?? p.name, p.version, 'auto-update off')"
+      - name: Upload installer
+        uses: actions/upload-artifact@v7
+        with:
+          name: LearnHarness-Side-Tutor-windows-x64
+          retention-days: 30
+          if-no-files-found: error
+          path: dist/*.exe
