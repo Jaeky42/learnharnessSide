@@ -6,7 +6,13 @@ const pkg = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), 
 
 const nextConfig: NextConfig = {
 	// Public build metadata only; no new runtime Electron version API.
-	env: { LH_VERSION: pkg.version, LH_HOMEPAGE: pkg.homepage },
+	// LH_BUILD_VERSION / LH_BUILD_HOMEPAGE: a build that packages under a
+	// different version or repo (the side-tutor fork build stamps
+	// <major>.<minor>.<run number> and the fork's URL) shows those instead.
+	env: {
+		LH_VERSION: process.env.LH_BUILD_VERSION || pkg.version,
+		LH_HOMEPAGE: process.env.LH_BUILD_HOMEPAGE || pkg.homepage,
+	},
 	// Leave multipart headroom above the 25 MiB file allowance. This is a
 	// proxy buffer, not a rejection gate: the import route also bounds reads,
 	// validates actual file bytes and handles incomplete multipart bodies.

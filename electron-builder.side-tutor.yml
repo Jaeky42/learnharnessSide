@@ -1,11 +1,24 @@
 # LearnHarness Side Tutor — a SEPARATE Windows build of this fork.
 #
 # Mixes in the main config, then changes only what makes it a distinct app:
-#   - its own appId/productName → installs NEXT TO the official LearnHarness
-#     (own install folder, Start-menu entry and uninstaller) instead of
-#     replacing it;
-#   - no update feed, and lhAutoUpdate:false read by electron/main.cjs →
-#     the official release can never install over it and drop the side tutor.
+#   - its own appId/productName → its own Start-menu entry and uninstaller;
+#   - its own package NAME (extraMetadata.name) → its own install folder.
+#     A one-click per-user NSIS install names the folder after package.json
+#     "name", NOT productName (app-builder-lib getWindowsInstallationDirName:
+#     productName only when !oneClick || perMachine). Without this both apps
+#     land in %LOCALAPPDATA%\Programs\learnharness, the side tutor overwrites
+#     the official app's resources, and either uninstaller deletes both.
+#     Now: %LOCALAPPDATA%\Programs\learnharness-side-tutor. Safe for data:
+#     main.cjs pins app.setName("LearnHarness"), so userData is unaffected;
+#   - its OWN update feed: the fork's GitHub Releases. Each push to the
+#     side-tutor branch publishes a release (.github/workflows/
+#     side-tutor-windows.yml, version <major>.<minor>.<run number>) and the
+#     installed app updates itself from there. The official feed is never
+#     read, so the official release can't install over the side tutor (and
+#     the side tutor can't install over the official app: different appId).
+#     `publish` MUST stay a single OBJECT, not a list: electron-builder's
+#     `extends` merge CONCATENATES arrays (builder-util-runtime deepAssign),
+#     which would put the official feed first; an object replaces it.
 # Data is SHARED on purpose: electron/main.cjs pins app.setName("LearnHarness"),
 # so userData (sessions, settings, auth.json) is the official app's folder.
 # Sharing userData also shares the single-instance lock, so the two apps can
@@ -14,8 +27,14 @@ extends: ./electron-builder.yml
 appId: com.learnharness.SideTutor
 productName: LearnHarness Side Tutor
 extraMetadata:
-  lhAutoUpdate: false
-publish: null
+  name: learnharness-side-tutor
+  # Settings → Updates links release notes to this repo's tags.
+  homepage: https://github.com/Jaeky42/learnharnessSide
+publish:
+  provider: github
+  owner: Jaeky42
+  repo: learnharnessSide
+  releaseType: release
 win:
   icon: build/icon.ico
   executableName: LearnHarnessSideTutor

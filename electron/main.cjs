@@ -510,8 +510,9 @@ function setupAutoUpdater() {
 		reportUpdateStatus("disabled");
 		return;
 	}
-	// Side-tutor fork builds (electron-builder.side-tutor.yml) ship without an
-	// update feed: the official release must never install over them.
+	// A build can opt out of updates with lhAutoUpdate:false in its packaged
+	// package.json. (Side-tutor fork builds no longer do: they update from
+	// the fork's own GitHub Releases — electron-builder.side-tutor.yml.)
 	try {
 		if (require("../package.json").lhAutoUpdate === false) {
 			log("auto-update: disabled for this build (lhAutoUpdate:false)");

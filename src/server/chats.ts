@@ -1,4 +1,5 @@
 import { discardSideTutor } from "./side-tutor.ts";
+import { discardSessionNotes } from "./notes.ts";
 import { abortExtraction, extractionStatuses } from "../agent/subagents/extraction.ts";
 import { isJobLive } from "../agent/subagents/aborts.ts";
 import { coverageOf } from "../core/coverage.ts";
@@ -154,6 +155,7 @@ function finishChatRecordDeletion(chatId: string): number {
 		discardChatDeliveries(chatId);
 		clearTurnFailure(chatId);
 		discardSideTutor(chatId);
+		discardSessionNotes(chatId);
 	}
 	return jobsRemoved;
 }

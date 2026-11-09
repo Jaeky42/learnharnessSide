@@ -51,9 +51,10 @@ import {
 import { PlanBlock, PlanPopup, latestTree } from "@/components/plan-block";
 import { PlanMarginalia, planExists } from "@/components/plan-window";
 import { SideTutor } from "@/components/side-tutor";
+import { NotesDrawer, useNotesDrawerOpen } from "@/components/notes/notes-drawer";
 import { MermaidOverlay, SessionMermaidContext } from "@/components/session-overlay";
 import { AbortTurnDialog, type AbortMode } from "@/components/abort-turn-dialog";
-import { ArrowRightIcon, DumbbellIcon, WaypointsIcon } from "lucide-react";
+import { ArrowRightIcon, DumbbellIcon, NotebookPenIcon, WaypointsIcon } from "lucide-react";
 import type { PlanBlockData } from "@/src/core";
 import { QuestionDock } from "@/components/question-dock";
 import { SessionFind } from "@/components/session-find";
@@ -882,6 +883,19 @@ export function Chat({
 	// The live plan popup (wave 4): opened by any transcript plan block, the
 	// top-bar plan chip, and the dock band's marginalia.
 	const [planOpen, setPlanOpen] = useState(false);
+	// The notes drawer (private notes in the learner's Obsidian vault — never
+	// seen by any agent): the top-bar Notes chip and Ctrl+Shift+N toggle it.
+	const [notesOpen, setNotesOpen] = useNotesDrawerOpen();
+	useEffect(() => {
+		const toggle = () => setNotesOpen((v) => !v);
+		const focus = () => setNotesOpen(true);
+		window.addEventListener(kbdEventForChat("toggle-notes"), toggle);
+		window.addEventListener(kbdEventForChat("focus-notes"), focus);
+		return () => {
+			window.removeEventListener(kbdEventForChat("toggle-notes"), toggle);
+			window.removeEventListener(kbdEventForChat("focus-notes"), focus);
+		};
+	}, [setNotesOpen]);
 	// Real plan presence — gates the marginalia's clickable flank. A JSX
 	// element is always truthy; gating on the node alone mounted a phantom
 	// (invisible, clickable) button in the bottom-right whenever a question
@@ -1376,6 +1390,22 @@ export function Chat({
 						</button>
 </Hint>
 					)}
+					{/* The Notes chip: the learner's private notes drawer (Ctrl+Shift+N). */}
+					<Hint label={notesOpen ? "Close notes" : "Open notes"} action="toggle-notes" side="bottom">
+<button
+						type="button"
+						data-testid="notes-chip"
+						aria-pressed={notesOpen}
+						onClick={(e) => {
+							blurAfterPointerClick(e);
+							setNotesOpen((v) => !v);
+						}}
+						className={`lh-no-drag flex shrink-0 cursor-pointer items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-medium uppercase tracking-wide transition-colors hover:border-border hover:text-foreground ${notesOpen ? "border-border bg-accent text-foreground" : "border-border/80 text-muted-foreground"}`}
+					>
+						<NotebookPenIcon className="size-3.5 text-primary" aria-hidden />
+						Notes
+					</button>
+</Hint>
 					{/* The extraction ring (owner-locked redesign, 2026-09-24): fills
 					    with uncovered vs the chunk threshold, pulses while a run is in
 					    flight, vanishes when the graph is off. Click → the exact
@@ -1798,6 +1828,9 @@ export function Chat({
 				<AbortTurnDialog mode={abortAsk} onClose={() => setAbortAsk(null)} onConfirm={confirmAbort} busy={busy} />
 				</div>
 			</div>
+			{/* The notes drawer: a full-height sibling of the session column, like
+			    the left sidebar. Teaching AND practice sessions (owner ruling). */}
+			{notesOpen && <NotesDrawer key={chatId} chatId={chatId} onClose={() => setNotesOpen(false)} />}
 		</div>
 		</JobsContext.Provider>
 		</SessionMermaidContext.Provider>

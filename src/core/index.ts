@@ -91,3 +91,5 @@ export * from "./coverage.ts";
 export * from "./session-markdown.ts";
 // The side tutor (side-window Q&A): contracts + the lesson snapshot. Pure.
 export * from "./side-tutor.ts";
+// The notes drawer's pure logic (properties, sections, links, split plans).
+export * from "./notes.ts";

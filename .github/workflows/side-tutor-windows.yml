@@ -1,15 +1,20 @@
 name: Side Tutor Windows build
 
-# Builds the "LearnHarness Side Tutor" installer on GitHub's Windows machines
-# and attaches it to the run as a downloadable artifact. Never publishes a
-# release. Mirrors the Windows leg of release.yml.
+# Builds the "LearnHarness Side Tutor" installer on GitHub's Windows machines,
+# attaches it to the run, and — once every test and smoke check has passed —
+# publishes it as a GitHub Release on THIS fork. The installed Side Tutor
+# app updates itself from those releases (electron-builder.side-tutor.yml
+# `publish`). Version: <major>.<minor> from package.json + the run number,
+# so every build is newer than the last. Never touches the official repo.
+# Mirrors the Windows leg of release.yml.
 on:
   push:
     branches: [side-tutor]
   workflow_dispatch:
 
 permissions:
-  contents: read
+  # Creating the fork's own release needs write access to this repo.
+  contents: write
 
 concurrency:
   group: side-tutor-windows-${{ github.ref }}
@@ -32,8 +37,15 @@ jobs:
           node-version: "26"
           cache: npm
       - run: npm ci
-      - name: Side-tutor tests on Windows
-        run: npx tsx --test tests/side-tutor.test.ts
+      - name: Stamp the build version
+        run: |
+          version=$(node -p "const [a,b]=require('./package.json').version.split('.'); a+'.'+b+'.'+process.env.GITHUB_RUN_NUMBER")
+          echo "SIDE_VERSION=$version" >> "$GITHUB_ENV"
+          echo "LH_BUILD_VERSION=$version" >> "$GITHUB_ENV"
+          echo "LH_BUILD_HOMEPAGE=https://github.com/$GITHUB_REPOSITORY" >> "$GITHUB_ENV"
+          echo "Side Tutor version $version"
+      - name: Side-tutor and notes tests on Windows
+        run: npx tsx --test tests/side-tutor.test.ts tests/side-tutor-install.test.ts tests/notes-core.test.ts tests/notes-store.test.ts tests/notes-privacy.test.ts
         env:
           NODE_ENV: test
       - name: Native renderer tests on Windows
@@ -50,7 +62,7 @@ jobs:
         # retry transient gateway timeouts instead of failing the run.
         run: |
           for attempt in 1 2 3; do
-            if npx electron-builder --win --x64 --publish never --config electron-builder.side-tutor.yml; then exit 0; fi
+            if npx electron-builder --win --x64 --publish never --config electron-builder.side-tutor.yml --em.version="$SIDE_VERSION"; then exit 0; fi
             echo "::warning::packaging attempt $attempt failed — retrying in 30s"
             rm -rf dist
             sleep 30
@@ -63,16 +75,35 @@ jobs:
           node scripts/smoke-provider-runtime.mjs --standalone "$payload"
           node scripts/smoke-provider-runtime.mjs --standalone "$payload" --runtime "$runtime"
           node scripts/smoke-demo-runtime.mjs --standalone "$payload" --runtime "$runtime" --browser
-      - name: No update feed shipped
+      - name: Packaged app updates from this fork
         run: |
-          if [ -f dist/win-unpacked/resources/app-update.yml ]; then
-            echo "::warning::app-update.yml present; main.cjs lhAutoUpdate guard still disables updates"
-          fi
-          node -e "const asar=require('@electron/asar'); const p=JSON.parse(asar.extractFile('dist/win-unpacked/resources/app.asar','package.json').toString()); if (p.lhAutoUpdate!==false) { console.error('lhAutoUpdate missing from packaged package.json'); process.exit(1) } console.log(p.productName ?? p.name, p.version, 'auto-update off')"
+          feed=dist/win-unpacked/resources/app-update.yml
+          test -f "$feed" || { echo "::error::no update feed packaged"; exit 1; }
+          cat "$feed"
+          grep -q "provider: github" "$feed" || { echo "::error::feed is not GitHub"; exit 1; }
+          grep -qi "owner: ${GITHUB_REPOSITORY%%/*}" "$feed" || { echo "::error::feed owner is not this fork"; exit 1; }
+          grep -qi "repo: ${GITHUB_REPOSITORY#*/}" "$feed" || { echo "::error::feed repo is not this fork"; exit 1; }
+          if grep -qi "amosblomqvist" "$feed"; then echo "::error::feed points at the official repo"; exit 1; fi
+          test -f dist/latest.yml || { echo "::error::latest.yml missing"; exit 1; }
+          grep -q "version: $SIDE_VERSION" dist/latest.yml || { echo "::error::latest.yml version mismatch"; exit 1; }
+          node -e "const asar=require('@electron/asar'); const p=JSON.parse(asar.extractFile('dist/win-unpacked/resources/app.asar','package.json').toString()); if (p.lhAutoUpdate===false) { console.error('updates are switched off in the packaged package.json'); process.exit(1) } if (p.name==='learnharness') { console.error('packaged name equals the official app name: both would install into the same folder'); process.exit(1) } if (p.version!==process.env.SIDE_VERSION) { console.error('packaged version', p.version, 'is not', process.env.SIDE_VERSION); process.exit(1) } console.log(p.productName ?? p.name, p.version, 'install folder', p.name)"
       - name: Upload installer
         uses: actions/upload-artifact@v7
         with:
           name: LearnHarness-Side-Tutor-windows-x64
           retention-days: 30
           if-no-files-found: error
-          path: dist/*.exe
+          path: |
+            dist/*.exe
+            dist/*.exe.blockmap
+            dist/latest.yml
+      - name: Publish the update on this fork
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v$SIDE_VERSION" dist/*.exe dist/*.exe.blockmap dist/latest.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "LearnHarness Side Tutor $SIDE_VERSION" \
+            --notes "Built from $(git log -1 --format=%h) on the side-tutor branch: $(git log -1 --format=%s). Installed Side Tutor apps download this automatically."

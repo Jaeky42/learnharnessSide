@@ -48,6 +48,16 @@ export * from "./compaction.ts";
 export { runPiTurn, piTurnResponse, type PiTurnHandle, type PiTurnSpec } from "./pi/ui-stream.ts";
 export * from "./observability.ts";
 export { sideTutorThreadResponse, sideTutorPostResponse, clearSideTutorResponse } from "./side-tutor.ts";
+export {
+	notesTreeResponse,
+	notesActionResponse,
+	noteReadResponse,
+	noteSaveResponse,
+	noteAttachmentResponse,
+	noteAssetResponse,
+	noteHomeResponse,
+	noteSetHomeResponse,
+} from "./notes.ts";
 export * from "./model-catalog.ts";
 export { subscriptionControlsResponse, subscriptionBrowserResponse } from "./web-subscription-http.ts";
 export { sessionCost } from "./pricing.ts";

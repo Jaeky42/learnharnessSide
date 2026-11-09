@@ -33,6 +33,11 @@ export const PATHS = {
 	 *  the chat record so side questions never reach the main teacher's
 	 *  context (src/core/side-tutor.ts). */
 	sideTutor: path.join(DATA_ROOT, "side-tutor"),
+	/** The notes drawer's own bookkeeping — vault setting, session home
+	 *  folders, edits waiting for an unavailable vault. The notes themselves
+	 *  live in the learner's vault. Agents' file tools refuse this folder
+	 *  and the vault's notes folder (agent/tools/fs-shared.ts). */
+	notes: path.join(DATA_ROOT, "notes"),
 } as const;
 
 // ─── Models ────────────────────────────────────────────────────────────────

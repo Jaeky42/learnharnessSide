@@ -2,7 +2,7 @@ import * as fsSync from "node:fs";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { AUTH_FILE } from "../../../config.ts";
+import { AUTH_FILE, PATHS } from "../../../config.ts";
 import { comparisonPath, guardSourcePath, isWithin, realSourcePath as realOrMissing, resolvePolicy, type ResolvedFileAccessPolicy } from "./file-access.ts";
 
 /**
@@ -151,6 +151,27 @@ export function sensitiveHomeLocations(
 	});
 }
 
+/** THE LEARNER'S PRIVATE NOTES (notes drawer): the vault's notes folder and
+ *  the drawer's own bookkeeping are never readable by any agent — the
+ *  teacher, the side tutor, background jobs. Read fresh per resolution/walk
+ *  from the drawer's settings file (agents never import the notes store).
+ *  Matched case-insensitively, named and canonical spellings alike. */
+export function privateNotesRoots(notesDir: string = PATHS.notes): string[] {
+	const roots = [notesDir];
+	try {
+		const raw = JSON.parse(fsSync.readFileSync(/* turbopackIgnore: true */ path.join(notesDir, "settings.json"), "utf-8")) as { vaultPath?: unknown };
+		if (typeof raw.vaultPath === "string" && path.isAbsolute(raw.vaultPath)) roots.push(path.join(/* turbopackIgnore: true */ raw.vaultPath, "LearnHarness"));
+	} catch { /* no vault chosen yet */ }
+	return roots.flatMap((root) => {
+		const real = protectedRealPath(root);
+		return real === root ? [root] : [root, real];
+	});
+}
+
+function isPrivateNotesPath(absolute: string, roots: readonly string[]): boolean {
+	return roots.some((root) => isWithin(absolute, root, true));
+}
+
 /** One snapshot per resolution/walk, not per visited entry. Resolve protected
  *  roots too: a sensitive directory or AUTH_FILE can itself be a symlink to
  *  a location outside home. Never read credential contents or app records. */
@@ -158,12 +179,20 @@ function sourcePathCheck(home = os.homedir()): (absolute: string) => boolean {
 	const homeRoots = sensitiveHomeLocations(home).map(protectedRealPath);
 	const files = credentialFiles(AUTH_FILE).map(protectedRealPath);
 	const credentialDir = protectedRealPath(path.dirname(AUTH_FILE));
-	return (absolute) => isSensitivePath(absolute, home) ||
+	const notes = privateNotesRoots();
+	return (absolute) => isSensitivePath(absolute, home) || isPrivateNotesPath(absolute, notes) ||
 		homeRoots.some((p) => isWithin(absolute, p, true)) ||
 		files.some((p) => isWithin(absolute, p)) || isCredentialTemp(absolute, credentialDir, path.basename(comparisonPath(AUTH_FILE)));
 }
 
 function checkedSourcePath(absolute: string, denied: (absolute: string) => boolean): string {
+	const notes = privateNotesRoots();
+	if (isPrivateNotesPath(absolute, notes) || isPrivateNotesPath(protectedRealPath(absolute), notes)) {
+		throw new Error(
+			`Access denied: ${absolute} is the learner's private notes folder. ` +
+			"Their notes are for them alone; no agent can open, list or search them. Ask the learner directly if you need something from their notes.",
+		);
+	}
 	const refuse = () => {
 		throw new Error(
 			`Access denied: ${absolute} is a protected location. Learner file tools cannot open it. ` +
