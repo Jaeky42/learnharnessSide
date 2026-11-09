@@ -43,6 +43,9 @@ jobs:
           echo "SIDE_VERSION=$version" >> "$GITHUB_ENV"
           echo "LH_BUILD_VERSION=$version" >> "$GITHUB_ENV"
           echo "LH_BUILD_HOMEPAGE=https://github.com/$GITHUB_REPOSITORY" >> "$GITHUB_ENV"
+          # This runner's copy only (never committed): electron-builder and
+          # the web build both read the version from package.json.
+          npm pkg set version="$version"
           echo "Side Tutor version $version"
       - name: Side-tutor and notes tests on Windows
         run: npx tsx --test tests/side-tutor.test.ts tests/side-tutor-install.test.ts tests/notes-core.test.ts tests/notes-store.test.ts tests/notes-privacy.test.ts
@@ -62,7 +65,7 @@ jobs:
         # retry transient gateway timeouts instead of failing the run.
         run: |
           for attempt in 1 2 3; do
-            if npx electron-builder --win --x64 --publish never --config electron-builder.side-tutor.yml --em.version="$SIDE_VERSION"; then exit 0; fi
+            if npx electron-builder --win --x64 --publish never --config electron-builder.side-tutor.yml; then exit 0; fi
             echo "::warning::packaging attempt $attempt failed — retrying in 30s"
             rm -rf dist
             sleep 30
