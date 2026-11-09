@@ -10,6 +10,10 @@ name: Side Tutor Windows build
 on:
   push:
     branches: [side-tutor]
+    # Notes for Claude Code and docs don't change the app: no build, no release.
+    paths-ignore:
+      - "CLAUDE.md"
+      - "docs/**"
   workflow_dispatch:
 
 permissions:
