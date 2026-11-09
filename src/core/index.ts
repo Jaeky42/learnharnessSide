@@ -89,3 +89,5 @@ export * from "./coverage.ts";
 // ONE session→markdown formatter — the extractor's view and the user-facing
 // export share it. Pure, browser-safe.
 export * from "./session-markdown.ts";
+// The side tutor (side-window Q&A): contracts + the lesson snapshot. Pure.
+export * from "./side-tutor.ts";

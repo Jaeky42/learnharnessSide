@@ -29,6 +29,10 @@ export const PATHS = {
 	/** Debug artifacts (env-gated): data/debug/provider-events/<chatId>.jsonl
 	 * raw provider stream recordings (src/agent/provider-events.ts). */
 	debug: path.join(DATA_ROOT, "debug"),
+	/** Side-tutor threads (one JSON file per chat) — deliberately OUTSIDE
+	 *  the chat record so side questions never reach the main teacher's
+	 *  context (src/core/side-tutor.ts). */
+	sideTutor: path.join(DATA_ROOT, "side-tutor"),
 } as const;
 
 // ─── Models ────────────────────────────────────────────────────────────────
