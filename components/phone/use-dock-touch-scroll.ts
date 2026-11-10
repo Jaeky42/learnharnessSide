@@ -12,12 +12,22 @@
  * can still move that way, and only otherwise does the drag move the
  * transcript (which also folds an opened question, as scrolling does).
  *
+ * LEAVING THE BOTTOM. The transcript is held to the bottom by
+ * use-stick-to-bottom, which for 0.35s after the content changes size keeps
+ * pulling the scroll back down until it sees the learner escape. It escapes
+ * at once on a wheel scrolled up, but for touch it only reads scroll events,
+ * and ignores those while the content is resizing, so a quick swipe right
+ * after a question opened or folded was pulled back to the bottom, which
+ * re-opened the question (owner's iPhone). `onEscape` (its stopScroll) is
+ * called whenever a finger moves the transcript up, here (forwarded) and on
+ * the transcript itself (native): the touch twin of its wheel escape.
+ *
  * Phone layout only. Horizontal drags (the confidence slider, wide tables)
  * and drags that start in a text box are left alone. The choice is made on
  * the drag's first movement (dragDecision).
  */
 
-import { useEffect, type RefObject } from "react";
+import { useEffect, useRef, type RefObject } from "react";
 import { useIsPhone } from "@/components/phone/use-phone";
 
 /** Per-frame velocity decay of the fling after the finger lifts. */
@@ -95,8 +105,10 @@ function leaveAlone(target: EventTarget | null): boolean {
 	return target instanceof Element && !!target.closest('textarea, input, select, [contenteditable="true"], .cm-editor');
 }
 
-export function useDockTouchScroll(rootRef: RefObject<HTMLElement | null>, transcriptRef: RefObject<HTMLElement | null>) {
+export function useDockTouchScroll(rootRef: RefObject<HTMLElement | null>, transcriptRef: RefObject<HTMLElement | null>, onEscape?: () => void) {
 	const phone = useIsPhone();
+	const escapeRef = useRef(onEscape);
+	escapeRef.current = onEscape;
 	useEffect(() => {
 		const root = rootRef.current;
 		const transcript = transcriptRef.current;
@@ -111,6 +123,20 @@ export function useDockTouchScroll(rootRef: RefObject<HTMLElement | null>, trans
 		const stopFling = () => {
 			cancelAnimationFrame(frame);
 			frame = 0;
+		};
+		const escape = () => escapeRef.current?.();
+		// A native drag on the transcript itself: escape as soon as the finger
+		// moves down (content moves up) while there is room above.
+		let nativeY: number | null = null;
+		const onTranscriptStart = (e: TouchEvent) => {
+			stopFling();
+			nativeY = e.touches.length === 1 ? (e.touches[0]?.clientY ?? null) : null;
+		};
+		const onTranscriptMove = (e: TouchEvent) => {
+			const y = e.touches[0]?.clientY;
+			if (nativeY === null || y === undefined || e.touches.length !== 1) return;
+			if (y > nativeY && transcript.scrollTop > 0) escape();
+			nativeY = y;
 		};
 		const onStart = (e: TouchEvent) => {
 			stopFling();
@@ -143,6 +169,7 @@ export function useDockTouchScroll(rootRef: RefObject<HTMLElement | null>, trans
 			samples.push({ t: e.timeStamp, y: t.clientY });
 			if (samples.length > 32) samples.shift();
 			lastY = t.clientY;
+			if (step > 0) escape();
 			transcript.scrollTop -= step;
 		};
 		const onEnd = (e: TouchEvent) => {
@@ -158,6 +185,7 @@ export function useDockTouchScroll(rootRef: RefObject<HTMLElement | null>, trans
 			const tick = (now: number) => {
 				const frames = Math.min(4, Math.max(0, (now - prev) / 16));
 				prev = now;
+				if (v > 0) escape();
 				transcript.scrollTop -= v * frames;
 				v = flingStep(v, frames);
 				if (v === 0) {
@@ -173,14 +201,16 @@ export function useDockTouchScroll(rootRef: RefObject<HTMLElement | null>, trans
 		root.addEventListener("touchend", onEnd);
 		root.addEventListener("touchcancel", onEnd);
 		// A touch on the transcript itself stops a fling, as native scrolling does.
-		transcript.addEventListener("touchstart", stopFling, { passive: true });
+		transcript.addEventListener("touchstart", onTranscriptStart, { passive: true });
+		transcript.addEventListener("touchmove", onTranscriptMove, { passive: true });
 		return () => {
 			stopFling();
 			root.removeEventListener("touchstart", onStart);
 			root.removeEventListener("touchmove", onMove);
 			root.removeEventListener("touchend", onEnd);
 			root.removeEventListener("touchcancel", onEnd);
-			transcript.removeEventListener("touchstart", stopFling);
+			transcript.removeEventListener("touchstart", onTranscriptStart);
+			transcript.removeEventListener("touchmove", onTranscriptMove);
 		};
 	}, [phone, rootRef, transcriptRef]);
 }
