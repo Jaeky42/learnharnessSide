@@ -1,6 +1,6 @@
 # Cloud sync: approved plan
 
-Status: **Phases 1–2 built (server mode, sign-in on the server); the rest is planned.** Work happens on a separate branch. It merges into `side-tutor` only once the whole feature works and the owner approves the merge, because every push to `side-tutor` publishes a release. Change these decisions only with the owner's approval.
+Status: **Phases 1–2 built (server mode, sign-in on the server); Phase 3 (phone layouts) is in progress; the rest is planned.** Work happens on a separate branch. It merges into `side-tutor` only once the whole feature works and the owner approves the merge, because every push to `side-tutor` publishes a release. Change these decisions only with the owner's approval.
 
 Goal: keep learning progress on several devices. The Windows desktop app stays fully usable, works offline, and keeps the Obsidian connection. A phone uses LearnHarness from the browser.
 
@@ -126,11 +126,56 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 - **Rule: never delete files by hand on the VPS while sync is running.** Deletions sync to every device. To remove something that leaked, exclude it instead.
 - The notes drawer's existing conflict check (hash + 409) and polling already handle concurrent edits from Obsidian.
 
-### Phone layouts
+### Phone layouts — approved plan (Phase 3)
 
-- Every view gets a phone layout in v1: teaching sessions, practice sessions, the side tutor and the notes drawer.
-- **Side tutor:** a chat bubble in the bottom-right corner of the teaching session that opens the tutor.
-- **Notes drawer:** slides in from the right and fills the screen. The owner reviews how this looks before it's settled.
+**When it applies**
+
+- Screens narrower than **640 px, in a browser only**. The desktop app never shows the phone layout (its window can't go below 640 px, and the rules also exclude the Electron shell, so UI zoom can't trigger it).
+- **Tablet layout: not built; decide later.** Tablets get the desktop layout.
+
+**Screens**
+
+- **Session list:** a drawer that slides in from the left over the lesson, with the rest dimmed. It covers 85% of the width.
+  - A phone always starts with it closed. It closes on picking a session, a tap on the dimmed area, or ✕.
+  - It doesn't read or write the desktop's remembered open/closed setting.
+- **Top bar:** one row at today's height. The title takes the free space (22 px text instead of 30) and truncates. Plan and Notes are icon-only, the extraction ring stays, and the phase word is hidden. The phase dividers in the lesson still show the phase.
+- **Side tutor** (teaching sessions only, as on the desktop):
+  - A round bubble in the bottom-right corner, just above the message box. It shows a spinner while an answer is being written. On a phone the tutor starts closed.
+  - The bubble opens a **bottom sheet** covering about three quarters of the screen, with the lesson dimmed above it. It closes on a tap on the dimmed lesson or the – button. No dragging or resizing.
+  - While an opened question leaves no room above the dock, the bubble moves to the top-right corner under the top bar.
+- **Notes drawer:** slides in from the right and fills the screen.
+  - **Inner layout: not settled.** Two are built behind a temporary switch for the owner to compare from screenshots: (A) list, then note with a back arrow; (B) stacked, where the list folds away when a note opens. The loser is removed.
+  - The two resize handles are hidden. Dragging notes between folders is off (press-and-hold opens the menu; "Move to…" does the job).
+- **Questions:** an opened question may grow to the full screen below the top bar, as on the desktop. Scrolling up folds it into the slim bar.
+- **Footer row** (context and cost, model, thinking level): all stay, on one row; the model name is kept to one line.
+- **Home:** the knowledge graph. The toolbar is fitted: search becomes an icon that opens a full-width field, and the other buttons are icon-only. The graph already supports touch drag and pinch (d3-zoom).
+- **Settings:** full screen. The section list first, then the section with a back arrow. The Keyboard section is hidden on phones; nothing else is removed.
+- **Plan and diagram viewers:** one-finger drag, two-finger pinch to zoom (new), and the − / + buttons.
+
+**Touch and typing**
+
+- **Enter:** on a touch phone, Enter makes a new line and the button sends. This covers the lesson, home and new-session message boxes, the side tutor, practice answers, written answers and "thinking while reading" (a check waiting closed opens with its Open button). Keyboard hints are hidden on touch screens. Desktop is unchanged.
+- **Row menus:** press and hold (about half a second) a session, note or folder to open the menu that right-click opens on the desktop. Row text isn't selectable on phones.
+- Text boxes use 16 px text on phones (smaller text makes iPhone Safari zoom in on focus).
+- When the on-screen keyboard opens, the layout shrinks so the focused box stays visible.
+- Controls that only appear on hover are always visible on touch screens. Hover tooltips don't show.
+- Wide tables, formulas and code scroll sideways inside their own box. The page never scrolls sideways.
+- The notch and the home bar (safe areas) are respected.
+
+**Home-screen app (PWA)**
+
+- Name and short name **LearnHarness**, the existing app icon, a dark background, `display: standalone`.
+- The manifest and the icon files are served **without the login**, because phones fetch them without the session cookie. They contain only the name and the icon.
+- No service worker and no offline mode.
+- The login and setup pages link the manifest and the icon too.
+
+**How it's built**
+
+- Phone styling lives in one fork-owned file, `app/phone.css`, with every rule inside the phone media query. Behavior (phone detection, press-and-hold, the sheet, pinch) lives in `components/phone/`.
+- Upstream components get only small hooks (data attributes and short conditionals), so rebasing onto upstream stays cheap.
+- A test checks that no rule in `phone.css` can apply on a desktop. Desktop screenshots are compared before and after.
+
+**Not in this phase:** a tablet layout, the side tutor in practice sessions, offline use, and renaming notes in the drawer.
 
 ### Hosting — built in Phase 1
 
@@ -174,7 +219,7 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
    - ✅ `ob sync-config` has `--excluded-folders` (comma-separated, empty to clear). It also has `--configs` (which `.obsidian` setting categories sync; may close the `.obsidian` gap), `--conflict-strategy merge|conflict` (an owner decision for Phase 4), `--file-types` and `--device-name`.
 1. ✅ **Server mode.** Dockerfile, the `LH_DATA_DIR` volume, the password login gate in `proxy.ts`, Caddy (HTTPS), the server image workflow, and automatic server updates. Running on the permanent VPS: HTTPS via Caddy, setup and password, locked from outside, and the nightly timer installed.
 2. ✅ **Sign-in on the server.** The ChatGPT paste box, plus the Claude sign-in button and Disconnect. Verified on the VPS: Claude Code installed itself onto the volume, and both ChatGPT and Claude connected from Settings.
-3. **Phone layouts.** PWA manifest; the teaching, practice, side tutor (bubble) and notes drawer (full screen) layouts.
+3. **Phone layouts.** In progress; see "Phone layouts — approved plan (Phase 3)". PWA manifest; phone layouts for every view.
 4. **Vault on the server.** The `ob sync` process, setup, and the automatic excluded-folders list.
 5. **Sync engine.** The lease API, session sync with take-over and desktop copies, graph line and operation sync, per-key settings merges, and the sync protocol version check.
    - Built as wrapper stores at the composition root (`src/server/stores.ts`) over the `core/ports.ts` interfaces, so upstream store code stays untouched and rebasing onto upstream stays cheap.
@@ -183,7 +228,7 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 
 ## Handoff: where things stand and how to continue
 
-### State (as of Phase 2)
+### State (Phases 0–2 done, Phase 3 in progress)
 
 - **Branch:** `claude/pensive-goldberg-7dty2m`. All cloud sync work lives here.
   - Pushes build only the server image (`:dev`), never a desktop release.
@@ -210,19 +255,19 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
   - a commit and push to the branch;
   - a "what to try on your server" list.
 
-### Next: Phase 3, phone layouts (decisions already made)
+### Now: Phase 3, phone layouts (plan approved, in progress)
 
-- All four get a phone layout in v1: **teaching sessions, practice sessions, the side tutor and the notes drawer**.
-- **Side tutor:** a chat bubble in the **bottom-right corner** of the teaching session, like a website chat widget, that opens the tutor.
-- **Notes drawer:** **slides in from the right and fills the screen.** The owner wants to see how it looks before settling it, so show screenshots.
-- Also add a PWA manifest.
-- **Still open; ask:**
-  - the breakpoint(s);
-  - how the sidebar and session list behave on a phone;
-  - how the plan and question docks fit;
-  - what is hidden or collapsed;
-  - whether the side tutor bubble shows in practice sessions too (the side tutor is teaching-only today).
-- **Suggested first step:** ask the owner what looks most cramped on the phone today, and take phone-sized screenshots (Playwright `devices["iPhone 13"]`) of the current UI.
+- The decisions are in "Phone layouts — approved plan (Phase 3)" above. The owner approved them; don't reopen them without a reason.
+- **Build order** (each step ends with a push to this branch):
+  1. Record the decisions (this file).
+  2. Basics: phone detection, `app/phone.css`, and the session drawer.
+  3. The notes drawer with **both** inner layouts, then side-by-side screenshots for the owner to choose from.
+  4. The rest of the lesson screen: top bar, side tutor bubble and sheet, Enter key, footer row, question tidying, press-and-hold, keyboard and safe-area handling.
+  5. Home, Settings, pinch zoom, and a sweep of every dialog and menu at 360, 390 and 430 px wide.
+  6. The home-screen app: manifest, icons, iPhone tags.
+  7. Tests, the desktop before-and-after comparison, docs, and a phone guide for the owner.
+- **Needs the owner's real phone** (a phone-sized desktop browser can't show these): typing with the on-screen keyboard open, the notch and home bar, and "Add to Home Screen".
+- **Sample data for screenshots:** copy `tests/fixtures/golden-data` to a scratch `LH_DATA_DIR`. Truncating a copy of the teaching chat right after a `quiz` tool call gives a session with an open question.
 
 ### Later phases: decisions still open (ask when you get there)
 
