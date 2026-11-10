@@ -190,8 +190,20 @@ describe("drag on the dock scrolls the lesson", async () => {
 		assert.equal(dragDecision(0, 2, true, () => true), "native", "a panel under the finger can scroll");
 		assert.equal(dragDecision(0, 2, false, none), "native", "Safari already scrolling: leave it");
 	});
-	it("slows a fling and stops it", () => {
+	it("slows a fling and stops it, by time rather than by frame", () => {
 		assert.equal(flingStep(10), 9.5);
 		assert.equal(flingStep(0.5), 0);
+		assert.ok(Math.abs(flingStep(flingStep(10, 0.5), 0.5) - 9.5) < 1e-9, "two 120 fps frames = one 60 fps frame");
+	});
+	it("takes the throw from the last moments of the drag, not the last twitch", async () => {
+		const { releaseVelocity, FLING_MAX } = await import("../components/phone/use-dock-touch-scroll.ts");
+		// A steady flick down at 1px/ms, then a 3px twitch back 1ms later as the finger lifts.
+		const flick = [0, 16, 32, 48, 64, 80].map((t) => ({ t, y: 100 + t }));
+		const twitch = [...flick, { t: 81, y: 177 }];
+		assert.ok(releaseVelocity(twitch, 82) > 0, "still a throw downwards");
+		assert.equal(Math.round(releaseVelocity(flick, 82)), 16);
+		assert.equal(releaseVelocity(flick, 200), 0, "the finger stopped before lifting");
+		assert.equal(releaseVelocity([{ t: 0, y: 0 }, { t: 2, y: 5 }], 3), 0, "too short to measure");
+		assert.equal(releaseVelocity([{ t: 0, y: 0 }, { t: 10, y: 400 }], 11), FLING_MAX, "capped");
 	});
 });

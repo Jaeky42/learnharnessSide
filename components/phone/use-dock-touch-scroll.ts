@@ -53,10 +53,32 @@ export function dragDecision(dx: number, dy: number, cancelable: boolean, innerC
 	return innerCan(dy) ? "native" : "take";
 }
 
-/** Pure rule, exported for tests: the next fling velocity (px per frame), or
- *  0 once it is too slow to see. */
-export function flingStep(v: number): number {
-	const next = v * FLING_DECAY;
+/** How far back the release speed looks, and the fastest fling, px/frame. */
+export const FLING_WINDOW_MS = 80;
+export const FLING_MAX = 60;
+
+/** Pure rule, exported for tests: the fling's starting speed (px per 16ms
+ *  frame, finger direction) from the drag's recent finger positions. It
+ *  spans the last FLING_WINDOW_MS, not the last move alone: as a finger
+ *  lifts, an iPhone can report a tiny twitch backwards a millisecond after
+ *  the previous move, which read as a fast throw the other way, sent the
+ *  lesson back to the bottom and re-opened the question (owner's iPhone).
+ *  A finger that stopped before lifting throws nothing. */
+export function releaseVelocity(samples: { t: number; y: number }[], endT: number): number {
+	const last = samples[samples.length - 1];
+	if (!last || endT - last.t > 50) return 0;
+	const recent = samples.filter((s) => last.t - s.t <= FLING_WINDOW_MS);
+	const first = recent[0];
+	if (!first || last.t - first.t < 8) return 0;
+	const v = ((last.y - first.y) / (last.t - first.t)) * 16;
+	return Math.max(-FLING_MAX, Math.min(FLING_MAX, v));
+}
+
+/** Pure rule, exported for tests: the next fling velocity (px per 16ms
+ *  frame) after `frames` such frames (fractional at 120 fps), or 0 once it
+ *  is too slow to see. */
+export function flingStep(v: number, frames = 1): number {
+	const next = v * FLING_DECAY ** frames;
 	return Math.abs(next) < 0.5 ? 0 : next;
 }
 
@@ -82,8 +104,7 @@ export function useDockTouchScroll(rootRef: RefObject<HTMLElement | null>, trans
 		let startX = 0;
 		let startY = 0;
 		let lastY = 0;
-		let lastT = 0;
-		let velocity = 0; // px per frame (16ms), finger direction
+		let samples: { t: number; y: number }[] = [];
 		let mode: "idle" | "pending" | "native" | "forward" = "idle";
 		let target: EventTarget | null = null;
 		let frame = 0;
@@ -101,8 +122,7 @@ export function useDockTouchScroll(rootRef: RefObject<HTMLElement | null>, trans
 			if (!t) return;
 			startX = t.clientX;
 			startY = lastY = t.clientY;
-			lastT = e.timeStamp;
-			velocity = 0;
+			samples = [{ t: e.timeStamp, y: t.clientY }];
 			target = e.target;
 			mode = "pending";
 		};
@@ -120,26 +140,30 @@ export function useDockTouchScroll(rootRef: RefObject<HTMLElement | null>, trans
 			}
 			e.preventDefault();
 			const step = t.clientY - lastY;
-			const dt = Math.max(1, e.timeStamp - lastT);
-			velocity = (step / dt) * 16;
+			samples.push({ t: e.timeStamp, y: t.clientY });
+			if (samples.length > 32) samples.shift();
 			lastY = t.clientY;
-			lastT = e.timeStamp;
 			transcript.scrollTop -= step;
 		};
-		const onEnd = () => {
+		const onEnd = (e: TouchEvent) => {
 			if (mode !== "forward") {
 				mode = "idle";
 				return;
 			}
 			mode = "idle";
-			let v = velocity;
-			const tick = () => {
-				v = flingStep(v);
+			let v = releaseVelocity(samples, e.timeStamp);
+			if (v === 0) return;
+			// Time-based, so the throw travels as far at 120 fps as at 60.
+			let prev = performance.now();
+			const tick = (now: number) => {
+				const frames = Math.min(4, Math.max(0, (now - prev) / 16));
+				prev = now;
+				transcript.scrollTop -= v * frames;
+				v = flingStep(v, frames);
 				if (v === 0) {
 					frame = 0;
 					return;
 				}
-				transcript.scrollTop -= v;
 				frame = requestAnimationFrame(tick);
 			};
 			frame = requestAnimationFrame(tick);
