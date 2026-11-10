@@ -16,9 +16,15 @@
 
 @media (max-width: 639.98px) {
 	/* ── Session drawer ─────────────────────────────────────────────────
-	   The sidebar leaves the row and slides over the content. */
+	   The sidebar leaves the row and slides over the content.
+	   position: absolute, not fixed: in a Safari tab, Safari clips FIXED
+	   layers to the area between the clock strip and its toolbar and paints
+	   those strips one solid colour, which cut the drawer off (owner's
+	   iPhone). Ordinary page layers show under the clock and the toolbar.
+	   The app's pages never scroll the window, so absolute at the top of
+	   the page looks exactly like fixed. */
 	html:not(.lh-electron) [data-phone="sidebar"] {
-		position: fixed;
+		position: absolute;
 		inset: 0 auto 0 0;
 		z-index: 40;
 		width: min(85vw, 20rem);
@@ -45,14 +51,10 @@
 		z-index: 39;
 		background: rgb(0 0 0 / 0.5);
 	}
-	/* In a Safari tab, Safari paints the strip under the clock and the strip
-	   around its toolbar itself, in one colour copied from a full-width
-	   fixed layer at that edge. Kept a few pixels short of both edges, the
-	   session drawer's dim gives it nothing to copy, so the strips stay the
-	   drawer's colour (owner's choice). The home-screen app owns the whole
-	   screen, so there the dim runs to both edges (rule below). */
+	/* The session drawer's dim is a page layer too (see the drawer above),
+	   so it also runs under the clock and the toolbar. */
 	html:not(.lh-electron) [data-phone="backdrop"]:not([data-phone-layer]) {
-		inset: 6px 0;
+		position: absolute;
 	}
 }
 
@@ -519,14 +521,6 @@
 	html:not(.lh-electron) [data-phone="stats"] [data-testid="dictation-meter"] {
 		flex: none;
 		width: 3.5rem;
-	}
-}
-
-@media (max-width: 639.98px) and (display-mode: standalone) {
-	/* The home-screen app: no Safari strips, so the dim beside the session
-	   drawer runs from the very top to the very bottom. */
-	html:not(.lh-electron) [data-phone="backdrop"]:not([data-phone-layer]) {
-		inset: 0;
 	}
 }
 
