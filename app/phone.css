@@ -17,12 +17,11 @@
 @media (max-width: 639.98px) {
 	/* ── Session drawer ─────────────────────────────────────────────────
 	   The sidebar leaves the row and slides over the content.
-	   position: absolute, not fixed: in a Safari tab, Safari clips FIXED
-	   layers to the area between the clock strip and its toolbar and paints
-	   those strips one solid colour, which cut the drawer off (owner's
-	   iPhone). Ordinary page layers show under the clock and the toolbar.
-	   The app's pages never scroll the window, so absolute at the top of
-	   the page looks exactly like fixed. */
+	   position: absolute, not fixed: a page layer, so in a Safari tab it
+	   can run under the clock and the toolbar with the bleed (body
+	   [data-lh-bleed] below; components/phone/phone-viewport.tsx). Safari
+	   clips FIXED layers to the area between its bars. The app's pages
+	   never scroll the window, so absolute looks exactly like fixed. */
 	html:not(.lh-electron) [data-phone="sidebar"] {
 		position: absolute;
 		inset: 0 auto 0 0;
@@ -42,8 +41,14 @@
 		transition: transform 200ms ease;
 		box-shadow: 0 0 40px rgb(0 0 0 / 0.5);
 	}
+	/* The divider runs the drawer's full height, through the safe-area and
+	   bleed padding (owner's ask), so it sits on the drawer, not its column. */
+	html:not(.lh-electron) [data-phone="sidebar"] {
+		border-right: 1px solid var(--color-border);
+	}
 	html:not(.lh-electron) [data-phone="sidebar"] > div {
 		width: 100%;
+		border-right-width: 0;
 	}
 	html:not(.lh-electron) [data-phone="backdrop"] {
 		position: fixed;
@@ -181,6 +186,31 @@
 	   body the frame for fixed overlays, so they move with it. */
 	html:not(.lh-electron) body[data-lh-keyboard] {
 		transform: translateY(var(--lh-vv-top, 0px));
+	}
+	/* The page itself never bounces or pulls to refresh. A drag that would
+	   reach the page (one starting where nothing can scroll that way) is
+	   stopped by components/phone/window-lock.ts. Not overscroll-behavior on
+	   the panels: "contain" on a box that only scrolls sideways (a formula,
+	   a table) also stopped drags there from reaching the lesson. */
+	html:not(.lh-electron) {
+		overscroll-behavior-y: none;
+	}
+	/* Safari tab bleed (experiment; components/phone/phone-viewport.tsx):
+	   the page runs --lh-bleed past the visible area at each end and rests
+	   scrolled down by that much, so the app sits where it did and the
+	   padding is what Safari shows under the clock and its toolbar. */
+	html:not(.lh-electron) body[data-lh-bleed] {
+		padding-block: var(--lh-bleed);
+		min-height: calc(var(--lh-vvh, 100dvh) + 2 * var(--lh-bleed));
+	}
+	html:not(.lh-electron) body[data-lh-bleed] [data-phone="sidebar"],
+	html:not(.lh-electron) body[data-lh-bleed] [data-phone="backdrop"]:not([data-phone-layer]) {
+		bottom: auto;
+		height: calc(var(--lh-vvh, 100dvh) + 2 * var(--lh-bleed));
+	}
+	html:not(.lh-electron) body[data-lh-bleed] [data-phone="sidebar"] {
+		padding-top: var(--lh-bleed);
+		padding-bottom: var(--lh-bleed);
 	}
 
 	/* ── Text boxes: 16px, or iPhone Safari zooms in on every tap ───── */

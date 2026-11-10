@@ -77,7 +77,7 @@ describe("app/phone.css can't reach the desktop", () => {
 			for (const rule of blocks(media.body)) {
 				if (rule.prelude.startsWith("@keyframes")) continue;
 				for (const selector of selectors(rule.prelude)) {
-						assert.match(selector, /^html:not\(\.lh-electron\) /, `unscoped selector: ${selector}`);
+						assert.match(selector, /^html:not\(\.lh-electron\)( |$)/, `unscoped selector: ${selector}`);
 					checked++;
 				}
 			}
@@ -150,5 +150,39 @@ describe("the app follows the visible area when the iPhone keyboard is up", asyn
 	});
 	it("leaves the layout alone while the page is pinch-zoomed", () => {
 		assert.equal(viewportFit({ height: 300, offsetTop: 120, scale: 2 }), null);
+	});
+});
+
+describe("Safari tab bleed", async () => {
+	const { bleedFor, keyboardUp, BLEED_PX } = await import("../components/phone/phone-viewport.tsx");
+	const safari = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1";
+	it("runs the page under the bars only in an iPhone Safari tab with the keyboard down", () => {
+		assert.equal(bleedFor({ userAgent: safari, standalone: false, keyboard: false }), BLEED_PX);
+		assert.equal(bleedFor({ userAgent: safari, standalone: true, keyboard: false }), 0, "the home-screen app already draws edge to edge");
+		assert.equal(bleedFor({ userAgent: safari, standalone: false, keyboard: true }), 0, "keyboard handling stays as it was");
+		assert.equal(bleedFor({ userAgent: safari.replace("Version/18.0", "CriOS/130.0"), standalone: false, keyboard: false }), 0);
+		assert.equal(bleedFor({ userAgent: "Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Mobile Safari/537.36", standalone: false, keyboard: false }), 0);
+	});
+	it("treats a pan or a much shorter visible area as the keyboard", () => {
+		assert.equal(keyboardUp({ height: 796, top: 0 }, 796), false);
+		assert.equal(keyboardUp({ height: 796, top: 12 }, 796), true);
+		assert.equal(keyboardUp({ height: 470, top: 0 }, 796), true);
+		assert.equal(keyboardUp({ height: 700, top: 0 }, 796), false);
+	});
+});
+
+describe("drag on the dock scrolls the lesson", async () => {
+	const { innerCanTake, flingStep } = await import("../components/phone/use-dock-touch-scroll.ts");
+	const box = (scrollTop: number, scrollHeight = 600, clientHeight = 300) => ({ scrollTop, scrollHeight, clientHeight });
+	it("keeps a drag in a panel that can still move that way", () => {
+		assert.equal(innerCanTake([box(100)], 20), true, "finger down, panel not at its top");
+		assert.equal(innerCanTake([box(0)], 20), false, "finger down, panel at its top: the lesson takes it");
+		assert.equal(innerCanTake([box(300)], -20), false, "finger up, panel at its bottom");
+		assert.equal(innerCanTake([box(0, 300, 300)], 20), false, "a box with nothing to scroll");
+		assert.equal(innerCanTake([box(0), box(50)], 20), true, "an outer panel can still move");
+	});
+	it("slows a fling and stops it", () => {
+		assert.equal(flingStep(10), 9.5);
+		assert.equal(flingStep(0.5), 0);
 	});
 });
