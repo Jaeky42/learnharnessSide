@@ -12,12 +12,24 @@
  * can still move that way, and only otherwise does the drag move the
  * transcript (which also folds an opened question, as scrolling does).
  *
+ * A TOUCH STOPS THE SLIDE TO THE BOTTOM (owner's find on their iPhone).
+ * When a question opens, or the learner reaches the bottom, the transcript
+ * slides down to the bottom (use-stick-to-bottom's scrollToBottom). While
+ * that slide runs it pulls the scroll down every frame, and chat.tsx won't
+ * fold the question until it settles or is interrupted. A wheel interrupts
+ * it at once; a finger never did, so a swipe while the text was still
+ * moving was pulled back into the question. `onTouchStart` runs on every
+ * touch on the dock or the transcript; chat.tsx stops the slide there, and
+ * only while one is running, the way a touch stops a moving list on an
+ * iPhone. (Calling stopScroll on every move instead made scrolling jump up
+ * and down on the owner's iPhone and was reverted.)
+ *
  * Phone layout only. Horizontal drags (the confidence slider, wide tables)
  * and drags that start in a text box are left alone. The choice is made on
  * the drag's first movement (dragDecision).
  */
 
-import { useEffect, type RefObject } from "react";
+import { useEffect, useRef, type RefObject } from "react";
 import { useIsPhone } from "@/components/phone/use-phone";
 
 /** Per-frame velocity decay of the fling after the finger lifts. */
@@ -95,8 +107,10 @@ function leaveAlone(target: EventTarget | null): boolean {
 	return target instanceof Element && !!target.closest('textarea, input, select, [contenteditable="true"], .cm-editor');
 }
 
-export function useDockTouchScroll(rootRef: RefObject<HTMLElement | null>, transcriptRef: RefObject<HTMLElement | null>) {
+export function useDockTouchScroll(rootRef: RefObject<HTMLElement | null>, transcriptRef: RefObject<HTMLElement | null>, onTouchStart?: () => void) {
 	const phone = useIsPhone();
+	const touchStartRef = useRef(onTouchStart);
+	touchStartRef.current = onTouchStart;
 	useEffect(() => {
 		const root = rootRef.current;
 		const transcript = transcriptRef.current;
@@ -112,8 +126,13 @@ export function useDockTouchScroll(rootRef: RefObject<HTMLElement | null>, trans
 			cancelAnimationFrame(frame);
 			frame = 0;
 		};
+		const onTranscriptStart = () => {
+			stopFling();
+			touchStartRef.current?.();
+		};
 		const onStart = (e: TouchEvent) => {
 			stopFling();
+			touchStartRef.current?.();
 			if (e.touches.length !== 1 || leaveAlone(e.target)) {
 				mode = "idle";
 				return;
@@ -173,14 +192,14 @@ export function useDockTouchScroll(rootRef: RefObject<HTMLElement | null>, trans
 		root.addEventListener("touchend", onEnd);
 		root.addEventListener("touchcancel", onEnd);
 		// A touch on the transcript itself stops a fling, as native scrolling does.
-		transcript.addEventListener("touchstart", stopFling, { passive: true });
+		transcript.addEventListener("touchstart", onTranscriptStart, { passive: true });
 		return () => {
 			stopFling();
 			root.removeEventListener("touchstart", onStart);
 			root.removeEventListener("touchmove", onMove);
 			root.removeEventListener("touchend", onEnd);
 			root.removeEventListener("touchcancel", onEnd);
-			transcript.removeEventListener("touchstart", stopFling);
+			transcript.removeEventListener("touchstart", onTranscriptStart);
 		};
 	}, [phone, rootRef, transcriptRef]);
 }
