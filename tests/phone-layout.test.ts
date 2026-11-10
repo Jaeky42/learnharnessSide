@@ -163,6 +163,18 @@ describe("Safari tab bleed", async () => {
 		assert.equal(bleedFor({ userAgent: safari.replace("Version/18.0", "CriOS/130.0"), standalone: false, keyboard: false }), 0);
 		assert.equal(bleedFor({ userAgent: "Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Mobile Safari/537.36", standalone: false, keyboard: false }), 0);
 	});
+	it("treats a focused text box as the keyboard, before its size arrives", async () => {
+		const { typingTarget } = await import("../components/phone/phone-viewport.tsx");
+		assert.equal(keyboardUp({ height: 796, top: 0 }, 796, true), true);
+		assert.equal(typingTarget({ tagName: "TEXTAREA" }), true);
+		assert.equal(typingTarget({ tagName: "INPUT", type: "text" }), true);
+		assert.equal(typingTarget({ tagName: "INPUT", type: "search" }), true);
+		assert.equal(typingTarget({ tagName: "INPUT", type: "range" }), false, "the confidence slider");
+		assert.equal(typingTarget({ tagName: "INPUT", type: "checkbox" }), false);
+		assert.equal(typingTarget({ tagName: "DIV", isContentEditable: true }), true, "the notes editor");
+		assert.equal(typingTarget({ tagName: "BUTTON" }), false);
+		assert.equal(typingTarget(null), false);
+	});
 	it("treats a pan or a much shorter visible area as the keyboard", () => {
 		assert.equal(keyboardUp({ height: 796, top: 0 }, 796), false);
 		assert.equal(keyboardUp({ height: 796, top: 12 }, 796), true);
