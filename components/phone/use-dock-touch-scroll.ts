@@ -32,6 +32,16 @@
  * cancelled so it can't land twice. (Calling stopScroll on every move instead made scrolling jump up
  * and down on the owner's iPhone and was reverted.)
  *
+ * NO BOUNCE AT THE ENDS (found with the scroll readout on the owner's
+ * iPhone). When the lesson overshot its bottom, Safari's rubber-band spring
+ * pulled it back to the edge; a swipe that began during that bounce folded
+ * the question, but the spring kept running underneath, overrode the
+ * forwarded scroll and snapped the lesson back to the bottom, which
+ * re-opened the question (the readout showed d below zero, then FOLD, then
+ * "reached the bottom" 150ms later with nothing else moving it). The
+ * transcript gets overscroll-behavior-y: none on phones, so it stops dead at
+ * its ends like the desktop's.
+ *
  * Phone layout only. Horizontal drags (the confidence slider, wide tables)
  * and drags that start in a text box are left alone. The choice is made on
  * the drag's first movement (dragDecision).
@@ -141,6 +151,8 @@ export function useDockTouchScroll(rootRef: RefObject<HTMLElement | null>, trans
 		const root = rootRef.current;
 		const transcript = transcriptRef.current;
 		if (!phone || !root || !transcript) return;
+		const previousOverscroll = transcript.style.overscrollBehaviorY;
+		transcript.style.overscrollBehaviorY = "none";
 		let startX = 0;
 		let startY = 0;
 		let lastY = 0;
@@ -240,6 +252,7 @@ export function useDockTouchScroll(rootRef: RefObject<HTMLElement | null>, trans
 		transcript.addEventListener("touchstart", onTranscriptStart, { passive: true });
 		transcript.addEventListener("scroll", onTranscriptScroll, { passive: true });
 		return () => {
+			transcript.style.overscrollBehaviorY = previousOverscroll;
 			stopFling();
 			root.removeEventListener("touchstart", onStart);
 			root.removeEventListener("touchmove", onMove);
