@@ -154,23 +154,16 @@ export function NotesDrawer({ chatId, onClose }: { chatId: string; onClose: () =
 	const [newBox, setNewBox] = useState<{ title: string; folder: string | null; error: string | null } | null>(null);
 	const [noteMenu, setNoteMenu] = useState<{ x: number; y: number } | null>(null);
 
-	// ─── Phone layout (cloud sync Phase 3) ──────────────────────────────────
-	// The drawer fills the screen. TEMPORARY: two inner layouts are built for
-	// the owner to compare — "steps" (list, then note with a back arrow) and
-	// "stacked" (list above the note; the list folds when a note opens). The
-	// loser is removed once the owner has chosen.
+	// ─── Phone layout (cloud sync Phase 3, owner's choice) ──────────────────
+	// The drawer fills the screen and shows one half at a time: the list,
+	// then the note with "‹ Notes" to go back. It opens on the note last
+	// open in this session, if any.
 	const phone = useIsPhone();
-	const [phoneLayout] = useState<"steps" | "stacked">(() => (load<string>("lh:notes-phone-layout", "steps") === "stacked" ? "stacked" : "steps"));
 	const [phoneScreen, setPhoneScreen] = useState<"list" | "note">(() => (openPath ? "note" : "list"));
-	const [phoneTreeOpen, setPhoneTreeOpen] = useState<boolean>(() => !openPath);
 	useEffect(() => {
 		setPhoneScreen(openPath ? "note" : "list");
-		setPhoneTreeOpen(!openPath);
 	}, [openPath]);
-	const showNoteOnPhone = () => {
-		setPhoneScreen("note");
-		setPhoneTreeOpen(false);
-	};
+	const showNoteOnPhone = () => setPhoneScreen("note");
 
 	const editorRef = useRef<NoteEditorHandle | null>(null);
 	const docRef = useRef<OpenDoc | null>(null);
@@ -609,9 +602,9 @@ export function NotesDrawer({ chatId, onClose }: { chatId: string; onClose: () =
 		onClose();
 	};
 
-	// On a phone the list is always shown on its own screen ("steps"), or
-	// folds with its own state ("stacked"); the desktop preference is untouched.
-	const treeShown = phone ? (phoneLayout === "steps" ? true : phoneTreeOpen) : treeOpen;
+	// On a phone the list has its own screen, so it never folds there; the
+	// desktop's fold preference is untouched.
+	const treeShown = phone || treeOpen;
 	const needsSetup = setupOpen || (tree !== null && !tree.status.configured);
 	const crumb = doc ? [NOTES_FOLDER, ...folderOf(doc.path).split("/").filter(Boolean)].join(" › ") : "";
 
@@ -621,9 +614,7 @@ export function NotesDrawer({ chatId, onClose }: { chatId: string; onClose: () =
 			data-testid="notes-drawer"
 			// PHONE hooks: app/phone.css makes this a full-screen drawer.
 			data-phone="notes"
-			data-phone-layout={phone ? phoneLayout : undefined}
 			data-phone-screen={phone ? phoneScreen : undefined}
-			data-phone-tree={phone ? (phoneTreeOpen ? "open" : "folded") : undefined}
 			className="relative flex h-dvh shrink-0 flex-col border-l border-border bg-background"
 			style={{ width }}
 		>
@@ -636,7 +627,7 @@ export function NotesDrawer({ chatId, onClose }: { chatId: string; onClose: () =
 				className="absolute inset-y-0 -left-1 z-10 w-2 cursor-col-resize"
 			/>
 			<header data-phone="notes-header" className="lh-drag lh-wco-gutter flex h-15 shrink-0 select-none items-center gap-2 border-b border-border pl-3">
-				{phone && phoneLayout === "steps" && phoneScreen === "note" && (
+				{phone && phoneScreen === "note" && (
 					<button
 						type="button"
 						data-phone="notes-back"
@@ -771,7 +762,7 @@ export function NotesDrawer({ chatId, onClose }: { chatId: string; onClose: () =
 								type="button"
 								aria-expanded={treeShown}
 								data-phone="notes-tree-toggle"
-								onClick={() => (phone ? setPhoneTreeOpen((v) => !v) : setTreeOpen((v) => !v))}
+								onClick={() => setTreeOpen((v) => !v)}
 							className="flex items-center gap-1 text-[11px] uppercase tracking-widest text-muted-foreground transition-colors hover:text-foreground"
 						>
 							<ChevronRightIcon className={cn("size-3 transition-transform", treeShown && "rotate-90")} aria-hidden />

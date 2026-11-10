@@ -12,6 +12,7 @@ import { createPortal } from "react-dom";
 import { ChevronRightIcon, FileTextIcon, FolderIcon, FolderOpenIcon, InboxIcon, MoreHorizontalIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { folderOf, INBOX_FOLDER, isFolderSummary, isWithinFolder, noteName, type NotesTreeNote } from "@/src/core";
+import { useIsPhone } from "@/components/phone/use-phone";
 
 export const DRAG_TYPE = "application/x-lh-note-item";
 
@@ -162,8 +163,11 @@ export function NotesTreeView({
 		return !isWithinFolder(toFolder, from) && folderOf(from) !== toFolder;
 	};
 
+	// PHONE (Phase 3): no dragging between folders — press and hold opens
+	// the row menu instead, and "Move to…" there does the job.
+	const phone = useIsPhone();
 	const dragProps = (path: string) => ({
-		draggable: true,
+		draggable: !phone,
 		onDragStart: (e: DragEvent) => {
 			dragging.current = path;
 			e.dataTransfer.setData(DRAG_TYPE, path);
@@ -215,6 +219,7 @@ export function NotesTreeView({
 				{...dragProps(n.path)}
 				onClick={() => onOpenNote(n.path)}
 				onContextMenu={(e) => openMenu(e, { kind: "note", note: n })}
+				data-phone-press=""
 				className={cn(
 					"group/row flex cursor-pointer items-center gap-1.5 rounded-sm py-1 pr-1 text-sm transition-colors hover:bg-accent/60",
 					active && "bg-accent",
@@ -257,6 +262,7 @@ export function NotesTreeView({
 						if (!forceOpen) onToggleFolder(f.path);
 					}}
 					onContextMenu={(e) => openMenu(e, { kind: "folder", folder: f })}
+					data-phone-press=""
 					className={cn(
 						"group/row flex cursor-pointer items-center gap-1.5 rounded-sm py-1 pr-1 text-sm font-medium transition-colors hover:bg-accent/60",
 						selected && "bg-accent/60",

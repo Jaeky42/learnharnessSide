@@ -52,6 +52,8 @@ export function TopBar({
 }) {
 	return (
 		<header
+			// PHONE hook (app/phone.css): one row, title first, icon chips.
+			data-phone="topbar"
 			onMouseDown={onMouseDown}
 			className={`${drag ? "lh-drag " : ""}lh-wco-gutter flex h-15 select-none items-center gap-3 border-b border-border px-3`}
 		>

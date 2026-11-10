@@ -1,5 +1,7 @@
 "use client";
 
+import { enterSends } from "@/components/phone/enter-key";
+
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { joinDictation, useDictationTarget } from "@/components/dictation";
 import { PathInput } from "@/components/path-input";
@@ -88,7 +90,7 @@ export function ReadingThinkingField({
 					// (and the universal ⌘/Ctrl+Enter) opens it — the dictation
 					// flush lands HERE first via the caller's finishDictation,
 					// so spoken thoughts ride along. Shift+Enter stays a newline.
-					if (e.key === "Enter" && onOpen !== undefined && (!e.shiftKey || e.metaKey || e.ctrlKey)) {
+					if (onOpen !== undefined && enterSends(e)) {
 						e.preventDefault();
 						e.stopPropagation();
 						onOpen();

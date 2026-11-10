@@ -121,43 +121,239 @@
 		height: 1rem;
 	}
 
-	/* Layout A — "steps": the list, then the note with a back arrow. */
-	html:not(.lh-electron) [data-phone="notes"][data-phone-layout="steps"][data-phone-screen="list"] [data-phone="notes-note"],
-	html:not(.lh-electron) [data-phone="notes"][data-phone-layout="steps"][data-phone-screen="note"] [data-phone="notes-list"],
-	html:not(.lh-electron) [data-phone="notes"][data-phone-layout="steps"][data-phone-screen="note"] [data-phone="notes-list-action"],
-	html:not(.lh-electron) [data-phone="notes"][data-phone-layout="steps"][data-phone-screen="note"] [data-phone="notes-title"] {
+	/* One half at a time: the list, then the note with "‹ Notes" to go back. */
+	html:not(.lh-electron) [data-phone="notes"][data-phone-screen="list"] [data-phone="notes-note"],
+	html:not(.lh-electron) [data-phone="notes"][data-phone-screen="note"] [data-phone="notes-list"],
+	html:not(.lh-electron) [data-phone="notes"][data-phone-screen="note"] [data-phone="notes-list-action"],
+	html:not(.lh-electron) [data-phone="notes"][data-phone-screen="note"] [data-phone="notes-title"] {
 		display: none;
 	}
-	html:not(.lh-electron) [data-phone="notes"][data-phone-layout="steps"] [data-phone="notes-tree"] {
+	html:not(.lh-electron) [data-phone="notes"] [data-phone="notes-tree"] {
 		height: auto !important; /* beats the inline desktop height */
 		flex: 1 1 0;
 		min-height: 0;
 		padding-bottom: 1rem;
 	}
-	html:not(.lh-electron) [data-phone="notes"][data-phone-layout="steps"] [data-phone="notes-tree-toggle"] {
-		pointer-events: none;
-	}
-	html:not(.lh-electron) [data-phone="notes"][data-phone-layout="steps"] [data-phone="notes-tree-toggle"] svg {
-		display: none;
-	}
-
-	/* Layout B — "stacked": the list above the note; it folds when a note opens. */
-	html:not(.lh-electron) [data-phone="notes"][data-phone-layout="stacked"] [data-phone="notes-tree"] {
-		height: auto !important;
-		flex: 0 1 auto;
-		max-height: 45dvh;
-	}
-	html:not(.lh-electron) [data-phone="notes"][data-phone-layout="stacked"][data-phone-tree="folded"] [data-phone="notes-filter"] {
-		display: none;
-	}
-	html:not(.lh-electron) [data-phone="notes"][data-phone-layout="stacked"] [data-phone="notes-tree-head"] {
+	/* The list can't fold on a phone (it has its own screen); a divider
+	   line under the heading instead of the fold arrow (owner's ask). */
+	html:not(.lh-electron) [data-phone="notes"] [data-phone="notes-tree-head"] {
 		padding-bottom: 0.25rem;
 		border-bottom: 1px solid var(--border);
+	}
+	html:not(.lh-electron) [data-phone="notes"] [data-phone="notes-tree-toggle"] {
+		pointer-events: none;
+	}
+	html:not(.lh-electron) [data-phone="notes"] [data-phone="notes-tree-toggle"] svg {
+		display: none;
 	}
 }
 
 @media (max-width: 639.98px) and (prefers-reduced-motion: reduce) {
 	html:not(.lh-electron) [data-phone="notes"] {
 		animation: none;
+	}
+}
+
+@media (max-width: 639.98px) {
+	/* ── Screen height follows the on-screen keyboard ──────────────────
+	   --lh-vvh is the visible height (components/phone/phone-viewport.tsx);
+	   every full-height shell ends where the keyboard begins. */
+	html:not(.lh-electron) .h-dvh {
+		height: var(--lh-vvh, 100dvh);
+	}
+
+	/* ── Text boxes: 16px, or iPhone Safari zooms in on every tap ───── */
+	html:not(.lh-electron) :is(textarea, input:not([type="range"], [type="checkbox"], [type="radio"]), [contenteditable="true"]:not(.cm-content)) {
+		font-size: 16px;
+	}
+
+	/* ── Top bar: one row, title first, icon chips ─────────────────── */
+	html:not(.lh-electron) [data-phone="topbar"] {
+		gap: 0.5rem;
+		padding-top: env(safe-area-inset-top, 0px);
+		height: calc(3.75rem + env(safe-area-inset-top, 0px));
+		padding-left: max(0.75rem, env(safe-area-inset-left, 0px));
+		padding-right: max(0.75rem, env(safe-area-inset-right, 0px));
+	}
+	html:not(.lh-electron) [data-phone="topbar"] .font-title {
+		font-size: 1.375rem; /* 22px, was 30px */
+	}
+	html:not(.lh-electron) [data-phone="topbar"] > .flex-1[aria-hidden="true"] {
+		min-width: 0;
+		flex: 0 0 0;
+	}
+	html:not(.lh-electron) [data-phone="topbar"] button.font-title {
+		flex: 1 1 auto;
+	}
+	html:not(.lh-electron) [data-phone="topbar"] :is([data-testid="plan-chip"], [data-testid="notes-chip"]) {
+		font-size: 0;
+		gap: 0;
+		width: 2.25rem;
+		height: 2.25rem;
+		padding: 0;
+		justify-content: center;
+	}
+	html:not(.lh-electron) [data-phone="topbar"] :is([data-testid="plan-chip"], [data-testid="notes-chip"]) svg {
+		width: 1rem;
+		height: 1rem;
+	}
+	html:not(.lh-electron) [data-phone="topbar"] [data-testid="phase-chip"] {
+		display: none;
+	}
+
+	/* ── Dock and footer row ───────────────────────────────────────── */
+	html:not(.lh-electron) [data-phone="dock"] {
+		padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
+	}
+	html:not(.lh-electron) [data-phone="dock"] > div {
+		padding-left: max(0.75rem, env(safe-area-inset-left, 0px));
+		padding-right: max(0.75rem, env(safe-area-inset-right, 0px));
+	}
+	html:not(.lh-electron) [data-phone="stats"] {
+		gap: 0.5rem;
+		padding-left: 0.25rem;
+		padding-right: 0.25rem;
+	}
+	html:not(.lh-electron) [data-phone="stats"] [data-testid="model-control"] {
+		min-width: 0;
+		flex: 0 1 auto;
+	}
+	html:not(.lh-electron) [data-phone="stats"] [data-testid="model-control"] > button:first-of-type {
+		min-width: 0;
+		max-width: 11rem;
+	}
+	html:not(.lh-electron) [data-phone="stats"] [data-testid="model-control"] button {
+		white-space: nowrap;
+	}
+	html:not(.lh-electron) [data-phone="stats"] [data-testid="model-control"] > button:first-of-type > span:first-child {
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	/* ── Side tutor: bubble ────────────────────────────────────────── */
+	html:not(.lh-electron) [data-phone="tutor-bubble"] {
+		top: auto;
+		right: max(1rem, env(safe-area-inset-right, 0px));
+		width: 3.25rem; /* BUBBLE_SIZE in components/phone/use-dock-anchor.ts */
+		height: 3.25rem;
+		padding: 0;
+		justify-content: center;
+		gap: 0;
+		border: 0;
+		background: var(--primary);
+		color: var(--primary-foreground);
+		box-shadow: 0 6px 18px rgb(0 0 0 / 0.45);
+	}
+	html:not(.lh-electron) [data-phone="tutor-bubble"][data-phone-place="top"] {
+		top: calc(3.75rem + 0.75rem + env(safe-area-inset-top, 0px));
+	}
+	html:not(.lh-electron) [data-phone="tutor-bubble"] > svg {
+		width: 1.5rem;
+		height: 1.5rem;
+	}
+	/* The "answering" spinner becomes a badge on the bubble. */
+	html:not(.lh-electron) [data-phone="tutor-bubble"] > :not(svg):not([data-phone="hide"]) {
+		position: absolute;
+		right: -0.125rem;
+		top: -0.125rem;
+		padding: 0.125rem 0.25rem;
+		border-radius: 9999px;
+		background: var(--background);
+		color: var(--foreground);
+		font-size: 0.625rem;
+		line-height: 1;
+	}
+
+	/* ── Side tutor: bottom sheet ──────────────────────────────────────
+	   Anchored from the top (an iPhone keyboard covers the bottom edge),
+	   covering the lower three quarters of the visible height. */
+	html:not(.lh-electron) [data-phone="tutor-sheet"] {
+		left: 0;
+		right: 0;
+		top: calc(var(--lh-vvh, 100dvh) * 0.26);
+		height: calc(var(--lh-vvh, 100dvh) * 0.74);
+		width: 100%;
+		min-width: 0;
+		max-width: none;
+		min-height: 0;
+		resize: none;
+		z-index: 46;
+		border-width: 1px 0 0;
+		border-radius: 1.125rem 1.125rem 0 0;
+		background: var(--background);
+		padding-bottom: env(safe-area-inset-bottom, 0px);
+		padding-left: env(safe-area-inset-left, 0px);
+		padding-right: env(safe-area-inset-right, 0px);
+		animation: lh-phone-in-up 200ms ease;
+	}
+	html:not(.lh-electron) [data-phone="tutor-sheet"]::before {
+		content: "";
+		flex: none;
+		width: 2.5rem;
+		height: 0.25rem;
+		margin: 0.5rem auto 0;
+		border-radius: 9999px;
+		background: color-mix(in oklab, var(--foreground) 30%, transparent);
+	}
+	html:not(.lh-electron) [data-phone="tutor-sheet"] > div:first-child {
+		cursor: default;
+		padding-block: 0.375rem 0.5rem;
+	}
+	html:not(.lh-electron) [data-phone="tutor-sheet"] > div:first-child button {
+		width: 2.5rem;
+		height: 2.5rem;
+		display: grid;
+		place-items: center;
+	}
+	html:not(.lh-electron) [data-phone="tutor-sheet"] > div:first-child button svg {
+		width: 1.125rem;
+		height: 1.125rem;
+	}
+	html:not(.lh-electron) [data-phone="tutor-sheet"] > div:nth-child(2) {
+		font-size: 1rem;
+	}
+	html:not(.lh-electron) [data-phone="backdrop"][data-phone-layer="sheet"] {
+		z-index: 45;
+		animation: lh-phone-fade 200ms ease;
+	}
+	@keyframes lh-phone-in-up {
+		from { transform: translateY(100%); }
+		to { transform: none; }
+	}
+	@keyframes lh-phone-fade {
+		from { opacity: 0; }
+		to { opacity: 1; }
+	}
+}
+
+@media (max-width: 639.98px) and (prefers-reduced-motion: reduce) {
+	html:not(.lh-electron) :is([data-phone="tutor-sheet"], [data-phone="backdrop"]) {
+		animation: none;
+	}
+}
+
+@media (max-width: 639.98px) {
+	/* The idle Dictate button in the footer row: icon only. */
+	html:not(.lh-electron) [data-phone="stats"] [data-testid="dictation-toggle"]:not([class*="destructive"]) {
+		width: 1.75rem;
+		flex: none;
+		padding: 0;
+	}
+	html:not(.lh-electron) [data-phone="stats"] [data-testid="dictation-toggle"]:not([class*="destructive"]) > span {
+		display: none;
+	}
+	html:not(.lh-electron) [data-phone="stats"] :has(> [data-testid="dictation-toggle"]:not([class*="destructive"])) {
+		width: auto;
+		flex: none;
+	}
+}
+
+@media (max-width: 639.98px) {
+	/* Press-and-hold rows: no text selection or iOS callout while holding. */
+	html:not(.lh-electron) [data-phone-press] {
+		-webkit-user-select: none;
+		user-select: none;
+		-webkit-touch-callout: none;
 	}
 }

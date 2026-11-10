@@ -19,6 +19,9 @@ import { MessageResponse } from "@/components/ai-elements/message";
 import { BrailleSpinner } from "@/components/braille-spinner";
 import { blurAfterPointerClick } from "@/components/focus-hygiene";
 import { cn } from "@/lib/utils";
+import { isPhoneNow, useIsPhone } from "@/components/phone/use-phone";
+import { useDockAnchor } from "@/components/phone/use-dock-anchor";
+import { plainEnterSends } from "@/components/phone/enter-key";
 import {
 	SIDE_TUTOR_MAX_QUESTION_CHARS,
 	type SideTutorEntry,
@@ -85,10 +88,15 @@ export function SideTutor({ chatId }: { chatId: string }) {
 	/** Last known panel width — the minimized pill lines up with its right edge. */
 	const widthRef = useRef(DEFAULT_WIDTH);
 	const fetchAbortRef = useRef<AbortController | null>(null);
+	// PHONE (cloud sync Phase 3): a bubble above the message box that opens a
+	// bottom sheet. It always starts closed there, can't be dragged or
+	// resized, and never touches the desktop's saved open state or position.
+	const phone = useIsPhone();
+	const anchor = useDockAnchor(phone);
 
 	// Client-only preferences (no SSR mismatch).
 	useEffect(() => {
-		setOpen(readStored(OPEN_KEY, true));
+		setOpen(isPhoneNow() ? false : readStored(OPEN_KEY, true));
 		setPos(clampPos(readStored(POS_KEY, defaultPos()), DEFAULT_WIDTH));
 		setMounted(true);
 	}, []);
@@ -140,6 +148,7 @@ export function SideTutor({ chatId }: { chatId: string }) {
 	const setOpenPersist = (next: boolean) => {
 		if (!next && panelRef.current) widthRef.current = panelRef.current.offsetWidth;
 		setOpen(next);
+		if (isPhoneNow()) return; // no auto-focus either: it would pop the keyboard up
 		writeStored(OPEN_KEY, next);
 		if (next) window.setTimeout(() => inputRef.current?.focus(), 0);
 	};
@@ -227,7 +236,7 @@ export function SideTutor({ chatId }: { chatId: string }) {
 
 	// ── dragging by the header ────────────────────────────────────────────
 	const onDragStart = (e: React.PointerEvent) => {
-		if ((e.target as HTMLElement).closest("button")) return;
+		if (phone || (e.target as HTMLElement).closest("button")) return;
 		e.preventDefault();
 		(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
 		dragRef.current = { x: e.clientX, y: e.clientY, start: pos };
@@ -265,30 +274,43 @@ export function SideTutor({ chatId }: { chatId: string }) {
 			<button
 				type="button"
 				data-testid="side-tutor-toggle"
+				// PHONE hooks (app/phone.css): a round bubble above the dock, or in
+				// the top-right corner while an opened question fills the screen.
+				data-phone="tutor-bubble"
+				data-phone-place={phone ? anchor.place : undefined}
 				onClick={(e) => {
 					blurAfterPointerClick(e);
 					setOpenPersist(true);
 				}}
 				onKeyDown={(e) => e.stopPropagation()}
-				style={{ right: Math.max(EDGE, window.innerWidth - pos.left - widthRef.current), top: pos.top, WebkitAppRegion: "no-drag" } as React.CSSProperties}
+				style={
+					(phone
+						? anchor.place === "above-dock"
+							? { top: anchor.top }
+							: {}
+						: { right: Math.max(EDGE, window.innerWidth - pos.left - widthRef.current), top: pos.top, WebkitAppRegion: "no-drag" }) as React.CSSProperties
+				}
 				className="fixed z-30 flex items-center gap-1.5 whitespace-nowrap rounded-full border border-border bg-background/95 px-3 py-1.5 text-xs text-muted-foreground shadow-md backdrop-blur transition-colors hover:text-foreground"
 				aria-label="Open the side tutor"
 			>
 				<MessageCircleQuestionIcon className="size-4" />
-				Ask on the side
+				<span data-phone="hide">Ask on the side</span>
 				{busy && <BrailleSpinner className="h-3" label="Answering" />}
 			</button>
 		);
 	}
 
 	return (
+		<>
+		{phone && <div data-phone="backdrop" data-phone-layer="sheet" aria-hidden="true" onClick={() => setOpenPersist(false)} />}
 		<div
 			ref={panelRef}
 			data-testid="side-tutor"
+			data-phone="tutor-sheet"
 			role="complementary"
 			aria-label="Side tutor"
 			onKeyDown={onPanelKeyDown}
-			style={{ left: pos.left, top: pos.top, WebkitAppRegion: "no-drag" } as React.CSSProperties}
+			style={(phone ? {} : { left: pos.left, top: pos.top, WebkitAppRegion: "no-drag" }) as React.CSSProperties}
 			className="fixed z-30 flex h-[min(30rem,calc(100dvh-6rem))] min-h-56 w-[22rem] min-w-72 max-w-[calc(100vw-1rem)] resize flex-col overflow-hidden rounded-xl border border-border bg-background/95 shadow-xl backdrop-blur"
 		>
 			<div
@@ -298,7 +320,7 @@ export function SideTutor({ chatId }: { chatId: string }) {
 				onPointerUp={onDragEnd}
 				onPointerCancel={onDragEnd}
 			>
-				<GripHorizontalIcon className="size-3.5 text-muted-foreground/60" />
+				<GripHorizontalIcon data-phone="hide" className="size-3.5 text-muted-foreground/60" />
 				<div className="min-w-0 flex-1">
 					<div className="text-sm font-medium leading-tight">Side tutor</div>
 					<div className="truncate text-[11px] leading-tight text-muted-foreground">Sees the lesson · stays out of it</div>
@@ -363,9 +385,9 @@ export function SideTutor({ chatId }: { chatId: string }) {
 					maxLength={SIDE_TUTOR_MAX_QUESTION_CHARS}
 					onChange={(e) => setInput(e.target.value)}
 					onKeyDown={(e) => {
-						if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-							e.preventDefault();
-							void ask();
+						if (e.key === "Enter" && !e.shiftKey && plainEnterSends() && !e.nativeEvent.isComposing) {
+								e.preventDefault();
+								void ask();
 						}
 					}}
 					rows={1}
@@ -403,6 +425,7 @@ export function SideTutor({ chatId }: { chatId: string }) {
 				)}
 			</div>
 		</div>
+		</>
 	);
 }
 
