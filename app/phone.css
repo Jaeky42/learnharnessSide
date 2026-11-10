@@ -61,6 +61,14 @@
 	html:not(.lh-electron) [data-phone="backdrop"]:not([data-phone-layer]) {
 		position: absolute;
 	}
+	/* Full-screen layers take the app's height (--lh-vvh), not the viewport
+	   the iPhone reports: in the home-screen app that leaves out the clock
+	   strip, so inset: 0 stopped 62 points above the bottom (owner's
+	   iPhone; components/phone/phone-viewport.tsx, standaloneGap). */
+	html:not(.lh-electron) :is([data-phone="sidebar"], [data-phone="backdrop"], [data-testid="settings-backdrop"]) {
+		bottom: auto;
+		height: var(--lh-vvh, 100dvh);
+	}
 }
 
 @media (max-width: 639.98px) and (prefers-reduced-motion: reduce) {

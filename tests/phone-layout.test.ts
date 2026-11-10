@@ -169,6 +169,14 @@ describe("Safari tab bleed", async () => {
 		assert.equal(layoutHeight(470, 796, true), 796, "closing: full height before Safari reports it");
 		assert.equal(layoutHeight(796, 796, true), 796);
 	});
+	it("adds the clock strip back in the home-screen app, only when it is what's missing", async () => {
+		const { standaloneGap } = await import("../components/phone/phone-viewport.tsx");
+		const iphone = { innerWidth: 440, screenWidth: 440, screenHeight: 956, safeTop: 62 };
+		assert.equal(standaloneGap({ ...iphone, standalone: true, innerHeight: 894 }), 62, "the owner's iPhone");
+		assert.equal(standaloneGap({ ...iphone, standalone: true, innerHeight: 956 }), 0, "no quirk: nothing added");
+		assert.equal(standaloneGap({ ...iphone, standalone: false, innerHeight: 796 }), 0, "a Safari tab");
+		assert.equal(standaloneGap({ ...iphone, standalone: true, innerHeight: 894, safeTop: 0 }), 0);
+	});
 	it("treats a focused text box as the keyboard, before its size arrives", async () => {
 		const { typingTarget } = await import("../components/phone/phone-viewport.tsx");
 		assert.equal(keyboardUp({ height: 796, top: 0 }, 796, true), true);

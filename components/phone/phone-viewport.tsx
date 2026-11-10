@@ -79,6 +79,32 @@ export function layoutHeight(visible: number, innerHeight: number, closing: bool
 	return closing ? Math.max(visible, innerHeight) : visible;
 }
 
+/** Pure rule, exported for tests: how much taller the app should be than
+ *  the iPhone reports, in the home-screen app. With the status bar drawn
+ *  over the page (black-translucent) the page starts behind the clock, but
+ *  the reported height leaves the clock strip out, so the app stopped that
+ *  far above the bottom of the screen (owner's iPhone: 894 of 956 points,
+ *  a 62-point band at the bottom). Only when the shortfall matches the
+ *  clock strip, so a phone without the quirk is left alone. */
+export function standaloneGap(env: { standalone: boolean; innerWidth: number; innerHeight: number; screenWidth: number; screenHeight: number; safeTop: number }): number {
+	if (!env.standalone || env.safeTop <= 0) return 0;
+	const portrait = env.innerHeight >= env.innerWidth;
+	const screenSide = portrait ? Math.max(env.screenWidth, env.screenHeight) : Math.min(env.screenWidth, env.screenHeight);
+	return Math.abs(screenSide - env.innerHeight - env.safeTop) <= 2 ? env.safeTop : 0;
+}
+
+let safeTopProbe: HTMLDivElement | null = null;
+/** The clock strip's height (env(safe-area-inset-top)), read from a probe. */
+function safeAreaTop(): number {
+	if (!safeTopProbe) {
+		safeTopProbe = document.createElement("div");
+		safeTopProbe.setAttribute("aria-hidden", "true");
+		safeTopProbe.style.cssText = "position:fixed;top:0;left:0;width:0;height:env(safe-area-inset-top,0px);visibility:hidden;pointer-events:none";
+		document.body.appendChild(safeTopProbe);
+	}
+	return safeTopProbe.getBoundingClientRect().height;
+}
+
 /** How long the keyboard-closing override waits for Safari's new height. */
 export const CLOSING_MAX_MS = 1200;
 
@@ -130,8 +156,10 @@ export function PhoneViewport() {
 			if (!fit) return;
 			// Safari's new height has arrived: the keyboard is gone.
 			if (closing && fit.height >= window.innerHeight - 1) endClosing();
-			root.style.setProperty("--lh-vvh", `${layoutHeight(fit.height, window.innerHeight, closing)}px`);
-			const bleed = bleedFor({ userAgent: navigator.userAgent, standalone: standaloneNow(), keyboard: keyboardUp(fit, window.innerHeight, typing) });
+			const standalone = standaloneNow();
+			const gap = standaloneGap({ standalone, innerWidth: window.innerWidth, innerHeight: window.innerHeight, screenWidth: window.screen.width, screenHeight: window.screen.height, safeTop: standalone ? safeAreaTop() : 0 });
+			root.style.setProperty("--lh-vvh", `${layoutHeight(fit.height, window.innerHeight, closing) + gap}px`);
+			const bleed = bleedFor({ userAgent: navigator.userAgent, standalone, keyboard: keyboardUp(fit, window.innerHeight, typing) });
 			if (bleed > 0) {
 				body.dataset.lhBleed = "";
 				body.style.setProperty("--lh-bleed", `${bleed}px`);
