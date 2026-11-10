@@ -48,7 +48,10 @@ export function useDockAnchor(active: boolean): DockAnchor {
 				if (dock) ro.observe(dock);
 				observed = dock;
 			}
-			const next = dockAnchor(dock ? dock.getBoundingClientRect().top : null);
+			// Relative to the body: while the iPhone keyboard is up the body is
+			// shifted (phone-viewport.tsx) and is the bubble's positioning frame.
+			const bodyTop = document.body.getBoundingClientRect().top;
+			const next = dockAnchor(dock ? dock.getBoundingClientRect().top - bodyTop : null);
 			setAnchor((prev) => (same(prev, next) ? prev : next));
 		};
 		const schedule = () => {

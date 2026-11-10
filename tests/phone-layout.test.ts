@@ -141,3 +141,14 @@ describe("menus stay on a phone screen", async () => {
 		assert.equal(p.style.maxWidth, 344);
 	});
 });
+
+describe("the app follows the visible area when the iPhone keyboard is up", async () => {
+	const { viewportFit } = await import("../components/phone/phone-viewport.tsx");
+	it("uses the visible height and Safari's pan", () => {
+		assert.deepEqual(viewportFit({ height: 565.4, offsetTop: 320.2, scale: 1 }), { height: 565, top: 320 });
+		assert.deepEqual(viewportFit({ height: 932, offsetTop: 0, scale: 1 }), { height: 932, top: 0 });
+	});
+	it("leaves the layout alone while the page is pinch-zoomed", () => {
+		assert.equal(viewportFit({ height: 300, offsetTop: 120, scale: 2 }), null);
+	});
+});

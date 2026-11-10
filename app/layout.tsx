@@ -19,8 +19,10 @@ export const metadata: Metadata = {
 	title: "Learning Harness",
 	description: "A teacher agent with a memory — sessions, quizzes, and a knowledge graph of what you know.",
 	// PHONE (cloud sync Phase 3): the home-screen app on an iPhone — its
-	// name, icon, and a dark status bar (app/manifest.ts covers Android).
-	appleWebApp: { capable: true, title: "LearnHarness", statusBarStyle: "black" },
+	// name and icon (app/manifest.ts covers Android). black-translucent lets
+	// the app draw under the clock, so the session drawer and its dim run the
+	// full height (owner's ask); every top edge pads by the safe-area inset.
+	appleWebApp: { capable: true, title: "LearnHarness", statusBarStyle: "black-translucent" },
 	icons: { apple: "/icons/apple-touch-icon.png" },
 };
 

@@ -53,7 +53,8 @@ import { KeyboardSection } from "./keyboard-section.tsx";
 import { ChatGPTUIProvider } from "./chatgpt-connection.tsx";
 import { NativeSubscriptionUIProvider } from "./subscription-connections.tsx";
 import { AccountSection, useServerAccount } from "./account-section.tsx";
-import { useIsPhone } from "@/components/phone/use-phone";
+import { isPhoneNow, useIsPhone } from "@/components/phone/use-phone";
+import { isServerMode } from "./server-mode";
 
 /** Owner (2026-09-20): hints earn their place — mechanics-explaining
  *  prose is out; only the keyboard note stays (storage location is a
@@ -69,6 +70,8 @@ const SECTIONS = [
 	{ id: "account", label: "Account" },
 ] as const;
 type SectionId = (typeof SECTIONS)[number]["id"];
+/** PHONE: the closing fade's length; app/phone.css uses the same 150ms. */
+const SETTINGS_FADE_MS = 150;
 
 /** `open(section?, row?)` — the optional ROW deep-links into the Keys
  *  section with that row unfolded (zero-keys wave: the dictation error's
@@ -91,7 +94,29 @@ export function SettingsDialogProvider({
 	// PHONE (Phase 3): a link to a specific section opens straight on it;
 	// plain "Settings" opens on the section list.
 	const [landOnExplicit, setLandOnExplicit] = useState(false);
+	// PHONE (Phase 3): Settings fades out on close as well as in (owner's
+	// choice), so closing waits for the fade to finish.
+	const [closing, setClosing] = useState(false);
+	const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+	const close = useCallback(() => {
+		const reduced = typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+		if (!isPhoneNow() || reduced) {
+			setShow(false);
+			return;
+		}
+		setClosing(true);
+		if (closeTimer.current) clearTimeout(closeTimer.current);
+		closeTimer.current = setTimeout(() => {
+			setShow(false);
+			setClosing(false);
+		}, SETTINGS_FADE_MS);
+	}, []);
+	useEffect(() => () => {
+		if (closeTimer.current) clearTimeout(closeTimer.current);
+	}, []);
 	const open = useCallback((section?: string, row?: string) => {
+		if (closeTimer.current) clearTimeout(closeTimer.current);
+		setClosing(false);
 		setLandOn(section ? section as SectionId : "keys");
 		setLandOnExplicit(!!section);
 		setLandOnRow(row ?? null);
@@ -102,7 +127,7 @@ export function SettingsDialogProvider({
 		<ChatGPTUIProvider><NativeSubscriptionUIProvider><DialogContext.Provider value={{ open }}>
 			{children}
 			{show && (
-				<SettingsDialog onClose={() => setShow(false)} initialSection={landOn} initialRow={landOnRow} phoneOpensSection={landOnExplicit} />
+				<SettingsDialog onClose={close} closing={closing} initialSection={landOn} initialRow={landOnRow} phoneOpensSection={landOnExplicit} />
 			)}
 		</DialogContext.Provider></NativeSubscriptionUIProvider></ChatGPTUIProvider>
 	);
@@ -117,12 +142,14 @@ function SettingsDialog({
 	initialSection,
 	initialRow,
 	phoneOpensSection,
+	closing,
 }: {
 	onClose: () => void;
 	initialSection: SectionId;
 	/** The keys-section row to unfold (see DialogContext above). */
 	initialRow: string | null;
 	phoneOpensSection: boolean;
+	closing: boolean;
 }) {
 	const backdropDismiss = useBackdropDismiss(onClose);
 	// Plain dim backdrop (no blur — nothing decorative); a genuine
@@ -131,9 +158,10 @@ function SettingsDialog({
 		<div
 			className="fixed inset-0 z-50 flex items-center justify-center bg-background/80"
 			data-testid="settings-backdrop"
+			data-phone-closing={closing ? "" : undefined}
 			{...backdropDismiss}
 		>
-			<SettingsDialogBody onClose={onClose} initialSection={initialSection} initialRow={initialRow} phoneOpensSection={phoneOpensSection} />
+			<SettingsDialogBody onClose={onClose} initialSection={initialSection} initialRow={initialRow} phoneOpensSection={phoneOpensSection} closing={closing} />
 		</div>,
 		document.body,
 	);
@@ -146,6 +174,7 @@ export function SettingsDialogBody({
 	initialSection = "keys",
 	initialRow = null,
 	phoneOpensSection = false,
+	closing = false,
 }: {
 	onClose: () => void;
 	initialSection?: SectionId;
@@ -154,6 +183,8 @@ export function SettingsDialogBody({
 	initialRow?: string | null;
 	/** PHONE: open straight on initialSection instead of the section list. */
 	phoneOpensSection?: boolean;
+	/** PHONE: sliding out before it unmounts. */
+	closing?: boolean;
 }) {
 	const { onAppearanceChange } = useAppearance();
 	const [record, setRecord] = useState<UserSettings | null | undefined>(
@@ -293,6 +324,7 @@ export function SettingsDialogBody({
 			data-testid="settings-dialog"
 			data-phone="settings"
 			data-phone-screen={phone ? phoneScreen : undefined}
+			data-phone-closing={phone && closing ? "" : undefined}
 			className="settings-dialog-pop flex h-[620px] max-h-[85vh] w-[920px] max-w-[90vw] flex-col overflow-hidden rounded-md border border-border bg-card shadow-xl"
 			onClick={(e) => e.stopPropagation()}
 		>
@@ -347,7 +379,7 @@ export function SettingsDialogBody({
 					data-testid="settings-nav"
 					className="flex w-44 shrink-0 flex-col gap-1 border-r border-border p-2"
 				>
-					{SECTIONS.filter((s) => (s.id !== "account" || account.devices) && !(phone && s.id === "keyboard")).map((s) => (
+					{SECTIONS.filter((s) => (s.id !== "account" || account.devices || (phone && account.devices === undefined && isServerMode())) && !(phone && s.id === "keyboard")).map((s) => (
 						<button
 							key={s.id}
 							type="button"
@@ -415,6 +447,12 @@ export function SettingsDialogBody({
 								<SettingsSection title="Account" testid="section-account">
 									<AccountSection devices={account.devices} reload={account.reload} />
 								</SettingsSection>
+							)}
+							{/* PHONE: the Account row shows from the first frame on the
+							    server (the lh_server cookie), so it doesn't pop into the
+							    list once the device list arrives. */}
+							{active === "account" && account.devices === undefined && (
+								<p className="px-6 py-5 text-xs text-muted-foreground/70">Loading…</p>
 							)}
 							{active === "keys" && (
 								<SettingsSection title="Providers" testid="section-keys">

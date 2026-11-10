@@ -135,9 +135,12 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 
 **Screens**
 
-- **Session list:** a drawer that slides in from the left over the lesson, with the rest dimmed. It covers 85% of the width.
+- **Session list:** a drawer that slides in from the left over the lesson, with the rest dimmed. It covers 85% of the width, at most 20rem.
   - A phone always starts with it closed. It closes on picking a session, a tap on the dimmed area, or ✕.
   - It doesn't read or write the desktop's remembered open/closed setting.
+  - **Full height (owner's ask after the real-phone check):** the drawer's colour and the dim should run from the very top of the screen to the very bottom, with the controls still below the clock.
+    - **Home-screen app:** the status bar is `black-translucent`, so the app draws under the clock and both colours run edge to edge. Every top edge pads by `env(safe-area-inset-top)`, so no control sits under the clock.
+    - **Safari tab:** Safari paints the strip under the clock and the strip around its floating toolbar itself, in one colour across the width. Community testing of Safari 26 (not Apple documentation) reports that it clips fixed layers to the area between those strips and copies the colour of a fixed layer spanning nearly the full width at each edge; it ignores `theme-color`. Measured on the owner's iPhone (iOS 27): the strips took the dim colour over the drawer too. The owner chose the drawer colour for a Safari tab, so the dim stops 6px short of the top and bottom edges there (full height in `display-mode: standalone`). Untested on the phone yet.
 - **Top bar:** one row at today's height. The title takes the free space (22 px text instead of 30) and truncates. Plan and Notes are icon-only, the extraction ring stays, and the phase word is hidden. The phase dividers in the lesson still show the phase.
 - **Side tutor** (teaching sessions only, as on the desktop):
   - A round bubble in the bottom-right corner, just above the message box, in the app's floating-control look (card background, thin border, grey icon; the owner found the bright version out of place). It shows a spinner while an answer is being written. On a phone the tutor starts closed and isn't focused on open (that would pop up the keyboard).
@@ -149,8 +152,10 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
   - A phone always opens the drawer closed and doesn't remember it, so the desktop's saved state is untouched.
 - **Questions:** an opened question may grow to the full screen below the top bar, as on the desktop. Scrolling up folds it into the slim bar.
 - **Footer row** (context and cost, model, thinking level): all stay, on one row; the model name is kept to one line. The idle Dictate button is icon-only.
+  - **While dictating** (owner's ask): a small live waveform (3.5rem, the desktop's meter) replaces the red dot, and the red Stop button is icon-only, so the row still fits.
 - **Home:** the knowledge graph. The toolbar is fitted: search becomes an icon that opens a full-width field, and the other buttons are icon-only. The graph already supports touch drag and pinch (d3-zoom).
-- **Settings:** full screen. The section list first, then the section with a back arrow. The Keyboard section is hidden on phones; nothing else is removed.
+- **Settings:** the desktop's floating panel, centred (90% wide, at most 85% of the visible height); the owner preferred it to a full-screen page. Inside: the section list first, then the section with a back arrow. It opens with the desktop's fade-and-grow and fades back out on close (150ms; closing waits for the fade). The Keyboard section is hidden on phones; nothing else is removed.
+  - On the server the Account row shows from the first frame (the `lh_server` cookie), so it doesn't pop into the list when the device list arrives; the section shows "Loading…" until then.
 - **Plan and diagram viewers:** one-finger drag, two-finger pinch to zoom (new), and the − / + buttons.
 
 **Touch and typing**
@@ -173,7 +178,7 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 - No service worker and no offline mode.
 - The login and setup pages link the manifest and the icon too; their security policy allows the same-site manifest and icon (`manifest-src 'self'; img-src 'self'`).
 - Icons are rendered from `build/icon-flat.svg` by `scripts/make-pwa-icons.mjs` into `public/icons/`: the icon as drawn (192, 512), a maskable 512 for Android, and a 180 apple-touch-icon. The full-bleed versions use the icon's own background, #141414.
-- On an iPhone the status bar is `black` (content starts below it).
+- On an iPhone the status bar is `black-translucent`: the app draws under the clock and pads every top edge (see the session list above).
 
 **How it's built**
 
@@ -183,13 +188,18 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 - **Code (`components/phone/`):**
   - `use-phone.ts`: the phone rule (`useIsPhone`, `useIsTouchPhone`, `isPhoneNow`), the same query as the CSS.
   - `phone-runtime.tsx`: mounted once in the root layout; installs press-and-hold and `phone-viewport.tsx`.
-  - `phone-viewport.tsx`: keeps `--lh-vvh` equal to the visible height, so every `h-dvh` shell ends where the on-screen keyboard begins (iPhone Safari overlays the keyboard instead of resizing). It scrolls the page back to the top only while the keyboard is up. Android uses `interactive-widget=resizes-content` (root layout viewport).
+  - `phone-viewport.tsx`: keeps the app inside the part of the screen the iPhone keyboard leaves visible. iPhone Safari overlays the keyboard and pans the view up to the box being typed in; on the owner's phone that pushed the top bar off screen and left an empty band above the keyboard.
+    - `--lh-vvh` is the visible height; every `h-dvh` shell, the body and the overlays size from it.
+    - `--lh-vv-top` is Safari's pan (`visualViewport.offsetTop`). While it's non-zero the body carries `data-lh-keyboard` and moves down by that much, which also makes the body the frame for fixed overlays, so they move with it. A window scroll is undone (the app's pages never scroll the window).
+    - Nothing changes while the page is pinch-zoomed (`visualViewport.scale` above 1).
+    - Android shrinks the layout itself (`interactive-widget=resizes-content` in the root layout's viewport).
+    - Anything that positions a fixed element from `getBoundingClientRect()` measures relative to the body (`use-dock-anchor.ts` does).
   - `use-dock-anchor.ts`: the tutor bubble's position, measured from the top (an iPhone keyboard covers the bottom edge).
   - `enter-key.ts`, `enter-hint.tsx`, `long-press.ts`, `use-pinch-zoom.ts`.
 - **Wiring:** `sidebar.tsx` (drawer state, backdrop, press-and-hold on rows), `top-bar.tsx`, `chat.tsx` (dock hook, practice hint), `side-tutor.tsx`, `notes/notes-drawer.tsx`, `notes/notes-tree.tsx`, `settings/settings-dialog.tsx` (a link to a section opens on it; plain Settings opens on the list), `graph-view.tsx` (search icon), `stats-bar.tsx`, `menu-shell.tsx`, `session-overlay.tsx` and `plan-block.tsx` (pinch), and the Enter handlers in `composer.tsx`, `question-dock.tsx`, `practice-dock.tsx`, `reading-thinking.tsx`.
 - **Tests:** `tests/phone-layout.test.ts` checks that every rule in `phone.css` is phone-only and browser-only, and covers the Enter rule, the bubble position, the hold slop and menu clamping. `tests/server-auth.test.ts` pins the open manifest and icon paths.
 - **Desktop check:** desktop screenshots (1280 and 700 wide) and a dump of every element's position and size, compared before and after. Nothing moved; the only pixel differences are the see-through footer pills, whose blur picks up whatever transcript text sits behind them.
-- **Checked in a phone-sized Chromium only.** Not yet checked on a real phone: typing with the on-screen keyboard open, the notch and home bar, and "Add to Home Screen".
+- **Real-phone check (owner, iPhone, iOS 27):** most of it worked. Fixed after it: the keyboard pushing the app up, the session list's strips, Settings' Account row popping in, and the missing dictation waveform; Settings became the centred panel. Those fixes were checked in a phone-sized Chromium only (the keyboard state recreated from the owner's screenshot) and need another look on the phone.
 
 **Not in this phase:** a tablet layout, the side tutor in practice sessions, offline use, and renaming notes in the drawer.
 
@@ -235,7 +245,7 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
    - ✅ `ob sync-config` has `--excluded-folders` (comma-separated, empty to clear). It also has `--configs` (which `.obsidian` setting categories sync; may close the `.obsidian` gap), `--conflict-strategy merge|conflict` (an owner decision for Phase 4), `--file-types` and `--device-name`.
 1. ✅ **Server mode.** Dockerfile, the `LH_DATA_DIR` volume, the password login gate in `proxy.ts`, Caddy (HTTPS), the server image workflow, and automatic server updates. Running on the permanent VPS: HTTPS via Caddy, setup and password, locked from outside, and the nightly timer installed.
 2. ✅ **Sign-in on the server.** The ChatGPT paste box, plus the Claude sign-in button and Disconnect. Verified on the VPS: Claude Code installed itself onto the volume, and both ChatGPT and Claude connected from Settings.
-3. ✅ **Phone layouts.** Every view, the side tutor bubble and sheet, the full-screen notes drawer and Settings, press and hold, and the home-screen app. Waiting on the owner's real-phone check (see "Phone layouts — built in Phase 3").
+3. ✅ **Phone layouts.** Every view, the side tutor bubble and sheet, the full-screen notes drawer, Settings, press and hold, and the home-screen app. First real-phone check done; its fixes wait on a second look (see "Phone layouts — built in Phase 3").
 4. **Vault on the server.** The `ob sync` process, setup, and the automatic excluded-folders list.
 5. **Sync engine.** The lease API, session sync with take-over and desktop copies, graph line and operation sync, per-key settings merges, and the sync protocol version check.
    - Built as wrapper stores at the composition root (`src/server/stores.ts`) over the `core/ports.ts` interfaces, so upstream store code stays untouched and rebasing onto upstream stays cheap.
@@ -249,7 +259,7 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 - **Branch:** `claude/pensive-goldberg-7dty2m`. All cloud sync work lives here.
   - Pushes build only the server image (`:dev`), never a desktop release.
   - **Never push to `side-tutor`** until the owner approves merging the whole feature.
-- **Phase 3 (phone layouts) is built and pushed.** It still needs the owner's check on a real phone: the on-screen keyboard, the notch and home bar, and Add to Home Screen.
+- **Phase 3 (phone layouts) is built and pushed.** The owner checked it on an iPhone (iOS 27); the fixes from that check need a second look on the phone: typing with the keyboard up, the session list's full-height colours (home-screen app and Safari tab), Settings, and the dictation waveform.
 - **Phases 0–2 are done and verified on the owner's VPS:**
   - HTTPS and the password login work;
   - the nightly update timer is installed;

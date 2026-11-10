@@ -39,7 +39,7 @@ function page(title: string, body: string, script: string): string {
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="LearnHarness">
-<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>${title} · LearnHarness</title>
 <style>${STYLE}</style>
 </head>
