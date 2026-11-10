@@ -13,14 +13,13 @@
  * transcript (which also folds an opened question, as scrolling does).
  *
  * Phone layout only. Horizontal drags (the confidence slider, wide tables)
- * and drags that start in a text box are left alone.
+ * and drags that start in a text box are left alone. The choice is made on
+ * the drag's first movement (dragDecision).
  */
 
 import { useEffect, type RefObject } from "react";
 import { useIsPhone } from "@/components/phone/use-phone";
 
-/** Finger travel before a drag picks a direction, in px. */
-export const DRAG_SLOP = 8;
 /** Per-frame velocity decay of the fling after the finger lifts. */
 export const FLING_DECAY = 0.95;
 
@@ -35,6 +34,23 @@ export function innerCanTake(boxes: ScrollBox[], dy: number): boolean {
 		if (dy > 0 ? b.scrollTop > 0 : b.scrollTop < b.scrollHeight - b.clientHeight - 0.5) return true;
 	}
 	return false;
+}
+
+/** Pure rule, exported for tests: what a one-finger drag does, decided on
+ *  its FIRST movement. iPhone Safari picks native scrolling on the first
+ *  touchmove that isn't prevented, so waiting for a few pixels of travel let
+ *  Safari scroll the page while this also moved the lesson, and the page
+ *  snapping back made scrolling jump and rubber-band (owner's iPhone). Once
+ *  native scrolling has started the event isn't cancelable and is left to it.
+ *    "wait"   no movement yet;
+ *    "native" sideways, a scroll box under the finger can take it, or too late;
+ *    "take"   nothing under the finger can scroll that way: the caller moves
+ *             the lesson (the dock) or stops the drag (the page). */
+export function dragDecision(dx: number, dy: number, cancelable: boolean, innerCan: (dy: number) => boolean): "wait" | "native" | "take" {
+	if (!cancelable) return "native";
+	if (dx === 0 && dy === 0) return "wait";
+	if (Math.abs(dx) > Math.abs(dy)) return "native";
+	return innerCan(dy) ? "native" : "take";
 }
 
 /** Pure rule, exported for tests: the next fling velocity (px per frame), or
@@ -94,10 +110,9 @@ export function useDockTouchScroll(rootRef: RefObject<HTMLElement | null>, trans
 			const t = e.touches[0];
 			if (mode === "idle" || mode === "native" || e.touches.length !== 1 || !t) return;
 			if (mode === "pending") {
-				const dx = t.clientX - startX;
-				const dy = t.clientY - startY;
-				if (Math.abs(dx) < DRAG_SLOP && Math.abs(dy) < DRAG_SLOP) return;
-				if (Math.abs(dx) > Math.abs(dy) || innerCanTake(scrollersUnder(target, root), dy)) {
+				const decision = dragDecision(t.clientX - startX, t.clientY - startY, e.cancelable, (dy) => innerCanTake(scrollersUnder(target, root), dy));
+				if (decision === "wait") return;
+				if (decision === "native") {
 					mode = "native";
 					return;
 				}

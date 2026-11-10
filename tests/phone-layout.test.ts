@@ -181,6 +181,15 @@ describe("drag on the dock scrolls the lesson", async () => {
 		assert.equal(innerCanTake([box(0, 300, 300)], 20), false, "a box with nothing to scroll");
 		assert.equal(innerCanTake([box(0), box(50)], 20), true, "an outer panel can still move");
 	});
+	it("decides on the drag's first movement, before Safari starts its own scrolling", async () => {
+		const { dragDecision } = await import("../components/phone/use-dock-touch-scroll.ts");
+		const none = () => false;
+		assert.equal(dragDecision(0, 0, true, none), "wait");
+		assert.equal(dragDecision(0, 1, true, none), "take", "one pixel down is enough");
+		assert.equal(dragDecision(3, 1, true, none), "native", "sideways");
+		assert.equal(dragDecision(0, 2, true, () => true), "native", "a panel under the finger can scroll");
+		assert.equal(dragDecision(0, 2, false, none), "native", "Safari already scrolling: leave it");
+	});
 	it("slows a fling and stops it", () => {
 		assert.equal(flingStep(10), 9.5);
 		assert.equal(flingStep(0.5), 0);

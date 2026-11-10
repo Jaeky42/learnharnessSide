@@ -20,7 +20,7 @@
  */
 
 import { isPhoneNow } from "@/components/phone/use-phone";
-import { DRAG_SLOP, innerCanTake, type ScrollBox } from "@/components/phone/use-dock-touch-scroll";
+import { dragDecision, innerCanTake, type ScrollBox } from "@/components/phone/use-dock-touch-scroll";
 
 function scrollersFrom(target: EventTarget | null, doc: Document): ScrollBox[] {
 	const out: ScrollBox[] = [];
@@ -50,10 +50,11 @@ export function installWindowLock(doc: Document = document): () => void {
 		const t = e.touches[0];
 		if (e.touches.length !== 1 || !t || mode === "idle" || mode === "free") return;
 		if (mode === "pending") {
-			const dx = t.clientX - startX;
-			const dy = t.clientY - startY;
-			if (Math.abs(dx) < DRAG_SLOP && Math.abs(dy) < DRAG_SLOP) return;
-			mode = Math.abs(dx) > Math.abs(dy) || innerCanTake(scrollersFrom(target, doc), dy) ? "free" : "lock";
+			// Decided on the first movement, as the dock does (dragDecision):
+			// Safari starts its own scrolling on the first unprevented move.
+			const decision = dragDecision(t.clientX - startX, t.clientY - startY, e.cancelable, (dy) => innerCanTake(scrollersFrom(target, doc), dy));
+			if (decision === "wait") return;
+			mode = decision === "native" ? "free" : "lock";
 		}
 		if (mode === "lock" && e.cancelable) e.preventDefault();
 	};
