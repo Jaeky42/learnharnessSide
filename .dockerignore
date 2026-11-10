@@ -9,7 +9,8 @@ data
 .fresh-data
 .memory
 real-data-extraction
-deploy
+deploy/*
+!deploy/docker-entrypoint.sh
 auth.json
 server-login.json*
 chatgpt-credentials.json*

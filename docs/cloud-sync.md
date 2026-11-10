@@ -1,6 +1,6 @@
 # Cloud sync: approved plan
 
-Status: **Phase 1 built (server mode); the rest is planned.** Work happens on a separate branch. It merges into `side-tutor` only once the whole feature works and the owner approves the merge, because every push to `side-tutor` publishes a release. Change these decisions only with the owner's approval.
+Status: **Phases 1–2 built (server mode, sign-in on the server); the rest is planned.** Work happens on a separate branch. It merges into `side-tutor` only once the whole feature works and the owner approves the merge, because every push to `side-tutor` publishes a release. Change these decisions only with the owner's approval.
 
 Goal: keep learning progress on several devices. The Windows desktop app stays fully usable, works offline, and keeps the Obsidian connection. A phone uses LearnHarness from the browser.
 
@@ -95,19 +95,23 @@ Graph extraction, research, compaction and visuals run on **whichever device hol
 
 **Tests:** `tests/server-auth.test.ts`.
 
-### Model sign-in on the VPS
+### Model sign-in on the VPS — built in Phase 2
 
-- **ChatGPT** (verified on a VPS: sign-in and a model reply both worked).
-  - **The problem:** the OAuth callback listens on `127.0.0.1:<random port>` on the server (`electron/chatgpt.cjs`), so the phone's browser can't reach it.
-  - **The fix:** a **"Paste the address you landed on"** box in the sign-in panel. The server forwards the pasted callback URL to its own waiting listener.
-  - The 3-minute login timeout still applies, so the panel shows a countdown.
-- **Claude (Claude Code CLI).**
-  - **The web/phone Settings** get a **Sign in to Claude** button. LearnHarness runs the official `claude` sign-in command on the server, shows the link, and passes the code the learner pastes back to the CLI.
-  - **The CLI owns the login.** It keeps its own credentials, and LearnHarness never stores a Claude token.
-  - **Disconnect** runs the CLI's own sign-out.
-  - **The desktop Settings stay unchanged** ("authenticate in your terminal").
-  - The command is `claude auth login`, verified in Phase 0.
+Both controls appear **only on the cloud server**. The page knows it's on the server from a plain `lh_server=1` marker cookie that the server's proxy sets (`components/settings/server-mode.ts`); it carries no secret, and the desktop never sends an extra request to check. The desktop app's Settings are unchanged.
+
+- **ChatGPT.** The callback listens on `127.0.0.1:<random port>` on the server (`electron/chatgpt.cjs`), so a phone's browser can't reach it.
+  - While a sign-in is pending, the connect dialog shows **"Paste the address you landed on"** with a 3-minute countdown (`components/settings/chatgpt-paste.tsx`).
+  - The server forwards the pasted address to its own listener (`src/server/chatgpt-paste.ts`, the `callback` op in `web-subscription-http.ts`). It accepts only `http://127.0.0.1:<port>/auth/callback` with a state and a code, and only for **the pending attempt's own port** (`pendingCallbackOrigin()` in `chatgpt.cjs`). The listener still checks the state and code itself.
+- **Claude (Claude Code CLI).** The Claude Code block in Settings → Providers gets **Sign in to Claude** (`components/settings/claude-server-sign-in.tsx`, `src/server/claude-login.ts`, `claude-login-http.ts`).
+  - LearnHarness runs `claude auth login --claudeai` over plain pipes, with no terminal emulation, and reads the link the CLI prints.
+  - The link opens through a **one-use** redirect (`/api/claude-code/login/open`); the page never receives it. The learner pastes the code from Claude's page, LearnHarness writes it to the CLI, and the attempt ends on `Login successful.`
+  - Limits: a **10-minute** time limit and one attempt at a time. A rejected code ends the attempt with a message.
+  - Status comes from `claude auth status --json`. **Disconnect** runs `claude auth logout`.
+  - **The CLI owns the login**; LearnHarness never stores a Claude code or token.
+  - Routes answer 404 outside server mode.
+- **Claude Code in the image.** `HOME=/data/home` is on the persistent volume. On first start the entrypoint (`deploy/docker-entrypoint.sh`) installs Claude Code there in the background with the official installer. It then updates itself, and the entrypoint and the nightly `update.sh` also run `claude update`. Its login (`/data/home/.claude`) is refused by the agents' file tools (the `.claude` entry under the home folder in `fs-shared.ts`).
 - Subscription credentials are never copied between devices; each machine signs in on its own.
+- **Tests:** `tests/server-sign-in.test.ts`. It includes an offline ChatGPT sign-in completed through the paste step, and `claude auth login` driven against a stand-in CLI that prints what the real one printed on a VPS.
 
 ### Obsidian vault on the VPS
 
@@ -169,7 +173,7 @@ Graph extraction, research, compaction and visuals run on **whichever device hol
    - ✅ `claude auth login` works on a headless VPS. It prints the link as plain text (`If the browser didn't open, visit: https://claude.com/cai/oauth/authorize?...`). Claude's own page shows a code after the learner authorizes. A plain prompt (`Paste code here if prompted >`) takes it, then the CLI prints `Login successful.` The Sign in button drives this command; Disconnect runs `claude auth logout`. The native installer puts `claude` in `~/.local/bin`.
    - ✅ `ob sync-config` has `--excluded-folders` (comma-separated, empty to clear). It also has `--configs` (which `.obsidian` setting categories sync; may close the `.obsidian` gap), `--conflict-strategy merge|conflict` (an owner decision for Phase 4), `--file-types` and `--device-name`.
 1. ✅ **Server mode.** Dockerfile, the `LH_DATA_DIR` volume, the password login gate in `proxy.ts`, Caddy (HTTPS), the server image workflow, and automatic server updates. Running on the permanent VPS: HTTPS via Caddy, setup and password, locked from outside, and the nightly timer installed.
-2. **Sign-in on the server.** The ChatGPT paste box, plus the Claude sign-in button and Disconnect.
+2. ✅ **Sign-in on the server.** The ChatGPT paste box, plus the Claude sign-in button and Disconnect. Built and tested locally; first real run on the VPS.
 3. **Phone layouts.** PWA manifest; the teaching, practice, side tutor (bubble) and notes drawer (full screen) layouts.
 4. **Vault on the server.** The `ob sync` process, setup, and the automatic excluded-folders list.
 5. **Sync engine.** The lease API, session sync with take-over and desktop copies, graph line and operation sync, per-key settings merges, and the sync protocol version check.

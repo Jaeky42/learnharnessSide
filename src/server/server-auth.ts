@@ -48,6 +48,10 @@ import { loginPageHtml, setupPageHtml } from "./server-auth-pages.ts";
 
 type Env = Record<string, string | undefined>;
 
+/** Readable by page scripts: says "this is the cloud server" so settings can
+ *  show server-only controls. Carries no secret; the session cookie is separate. */
+export const SERVER_MARKER_COOKIE = "lh_server";
+
 export function serverModeEnabled(env: Env = process.env): boolean {
 	return env.LH_SERVER_MODE === "1";
 }

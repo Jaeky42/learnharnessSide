@@ -282,6 +282,9 @@ function createChatGPT({ store, openExternal, fetch: request = globalThis.fetch,
 				listener.listen(0, "127.0.0.1", resolve);
 			});
 			const redirectUri = `http://127.0.0.1:${listener.address().port}/auth/callback`;
+			// Side-tutor fork (server mode): the server's paste step forwards a
+			// pasted callback only to this exact pending listener.
+			if (pending?.abort === abort) pending.callbackOrigin = new URL(redirectUri).origin;
 			listener.on("request", async (req, res) => {
 				let callback;
 				try { callback = new URL(req.url || "/", redirectUri); }
@@ -350,6 +353,8 @@ function createChatGPT({ store, openExternal, fetch: request = globalThis.fetch,
 		return snapshot();
 	}
 	function cancelLogin() { pending?.cancel(); return snapshot(); }
+	/** The pending sign-in's loopback origin (http://127.0.0.1:<port>), or null. */
+	function pendingCallbackOrigin() { return pending?.callbackOrigin ?? null; }
 
 	function authorized(background, expected, capturedEpoch) {
 		const account = active();
@@ -536,7 +541,7 @@ function createChatGPT({ store, openExternal, fetch: request = globalThis.fetch,
 	function close() { closed = true; pending?.cancel(); stop(); }
 	function pause() { paused = true; pending?.cancel(); stop(); notify(); }
 	function resume() { paused = false; if (!storageDenied) suspended = false; notify(); }
-	return { status, login, cancelLogin, lease, models, select, consent, disconnect, logout, close, pause, resume, stamp };
+	return { status, login, cancelLogin, pendingCallbackOrigin, lease, models, select, consent, disconnect, logout, close, pause, resume, stamp };
 }
 
 module.exports = { createChatGPT, fileStore, publicError, allowedAuthEndpoint, SCOPES, validateState };

@@ -11,6 +11,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { SettingsGroup } from "./controls.tsx";
+import { isServerMode } from "./server-mode";
 
 export interface AccountDevice {
 	id: string;
@@ -25,6 +26,7 @@ export interface AccountDevice {
 export function useServerAccount(): { devices: AccountDevice[] | null | undefined; reload: () => void } {
 	const [devices, setDevices] = useState<AccountDevice[] | null | undefined>(undefined);
 	const reload = useCallback(() => {
+		if (!isServerMode()) { setDevices(null); return; } // desktop/local: no request at all
 		fetch("/api/server-auth/account", { credentials: "same-origin" })
 			.then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
 			.then((body: { devices: AccountDevice[] }) => setDevices(body.devices))

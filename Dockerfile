@@ -20,6 +20,10 @@ RUN npx next build && node scripts/smoke-provider-runtime.mjs && node scripts/bu
 
 # ── run ──────────────────────────────────────────────────────────────────
 FROM node:26-bookworm-slim
+# curl + CA certificates: the entrypoint installs Claude Code onto the volume.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends curl ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
@@ -27,16 +31,20 @@ ENV NODE_ENV=production \
     PORT=3000 \
     LH_SERVER_MODE=1 \
     LH_DATA_DIR=/data/data \
-    LH_AUTH_FILE=/data/secrets/auth.json
+    LH_AUTH_FILE=/data/secrets/auth.json \
+    HOME=/data/home \
+    PATH=/data/home/.local/bin:$PATH
 COPY --from=build /src/.next/standalone ./
 COPY --from=build /src/scripts/server-reset-password.mjs ./scripts/server-reset-password.mjs
+COPY deploy/docker-entrypoint.sh /usr/local/bin/lh-entrypoint
 # `docker compose exec lh reset-password`: the forgot-password path.
 RUN printf '#!/bin/sh\nexec node /app/scripts/server-reset-password.mjs "$@"\n' > /usr/local/bin/reset-password \
  && chmod 755 /usr/local/bin/reset-password \
- && mkdir -p /data/data /data/secrets \
+ && chmod 755 /usr/local/bin/lh-entrypoint \
+ && mkdir -p /data/data /data/secrets /data/home \
  && chown -R node:node /data \
  && chmod 700 /data/secrets
 USER node
 VOLUME ["/data"]
 EXPOSE 3000
-CMD ["node", "server.js"]
+CMD ["lh-entrypoint"]

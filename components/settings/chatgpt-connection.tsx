@@ -6,6 +6,8 @@ import { ConnectionDialog, ConnectionFooter, ConnectionRow } from "./connection-
 import { Button } from "@/components/ui/button";
 import { Toggle } from "./controls";
 import { useChatGPTBridge } from "./subscription-client";
+import { useServerMode } from "./server-mode";
+import { ChatGPTPasteStep, CHATGPT_SERVER_NOTICE } from "./chatgpt-paste";
 
 export const CHATGPT_NOTICE = "LearnHarness stores your ChatGPT account details and credentials in an unencrypted local file on this device. When this connection is used, relevant conversation context, learning material, and tool results are sent directly to OpenAI. ChatGPT plan limits apply; any additional credits are authorized and managed in ChatGPT, not LearnHarness.";
 export function chatGPTNotice(web = false): string { return web ? `${CHATGPT_NOTICE.replace("on this device", "on the machine running LearnHarness")} Complete ChatGPT sign-in in a browser on that same machine.` : CHATGPT_NOTICE; }
@@ -45,6 +47,9 @@ const Context = createContext({
 export function ChatGPTUIProvider({ children }: { children: React.ReactNode }) {
 	const bridge = useChatGPTBridge();
 	const web = typeof window !== "undefined" && bridge !== window.lh?.chatgpt;
+	// Side-tutor fork: on the cloud server the redirect can't finish by itself (chatgpt-paste.tsx).
+	const server = useServerMode() === true && web;
+	const [pendingSince, setPendingSince] = useState<number | null>(null);
 	const [status, setStatus] = useState<ChatGPTStatus>(empty);
 	const [dialog, setDialog] = useState<Dialog | null>(null);
 	const [busy, setBusy] = useState(false);
@@ -253,6 +258,7 @@ export function ChatGPTUIProvider({ children }: { children: React.ReactNode }) {
 		select: (id: string) => { if (bridge) void control("change", () => bridge.select(id)); },
 		dismissWarning: () => { setDismissedError(REVOCATION_WARNING); setError(null); },
 	};
+	useEffect(() => { setPendingSince((since) => status.pending ? since ?? Date.now() : null); }, [status.pending]);
 	return <Context.Provider value={context}>
 		{children}
 		{dialog && <AccountDialog key={`${dialog.kind}:${dialog.kind === "manage" && !!dialog.confirm}`} onClose={close} busy={busy && operation.current !== "login"}>
@@ -278,7 +284,7 @@ export function ChatGPTUIProvider({ children }: { children: React.ReactNode }) {
 						</select>
 						{registration && <Button variant="ghost" size="xs" disabled={busy} onClick={() => context.manage(registration)}>Manage…</Button>}
 					</div>}
-					<p className="mt-3 text-xs leading-relaxed text-muted-foreground" data-testid="chatgpt-privacy-notice">{chatGPTNotice(web)}</p>
+					<p className="mt-3 text-xs leading-relaxed text-muted-foreground" data-testid="chatgpt-privacy-notice">{server ? CHATGPT_SERVER_NOTICE : chatGPTNotice(web)}</p>
 				</> : null}
 				<div className={`mt-4 flex items-center gap-3 text-xs text-foreground ${busy && operation.current === "change" && status.available && !status.pending ? "[&>button:disabled]:cursor-auto" : ""}`} data-testid="chatgpt-global-background">
 					<Toggle label={BACKGROUND_LABEL} checked={dialog.kind === "connect" ? background : status.allowBackgroundUse} disabled={busy || status.pending || !status.available} onChange={(enabled) => {
@@ -293,6 +299,7 @@ export function ChatGPTUIProvider({ children }: { children: React.ReactNode }) {
 				</div>
 				{!status.available && <p className="mt-3 text-xs text-muted-foreground">ChatGPT sign-in is available only in the desktop app. API-key connections remain available here.</p>}
 				{status.pending && <p role="status" className="mt-3 text-xs text-muted-foreground">Waiting for browser sign-in…</p>}
+				{status.pending && server && pendingSince !== null && <ChatGPTPasteStep startedAt={pendingSince} />}
 				{context.error && <p role="alert" className="mt-3 text-xs text-red-400">{context.error}</p>}
 				{dialog.kind === "manage" && managed && <div className="mt-4 flex flex-wrap items-center justify-between gap-3" data-testid="chatgpt-account-strip">
 					<div data-testid="chatgpt-managed-identity" className="flex min-w-0 items-center gap-2 text-xs text-foreground">

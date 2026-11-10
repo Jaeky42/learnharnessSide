@@ -1,5 +1,7 @@
 import { NATIVE_SUBSCRIPTIONS } from "../core/contracts/subscriptions.ts";
 import { webSubscriptionOwner, webSubscriptionsEnabled, webSubscriptionStatus } from "./web-subscriptions.ts";
+import { checkPastedCallback, forwardPastedCallback } from "./chatgpt-paste.ts";
+import { serverModeEnabled } from "./server-auth.ts";
 
 const HEADERS = { "Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "X-Content-Type-Options": "nosniff" };
 /** Same-origin browser controls, not user authentication. Web/dev deliberately
@@ -47,6 +49,14 @@ export async function subscriptionControlsResponse(request: Request): Promise<Re
 		const fields = command as Record<string, unknown>;
 		const providerId = fields.providerId;
 		if (providerId !== "chatgpt" && !NATIVE_SUBSCRIPTIONS.some((provider) => provider.providerId === providerId)) return error("Unsupported connection.", 400);
+		// Side-tutor fork: server mode's ChatGPT paste step (chatgpt-paste.ts).
+		if (providerId === "chatgpt" && fields.op === "callback" && serverModeEnabled()) {
+			const owner = webSubscriptionOwner();
+			const checked = checkPastedCallback(fields.url, owner.chatgpt.pendingCallbackOrigin());
+			if (!checked.ok) return error(checked.error, 400);
+			if (!await forwardPastedCallback(checked.url)) return error("The sign-in couldn't be finished. Press Connect and try again.", 400);
+			return Response.json({ value: await owner.chatgpt.status() }, { headers: HEADERS });
+		}
 		const allowed = providerId === "chatgpt" ? ["login", "cancel", "select", "disconnect", "logout", "consent"] : ["login", "cancel", "respond", "open", "retry", "disconnect", "consent"];
 		if (typeof fields.op !== "string" || !allowed.includes(fields.op)) return error("Unsupported control.", 400);
 		return Response.json(await webSubscriptionOwner().control(providerId as string, fields, subscriptionRequestOrigin(request)!), { headers: HEADERS });

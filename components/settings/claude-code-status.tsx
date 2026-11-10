@@ -4,6 +4,8 @@ import { CLAUDE_CODE_MINIMUM_VERSION, type ClaudeCodeStatus, type UserSettings }
 import { notifySettingsSaved, useSettingsSaved } from "@/components/settings-signal";
 import { Button } from "@/components/ui/button";
 import { Toggle } from "./controls";
+import { useServerMode } from "./server-mode";
+import { ClaudeServerSignIn } from "./claude-server-sign-in";
 
 export function claudeCodeStatusLabel(status: ClaudeCodeStatus | null): string {
 	switch (status?.state) {
@@ -21,6 +23,8 @@ export function ClaudeCodeInstallationStatus() {
 	const [error, setError] = useState<string | null>(null);
 	const [status, setStatus] = useState<ClaudeCodeStatus | null>(null);
 	const [busy, setBusy] = useState(false);
+	// Side-tutor fork: on the cloud server, sign in from here (claude-server-sign-in.tsx).
+	const server = useServerMode() === true;
 	const request = useRef<AbortController | null>(null);
 	const settingsRead = useRef<AbortController | null>(null);
 	const settingsWrite = useRef<AbortController | null>(null);
@@ -109,7 +113,7 @@ export function ClaudeCodeInstallationStatus() {
 				<span role="status" className="text-xs text-muted-foreground">{busy ? "Checking…" : claudeCodeStatusLabel(status)}</span>
 				<Button type="button" size="xs" variant="outline" className="cursor-pointer disabled:cursor-not-allowed" disabled={busy} onClick={() => void refresh()} data-testid="claude-code-check-again">Check again</Button>
 			</div>
-			<p className="text-xs leading-relaxed text-muted-foreground"><strong className="font-medium">Install and authenticate Claude Code in your terminal, then select a Claude Code model here.</strong> LearnHarness starts it when needed—no background process required.</p>
+			{server ? <ClaudeServerSignIn /> : <p className="text-xs leading-relaxed text-muted-foreground"><strong className="font-medium">Install and authenticate Claude Code in your terminal, then select a Claude Code model here.</strong> LearnHarness starts it when needed—no background process required.</p>}
 			<p className="text-xs leading-relaxed text-muted-foreground">Checks installation/version only—not authentication, model access, or quota. Claude Code controls billing. Requires v{CLAUDE_CODE_MINIMUM_VERSION}+. <a href="https://code.claude.com/docs/en/setup" target="_blank" rel="noreferrer" className="underline underline-offset-2 hover:text-foreground">Setup ↗</a></p>
 			<p className="text-xs leading-relaxed text-muted-foreground">Verify AI claims independently—they may be inaccurate, incomplete, misleading, or outdated.</p>
 		</>}

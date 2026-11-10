@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { desktopAPIAuthorized } from "./src/server/desktop-access.ts";
-import { serverGate } from "./src/server/server-auth.ts";
+import { SERVER_MARKER_COOKIE, serverGate, serverModeEnabled } from "./src/server/server-auth.ts";
 
 /** Applies to every API method, including SSE and spending/settings routes.
  * No public callback or worker bypass: internal jobs call server functions,
@@ -20,7 +20,13 @@ export function proxy(request: NextRequest) {
 			{ status: 403, headers: { "Cache-Control": "no-store" } },
 		);
 	}
-	return NextResponse.next();
+	const response = NextResponse.next();
+	// Lets the page know it's the cloud server without an extra request
+	// (components/settings/server-mode.ts). Not a credential.
+	if (serverModeEnabled() && !request.cookies.has(SERVER_MARKER_COOKIE)) {
+		response.cookies.set(SERVER_MARKER_COOKIE, "1", { path: "/", sameSite: "lax", secure: true, maxAge: 365 * 24 * 60 * 60 });
+	}
+	return response;
 }
 
 export const config = { matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"] };
