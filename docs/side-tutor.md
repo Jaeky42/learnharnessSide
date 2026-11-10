@@ -40,6 +40,7 @@ Branch `side-tutor`, based on upstream amosblomqvist/learnharness @ da08cb5 (v0.
   - `components/side-tutor.tsx`
 - **Tests:** `tests/side-tutor.test.ts`.
 - **Known limit:** a teacher reply that's still streaming isn't visible until it finishes.
+- **On a phone** (browser narrower than 640 px): a bubble above the message box opens the tutor as a bottom sheet. See "Phone layouts" in `docs/cloud-sync.md`.
 
 ## Notes drawer
 
@@ -63,6 +64,7 @@ The learner's own notes beside the lesson, stored as Markdown in their Obsidian 
 - **Moving:** drag and drop works for notes **and folders**, and there's also "Move to…".
 - **Editor:** CodeMirror for editing (sections fold while typing), plus a Read view with formatted math, folding, clickable links and images.
 - **Where it appears:** both **teaching and practice** sessions.
+- **On a phone:** the drawer fills the screen and shows the list, then the note. Rows open their menu on press and hold, and dragging is off. See "Phone layouts" in `docs/cloud-sync.md`.
 - **Extras:**
   - Math in Read view.
   - Pasted images go to Obsidian's `attachmentFolderPath`, or `LearnHarness/attachments` when that isn't set.
