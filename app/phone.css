@@ -88,6 +88,22 @@
 		to { transform: none; }
 	}
 
+	/* ── Clock cover (home-screen app only; components/phone/phone-runtime.tsx)
+	   A pinned, solid, full-width strip behind the clock, so iOS 26+ uses its
+	   colour instead of blurring the top of the app (owner's choice,
+	   experimental). Under the drawer (40), its dim (39) and every overlay;
+	   above the page. */
+	html:not(.lh-electron) [data-phone="clock-cover"] {
+		position: fixed;
+		top: 0;
+		left: 0;
+		right: 0;
+		height: env(safe-area-inset-top, 0px);
+		z-index: 30;
+		background: var(--background);
+		pointer-events: none;
+	}
+
 	/* ── Notes drawer: slides in from the right and fills the screen ───── */
 	html:not(.lh-electron) [data-phone="notes"] {
 		position: fixed;
