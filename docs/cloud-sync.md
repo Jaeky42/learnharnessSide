@@ -180,3 +180,83 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
    - Built as wrapper stores at the composition root (`src/server/stores.ts`) over the `core/ports.ts` interfaces, so upstream store code stays untouched and rebasing onto upstream stays cheap.
 6. **Desktop sync UI.** Settings → Cloud (server URL, sign-in, device name, Sync now); a sync status chip; lease state on each session.
 7. **Tests and docs.** Lease, take-over and graph operation tests; an end-to-end test with two servers and one cloud; and an update of this file from "planned" to built.
+
+## Handoff: where things stand and how to continue
+
+### State (as of Phase 2)
+
+- **Branch:** `claude/pensive-goldberg-7dty2m`. All cloud sync work lives here.
+  - Pushes build only the server image (`:dev`), never a desktop release.
+  - **Never push to `side-tutor`** until the owner approves merging the whole feature.
+- **Phases 0–2 are done and verified on the owner's VPS:**
+  - HTTPS and the password login work;
+  - the nightly update timer is installed;
+  - Claude Code installed itself onto the volume;
+  - ChatGPT and Claude are both connected from Settings.
+- **The cloud copy and the desktop app are separate libraries** until Phase 5.
+- **The owner's server follows `LH_CHANNEL=dev`.** To update it right away instead of waiting for the nightly run: `cd ~/learnharnessSide && git pull && cd deploy && ./update.sh`. The `git pull` is needed only when files in `deploy/` changed.
+
+### How the owner works
+
+- **Per AGENTS.md:**
+  - Investigate first, then ask design questions **one per AskUserQuestion call**.
+  - Get the phase plan approved, then build.
+  - Never guess a design or wording decision.
+- **The owner prefers visuals.** Use diagrams and mockups in questions, and phone-friendly step-by-step guides as Artifact pages for anything done on the server. Each command is tagged with where it runs, and the guide has fill-in boxes for values like the domain.
+- **The owner is new to servers.** The PC is Windows (PowerShell, not Command Prompt). Spell out every command and what success looks like. Never ask the owner to paste secrets, setup codes or sign-in codes into chat.
+- **Each phase ends with:**
+  - tests and `npm test` / typecheck / lint;
+  - a real browser check (Playwright) in server mode;
+  - a commit and push to the branch;
+  - a "what to try on your server" list.
+
+### Next: Phase 3, phone layouts (decisions already made)
+
+- All four get a phone layout in v1: **teaching sessions, practice sessions, the side tutor and the notes drawer**.
+- **Side tutor:** a chat bubble in the **bottom-right corner** of the teaching session, like a website chat widget, that opens the tutor.
+- **Notes drawer:** **slides in from the right and fills the screen.** The owner wants to see how it looks before settling it, so show screenshots.
+- Also add a PWA manifest.
+- **Still open; ask:**
+  - the breakpoint(s);
+  - how the sidebar and session list behave on a phone;
+  - how the plan and question docks fit;
+  - what is hidden or collapsed;
+  - whether the side tutor bubble shows in practice sessions too (the side tutor is teaching-only today).
+- **Suggested first step:** ask the owner what looks most cramped on the phone today, and take phone-sized screenshots (Playwright `devices["iPhone 13"]`) of the current UI.
+
+### Later phases: decisions still open (ask when you get there)
+
+- **Phase 4 (vault on the server):**
+  - how the owner gives the server the Obsidian account and the end-to-end encryption password (a Settings page vs. SSH);
+  - `--conflict-strategy` (`merge` or `conflict`);
+  - whether `--configs` should be cleared so `.obsidian` settings don't sync to the server;
+  - the device name (for example "LearnHarness server");
+  - where the vault lives on the volume (for example `/data/vault`) and how the notes drawer's vault path points at it;
+  - how the desktop sends the top-level folder list for the exclusions;
+  - whether `obsidian-headless` runs inside the LearnHarness container or as a second compose service.
+- **Phase 5 (sync engine):**
+  - which device holds the take-over warning's data;
+  - lease API details;
+  - how "(desktop copy)" sessions are named and filed;
+  - the operation-log format for graph deletions;
+  - the sync protocol version number;
+  - how background jobs already running behave when a lease is taken over.
+- **Phase 6 (desktop sync UI):**
+  - where Settings → Cloud lives;
+  - the sync status chip;
+  - the lock indicator on sessions;
+  - device token pairing (how the desktop signs in to the server).
+
+### Development notes for this work
+
+- **Run server mode locally:** `LH_SERVER_MODE=1 LH_DATA_DIR=<tmp>/data LH_AUTH_FILE=<tmp>/secrets/auth.json npx next dev -p 3100`.
+  - The setup code is printed in the log.
+  - The login cookie is `Secure`, which browsers accept on `http://localhost`.
+  - `next dev` rewrites one line of `AGENTS.md`; run `git checkout -- AGENTS.md` before committing.
+- **Never run real `claude auth login/logout` in a cloud dev session.** It can sign out the session's own Claude Code. Put a stand-in `claude` script first on `PATH` (see `tests/server-sign-in.test.ts` for one that mimics the real output).
+- **Sandbox network:**
+  - `auth.openai.com` and `claude.ai` are usually blocked, so real sign-ins can only be tested on the VPS.
+  - Docker works after starting `dockerd`. Builds need the sandbox CA and proxy passed in from outside: a local Dockerfile copy adding `COPY --from=ca ca-bundle.crt` and `NODE_EXTRA_CA_CERTS`, `--build-context ca=/root/.ccr`, `--network host`, plus the proxy build args. Never change the real Dockerfile for this.
+  - Docker Hub may answer 429 (rate limit), and `apt` can't run (the proxy is HTTPS-only), so test entrypoint changes on top of an image that's already built.
+- **On Node 22**, `tests/subscription-auth.test.ts` has one known failure. CI uses Node 26.
+- **Desktop must not change:** server-only UI keys off `isServerMode()` (the `lh_server` cookie) with no extra requests. `tests/claude-code-status-ui.test.tsx` pins the desktop's exact request list.
