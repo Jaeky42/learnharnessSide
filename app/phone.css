@@ -240,10 +240,18 @@
 		padding: 0;
 		justify-content: center;
 		gap: 0;
-		border: 0;
-		background: var(--primary);
-		color: var(--primary-foreground);
-		box-shadow: 0 6px 18px rgb(0 0 0 / 0.45);
+		/* The app's floating-control look (graph toolbar, footer pills):
+		   card background, thin border, quiet icon (owner: not too bright). */
+		border: 1px solid var(--border);
+		background: color-mix(in oklab, var(--card) 85%, transparent);
+		-webkit-backdrop-filter: blur(8px);
+		backdrop-filter: blur(8px);
+		color: var(--muted-foreground);
+		box-shadow: 0 6px 18px rgb(0 0 0 / 0.35);
+	}
+	html:not(.lh-electron) [data-phone="tutor-bubble"]:active {
+		color: var(--foreground);
+		background: var(--accent);
 	}
 	html:not(.lh-electron) [data-phone="tutor-bubble"][data-phone-place="top"] {
 		top: calc(3.75rem + 0.75rem + env(safe-area-inset-top, 0px));

@@ -280,6 +280,11 @@ describe("gate", () => {
 		for (const open of ["/setup", "/login", "/_next/static/chunks/a.js", "/_next/hmr", "/fonts/x.woff2", "/favicon.ico"]) assert.equal(gate(open), null, open);
 	});
 
+	it("the home-screen app's manifest and icons are open (phones fetch them without the cookie); nothing near them is", () => {
+		for (const open of ["/manifest.webmanifest", "/icons/icon-192.png", "/icons/apple-touch-icon.png"]) assert.equal(gate(open), null, open);
+		for (const closed of ["/manifest.json", "/icons", "/iconsx/a.png"]) assert.notEqual(gate(closed), null, closed);
+	});
+
 	it("after setup: no cookie → /login; a valid cookie passes; an expired one doesn't", () => {
 		const t0 = Date.now();
 		const base = { ...core.emptyServerAuthState(), password: core.hashPassword("longenough") };

@@ -1,0 +1,41 @@
+// The home-screen app's icons (cloud sync Phase 3), rendered from the same
+// design source as the desktop icons (build/icon-flat.svg):
+//
+//   public/icons/icon-192.png, icon-512.png  the rounded icon as drawn
+//   public/icons/maskable-512.png            full-bleed, for Android, which
+//                                            cuts its own shape out of it
+//   public/icons/apple-touch-icon.png        180×180 full-bleed, for iPhone,
+//                                            which rounds the corners itself
+//
+// Full-bleed versions sit the design on the icon's own background colour
+// (#141414) with the artwork scaled into Android's safe zone.
+// Re-run after the design changes: `node scripts/make-pwa-icons.mjs`.
+import { Resvg } from "@resvg/resvg-js";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+const svg = readFileSync(path.join(root, "build", "icon-flat.svg"), "utf8");
+const out = path.join(root, "public", "icons");
+mkdirSync(out, { recursive: true });
+
+const BACKGROUND = "#141414";
+/** Android's maskable safe zone is the centre 80%; iPhone crops far less. */
+const fullBleed = (scale) => {
+	const inner = svg.replace(/^[\s\S]*?<svg[^>]*>/, "").replace(/<\/svg>\s*$/, "");
+	const offset = (1024 * (1 - scale)) / 2;
+	return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024"><rect width="1024" height="1024" fill="${BACKGROUND}"/><g transform="translate(${offset} ${offset}) scale(${scale})">${inner}</g></svg>`;
+};
+const render = (source, size) => new Resvg(source, { fitTo: { mode: "width", value: size } }).render().asPng();
+
+const files = [
+	["icon-192.png", render(svg, 192)],
+	["icon-512.png", render(svg, 512)],
+	["maskable-512.png", render(fullBleed(0.8), 512)],
+	["apple-touch-icon.png", render(fullBleed(0.92), 180)],
+];
+for (const [name, png] of files) {
+	writeFileSync(path.join(out, name), png);
+	console.log(`public/icons/${name} — ${(png.length / 1024).toFixed(1)} KB`);
+}

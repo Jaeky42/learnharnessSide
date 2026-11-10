@@ -63,8 +63,10 @@ const PUBLIC_PAGES = new Set(["/login", "/setup"]);
 const PUBLIC_APIS = new Set(["/api/server-auth/login", "/api/server-auth/setup"]);
 // /_next/ is Next's own build output and dev live-reload socket: no user
 // data. Gating the dev socket made every page reload in a loop.
-const PUBLIC_PREFIXES = ["/_next/", "/fonts/"];
-const PUBLIC_FILES = new Set(["/favicon.ico", "/robots.txt"]);
+const PUBLIC_PREFIXES = ["/_next/", "/fonts/", "/icons/"];
+// The home-screen app's manifest and icons (cloud sync Phase 3): phones
+// fetch them without the login cookie. They hold only the name and icon.
+const PUBLIC_FILES = new Set(["/favicon.ico", "/robots.txt", "/manifest.webmanifest"]);
 
 // ─── Request helpers ─────────────────────────────────────────────────────────
 
@@ -132,7 +134,7 @@ function html(body: string): Response {
 		headers: {
 			...NO_STORE,
 			"Content-Type": "text/html; charset=utf-8",
-			"Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
+			"Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; manifest-src 'self'; img-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
 			"Referrer-Policy": "no-referrer",
 		},
 	});

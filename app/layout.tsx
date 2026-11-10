@@ -18,6 +18,10 @@ const prose = Source_Sans_3({ subsets: ["latin"], variable: "--font-sans3" });
 export const metadata: Metadata = {
 	title: "Learning Harness",
 	description: "A teacher agent with a memory — sessions, quizzes, and a knowledge graph of what you know.",
+	// PHONE (cloud sync Phase 3): the home-screen app on an iPhone — its
+	// name, icon, and a dark status bar (app/manifest.ts covers Android).
+	appleWebApp: { capable: true, title: "LearnHarness", statusBarStyle: "black" },
+	icons: { apple: "/icons/apple-touch-icon.png" },
 };
 
 // PHONE (cloud sync Phase 3): viewport-fit=cover lets the app paint under the
