@@ -21,7 +21,6 @@
 
 import { isPhoneNow } from "@/components/phone/use-phone";
 import { dragDecision, innerCanTake, type ScrollBox } from "@/components/phone/use-dock-touch-scroll";
-import { dlog } from "@/components/phone/scroll-debug"; // TEMPORARY scroll-debug
 
 function scrollersFrom(target: EventTarget | null, doc: Document): ScrollBox[] {
 	const out: ScrollBox[] = [];
@@ -56,7 +55,6 @@ export function installWindowLock(doc: Document = document): () => void {
 			const decision = dragDecision(t.clientX - startX, t.clientY - startY, e.cancelable, (dy) => innerCanTake(scrollersFrom(target, doc), dy));
 			if (decision === "wait") return;
 			mode = decision === "native" ? "free" : "lock";
-			if (!e.cancelable) dlog("page: Safari already scrolling"); // scroll-debug (temporary)
 		}
 		if (mode === "lock" && e.cancelable) e.preventDefault();
 	};

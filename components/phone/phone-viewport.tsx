@@ -34,7 +34,6 @@
 
 import { useEffect } from "react";
 import { useIsPhone } from "@/components/phone/use-phone";
-import { dlog } from "@/components/phone/scroll-debug"; // TEMPORARY scroll-debug
 
 /** Pure rule, exported for tests: what to apply for a visual viewport. */
 export function viewportFit(vv: { height: number; offsetTop: number; scale: number }): { height: number; top: number } | null {
@@ -143,10 +142,7 @@ export function PhoneViewport() {
 			// The app's pages never scroll the window; only their inner panels
 			// scroll. A window scroll is Safari revealing a box (or, in a Safari
 			// tab, a drag on the page): put it back at rest.
-			if (Math.abs(window.scrollY - bleed) > 0.5) {
-				dlog(`page snapped back (was ${Math.round(window.scrollY - bleed)}px off)`); // scroll-debug (temporary)
-				window.scrollTo(0, bleed);
-			}
+			if (Math.abs(window.scrollY - bleed) > 0.5) window.scrollTo(0, bleed);
 			if (bleed === 0 && fit.top > 0) {
 				body.style.setProperty("--lh-vv-top", `${fit.top}px`);
 				body.dataset.lhKeyboard = "";
