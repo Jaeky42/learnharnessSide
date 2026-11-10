@@ -31,6 +31,7 @@ import { dockStateKey } from "@/components/dock-state-key";
 import { clearOpeningPrompt, readOpeningPromptEntry, stashOpeningPrompt, OPENING_PROMPT_FAILURE } from "@/components/opening-prompt";
 import { forwardDockWheel, useDockHeight } from "@/components/dock-height";
 import { useDockTouchScroll } from "@/components/phone/use-dock-touch-scroll";
+import { dlog, watchScrollDebug } from "@/components/phone/scroll-debug"; // TEMPORARY scroll-debug
 import { QueuedSteersBody, type QueuedSteerLine } from "@/components/queued-steers";
 import { DictationBar, finishDictation, joinDictation, useDictation } from "@/components/dictation";
 import { useFieldCycle } from "@/components/field-cycle";
@@ -2100,7 +2101,10 @@ function DockOverlay({
 	// starts in its initial state — no scroll, no morph.
 	useEffect(() => {
 		if (!pendingId || pendingId === initialPendingRef.current) return;
-		if (!requiresReveal && atBottomRef.current) void suppressFoldDuringReveal();
+		if (!requiresReveal && atBottomRef.current) {
+			dlog("new question: slide to it"); // scroll-debug (temporary)
+			void suppressFoldDuringReveal();
+		}
 		// fire only when a NEW question lands
 	}, [pendingId]);
 
@@ -2243,12 +2247,19 @@ function DockOverlay({
 	useDockTouchScroll(blockRef, scrollRef, {
 		onTouchStart: () => {
 			if (!stickState.animation && !expandIntentRef.current) return;
+			dlog("touch stopped the slide"); // scroll-debug (temporary)
 			stopScroll();
 			clearTimeout(intentTimerRef.current);
 			expandIntentRef.current = false;
 		},
 		isSliding: () => !!stickState.animation || expandIntentRef.current,
 	});
+	// TEMPORARY scroll-debug readout (?scrolldebug=1): library state and d.
+	useEffect(() => {
+		const el = scrollRef.current;
+		if (!el) return;
+		return watchScrollDebug(el, stickState);
+	}, [scrollRef, stickState]);
 
 	// Explicit expand (bar click): the smooth scroll to the bottom takes
 	// hundreds of ms, during which the position is still legitimately inside
@@ -2273,6 +2284,7 @@ function DockOverlay({
 		});
 	};
 	const expandAndReveal = () => {
+		dlog("OPEN: bar tapped"); // scroll-debug (temporary)
 		setRevealed(true); // the teach-check invitation was accepted (W5)
 		setExpanded(true);
 		void suppressFoldDuringReveal();
@@ -2330,11 +2342,15 @@ function DockOverlay({
 				// folded on stick-to-bottom's catch-up transients; a real fold
 				// needs the distance AND stick-to-bottom agreeing the learner
 				// left the bottom.
-				if (d > COLLAPSE_DIST && !expandIntentRef.current && !atBottomRef.current) setExpanded(false);
+				if (d > COLLAPSE_DIST && !expandIntentRef.current && !atBottomRef.current) {
+					dlog("FOLD"); // scroll-debug (temporary)
+					setExpanded(false);
+				}
 			} else if (d < EXPAND_DIST) {
 				// Teach checks stay collapsed until the learner opens them (W5): the
 				// at-bottom auto-expand would pop the form over the teaching.
 				if (requiresRevealRef.current && !revealedRef.current) return;
+				dlog("OPEN: reached the bottom"); // scroll-debug (temporary)
 				setExpanded(true);
 				void scrollToBottom();
 			}
@@ -2470,6 +2486,7 @@ function DockOverlay({
 									input={practice.input as { statement: string }}
 									expanded={expanded}
 									onExpand={() => {
+										dlog("OPEN: bar tapped"); // scroll-debug (temporary)
 										setExpanded(true);
 										void suppressFoldDuringReveal();
 									}}

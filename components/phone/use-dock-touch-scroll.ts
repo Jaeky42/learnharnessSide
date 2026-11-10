@@ -39,6 +39,7 @@
 
 import { useEffect, useRef, type RefObject } from "react";
 import { useIsPhone } from "@/components/phone/use-phone";
+import { dlog } from "@/components/phone/scroll-debug"; // TEMPORARY scroll-debug
 
 /** Per-frame velocity decay of the fling after the finger lifts. */
 export const FLING_DECAY = 0.95;
@@ -185,9 +186,12 @@ export function useDockTouchScroll(rootRef: RefObject<HTMLElement | null>, trans
 				const decision = dragDecision(t.clientX - startX, t.clientY - startY, e.cancelable, (dy) => innerCanTake(scrollersUnder(target, root), dy));
 				if (decision === "wait") return;
 				if (decision === "native") {
+					// scroll-debug (temporary)
+					dlog(!e.cancelable ? "drag: Safari already scrolling (left alone)" : Math.abs(t.clientX - startX) > Math.abs(t.clientY - startY) ? "drag: sideways" : "drag: panel scrolls itself");
 					mode = "native";
 					return;
 				}
+				dlog(`drag on question: moving the lesson ${t.clientY > startY ? "up" : "down"}`); // scroll-debug (temporary)
 				mode = "forward";
 			}
 			e.preventDefault();
@@ -201,6 +205,7 @@ export function useDockTouchScroll(rootRef: RefObject<HTMLElement | null>, trans
 			if (mode === "pending" && e.type === "touchend" && replayTap(movingAtStart, e.timeStamp - startT) && target instanceof HTMLElement) {
 				mode = "idle";
 				if (e.cancelable) e.preventDefault();
+				dlog("tap while moving: replayed"); // scroll-debug (temporary)
 				target.click();
 				return;
 			}
@@ -210,6 +215,7 @@ export function useDockTouchScroll(rootRef: RefObject<HTMLElement | null>, trans
 			}
 			mode = "idle";
 			let v = releaseVelocity(samples, e.timeStamp);
+			dlog(v === 0 ? "release: no throw" : `release: throw ${v > 0 ? "up" : "down"} ${Math.abs(v).toFixed(1)}px/frame`); // scroll-debug (temporary)
 			if (v === 0) return;
 			// Time-based, so the throw travels as far at 120 fps as at 60.
 			let prev = performance.now();

@@ -231,3 +231,12 @@ describe("drag on the dock scrolls the lesson", async () => {
 		assert.equal(releaseVelocity([{ t: 0, y: 0 }, { t: 10, y: 400 }], 11), FLING_MAX, "capped");
 	});
 });
+
+// TEMPORARY scroll-debug readout: remove with components/phone/scroll-debug.ts.
+describe("scroll readout (temporary)", async () => {
+	const { debugLine } = await import("../components/phone/scroll-debug.ts");
+	it("formats a line with the time and the distance from the bottom", () => {
+		assert.equal(debugLine(123456.7, "FOLD", 140.4), "23.457 FOLD  d=140");
+		assert.equal(debugLine(5000, "readout on", null), "05.000 readout on");
+	});
+});
