@@ -19,8 +19,11 @@
  * and ignores those while the content is resizing, so a quick swipe right
  * after a question opened or folded was pulled back to the bottom, which
  * re-opened the question (owner's iPhone). `onEscape` (its stopScroll) is
- * called whenever a finger moves the transcript up, here (forwarded) and on
- * the transcript itself (native): the touch twin of its wheel escape.
+ * called ONCE per forwarded drag, on its first move up: the touch twin of its
+ * wheel escape. Calling it on every move (and on native drags and the
+ * throw) brought back a quick up-and-down jumping on the owner's iPhone:
+ * near the bottom, a tiny backwards twitch reads to the library as "back at
+ * the bottom" and the next move escaped again, so the two kept flipping.
  *
  * Phone layout only. Horizontal drags (the confidence slider, wide tables)
  * and drags that start in a text box are left alone. The choice is made on
@@ -124,20 +127,7 @@ export function useDockTouchScroll(rootRef: RefObject<HTMLElement | null>, trans
 			cancelAnimationFrame(frame);
 			frame = 0;
 		};
-		const escape = () => escapeRef.current?.();
-		// A native drag on the transcript itself: escape as soon as the finger
-		// moves down (content moves up) while there is room above.
-		let nativeY: number | null = null;
-		const onTranscriptStart = (e: TouchEvent) => {
-			stopFling();
-			nativeY = e.touches.length === 1 ? (e.touches[0]?.clientY ?? null) : null;
-		};
-		const onTranscriptMove = (e: TouchEvent) => {
-			const y = e.touches[0]?.clientY;
-			if (nativeY === null || y === undefined || e.touches.length !== 1) return;
-			if (y > nativeY && transcript.scrollTop > 0) escape();
-			nativeY = y;
-		};
+		let escaped = false;
 		const onStart = (e: TouchEvent) => {
 			stopFling();
 			if (e.touches.length !== 1 || leaveAlone(e.target)) {
@@ -149,6 +139,7 @@ export function useDockTouchScroll(rootRef: RefObject<HTMLElement | null>, trans
 			startX = t.clientX;
 			startY = lastY = t.clientY;
 			samples = [{ t: e.timeStamp, y: t.clientY }];
+			escaped = false;
 			target = e.target;
 			mode = "pending";
 		};
@@ -169,7 +160,10 @@ export function useDockTouchScroll(rootRef: RefObject<HTMLElement | null>, trans
 			samples.push({ t: e.timeStamp, y: t.clientY });
 			if (samples.length > 32) samples.shift();
 			lastY = t.clientY;
-			if (step > 0) escape();
+			if (step > 0 && !escaped) {
+				escaped = true;
+				escapeRef.current?.();
+			}
 			transcript.scrollTop -= step;
 		};
 		const onEnd = (e: TouchEvent) => {
@@ -185,7 +179,6 @@ export function useDockTouchScroll(rootRef: RefObject<HTMLElement | null>, trans
 			const tick = (now: number) => {
 				const frames = Math.min(4, Math.max(0, (now - prev) / 16));
 				prev = now;
-				if (v > 0) escape();
 				transcript.scrollTop -= v * frames;
 				v = flingStep(v, frames);
 				if (v === 0) {
@@ -201,16 +194,14 @@ export function useDockTouchScroll(rootRef: RefObject<HTMLElement | null>, trans
 		root.addEventListener("touchend", onEnd);
 		root.addEventListener("touchcancel", onEnd);
 		// A touch on the transcript itself stops a fling, as native scrolling does.
-		transcript.addEventListener("touchstart", onTranscriptStart, { passive: true });
-		transcript.addEventListener("touchmove", onTranscriptMove, { passive: true });
+		transcript.addEventListener("touchstart", stopFling, { passive: true });
 		return () => {
 			stopFling();
 			root.removeEventListener("touchstart", onStart);
 			root.removeEventListener("touchmove", onMove);
 			root.removeEventListener("touchend", onEnd);
 			root.removeEventListener("touchcancel", onEnd);
-			transcript.removeEventListener("touchstart", onTranscriptStart);
-			transcript.removeEventListener("touchmove", onTranscriptMove);
+			transcript.removeEventListener("touchstart", stopFling);
 		};
 	}, [phone, rootRef, transcriptRef]);
 }
