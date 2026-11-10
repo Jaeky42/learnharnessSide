@@ -110,7 +110,19 @@ Graph extraction, research, compaction and visuals run on **whichever device hol
 ### Hosting
 
 - A small VPS with Ubuntu, Docker and Caddy, plus a persistent volume for `/data` and `/vault`.
+- **Provider:** chosen at setup time. Hetzner CX23 is being considered, with DigitalOcean as the fallback.
+  - Use **x86**, not ARM, because the native add-ons, the Claude CLI and `ob` are only confirmed on x86.
+  - The server needs a **public IPv4** address.
 - The server image is built by a **separate** workflow, so it never triggers a desktop release.
+
+### Updates
+
+- **The desktop** keeps updating itself from this fork's releases, as now.
+- **The server updates automatically.** It checks for a new server image on a schedule, pulls it and restarts. `/data` and `/vault` live on persistent storage and aren't touched. The check interval is decided in Phase 1.
+- **Version rule:**
+  - The desktop and server exchange a sync protocol version on every sync.
+  - If they don't match, sync **pauses**: the desktop keeps working locally and shows "Update the server to continue syncing".
+  - Releases that change a data format are marked, so they're never applied to only one side.
 - Multi-user hosting isn't planned. If it's ever wanted, the approach is one container per user on one VPS, with no changes to the single-user app.
 
 ## Phases
@@ -120,11 +132,11 @@ Graph extraction, research, compaction and visuals run on **whichever device hol
    - ✅ Graph id and rewrite analysis (above).
    - ⏳ Which `claude` sign-in command the page can drive on a headless server.
    - ⏳ `ob sync-config --excluded-folders` on a real install.
-1. **Server mode.** Dockerfile, the `LH_DATA_DIR` volume, the password login gate in `proxy.ts`, Caddy (HTTPS), and the server image workflow.
+1. **Server mode.** Dockerfile, the `LH_DATA_DIR` volume, the password login gate in `proxy.ts`, Caddy (HTTPS), the server image workflow, and automatic server updates.
 2. **Sign-in on the server.** The ChatGPT paste box, plus the Claude sign-in button and Disconnect.
 3. **Phone layouts.** PWA manifest; the teaching, practice, side tutor (bubble) and notes drawer (full screen) layouts.
 4. **Vault on the server.** The `ob sync` process, setup, and the automatic excluded-folders list.
-5. **Sync engine.** The lease API, session sync with take-over and desktop copies, graph line and operation sync, and per-key settings merges.
+5. **Sync engine.** The lease API, session sync with take-over and desktop copies, graph line and operation sync, per-key settings merges, and the sync protocol version check.
    - Built as wrapper stores at the composition root (`src/server/stores.ts`) over the `core/ports.ts` interfaces, so upstream store code stays untouched and rebasing onto upstream stays cheap.
 6. **Desktop sync UI.** Settings → Cloud (server URL, sign-in, device name, Sync now); a sync status chip; lease state on each session.
 7. **Tests and docs.** Lease, take-over and graph operation tests; an end-to-end test with two servers and one cloud; and an update of this file from "planned" to built.
