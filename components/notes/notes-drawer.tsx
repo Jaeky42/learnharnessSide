@@ -17,6 +17,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import {
+	ChevronLeftIcon,
 	ChevronRightIcon,
 	ChevronsDownUpIcon,
 	ExternalLinkIcon,
@@ -66,6 +67,7 @@ import { NoteEditor, type NoteEditorHandle } from "./note-editor";
 import { NoteReadView } from "./note-read-view";
 import { MoveDialog, NameDialog, SplitDialog } from "./notes-dialogs";
 import { buildTree, filterTree, itemName, NotesTreeView, type RowTarget, type TreeMenuItem } from "./notes-tree";
+import { isPhoneNow, useIsPhone } from "@/components/phone/use-phone";
 
 const TREE_POLL_MS = 4000;
 const NOTE_POLL_MS = 2500;
@@ -111,11 +113,15 @@ type Dialog =
  *  this hook persists it across sessions and app restarts. */
 export function useNotesDrawerOpen(): [boolean, (next: boolean | ((v: boolean) => boolean)) => void] {
 	const [open, setOpenState] = useState(false);
-	useEffect(() => setOpenState(load("lh:notes-open", false)), []);
+	// PHONE (Phase 3): the drawer fills the screen there, so it always starts
+	// closed and its state isn't remembered.
+	useEffect(() => {
+		if (!isPhoneNow()) setOpenState(load("lh:notes-open", false));
+	}, []);
 	const setOpen = useCallback((next: boolean | ((v: boolean) => boolean)) => {
 		setOpenState((prev) => {
 			const v = typeof next === "function" ? next(prev) : next;
-			store("lh:notes-open", v);
+			if (!isPhoneNow()) store("lh:notes-open", v);
 			return v;
 		});
 	}, []);
@@ -147,6 +153,24 @@ export function NotesDrawer({ chatId, onClose }: { chatId: string; onClose: () =
 	const [selection, setSelection] = useState({ start: 0, end: 0 });
 	const [newBox, setNewBox] = useState<{ title: string; folder: string | null; error: string | null } | null>(null);
 	const [noteMenu, setNoteMenu] = useState<{ x: number; y: number } | null>(null);
+
+	// ─── Phone layout (cloud sync Phase 3) ──────────────────────────────────
+	// The drawer fills the screen. TEMPORARY: two inner layouts are built for
+	// the owner to compare — "steps" (list, then note with a back arrow) and
+	// "stacked" (list above the note; the list folds when a note opens). The
+	// loser is removed once the owner has chosen.
+	const phone = useIsPhone();
+	const [phoneLayout] = useState<"steps" | "stacked">(() => (load<string>("lh:notes-phone-layout", "steps") === "stacked" ? "stacked" : "steps"));
+	const [phoneScreen, setPhoneScreen] = useState<"list" | "note">(() => (openPath ? "note" : "list"));
+	const [phoneTreeOpen, setPhoneTreeOpen] = useState<boolean>(() => !openPath);
+	useEffect(() => {
+		setPhoneScreen(openPath ? "note" : "list");
+		setPhoneTreeOpen(!openPath);
+	}, [openPath]);
+	const showNoteOnPhone = () => {
+		setPhoneScreen("note");
+		setPhoneTreeOpen(false);
+	};
 
 	const editorRef = useRef<NoteEditorHandle | null>(null);
 	const docRef = useRef<OpenDoc | null>(null);
@@ -585,6 +609,9 @@ export function NotesDrawer({ chatId, onClose }: { chatId: string; onClose: () =
 		onClose();
 	};
 
+	// On a phone the list is always shown on its own screen ("steps"), or
+	// folds with its own state ("stacked"); the desktop preference is untouched.
+	const treeShown = phone ? (phoneLayout === "steps" ? true : phoneTreeOpen) : treeOpen;
 	const needsSetup = setupOpen || (tree !== null && !tree.status.configured);
 	const crumb = doc ? [NOTES_FOLDER, ...folderOf(doc.path).split("/").filter(Boolean)].join(" › ") : "";
 
@@ -592,6 +619,11 @@ export function NotesDrawer({ chatId, onClose }: { chatId: string; onClose: () =
 		<aside
 			aria-label="Notes"
 			data-testid="notes-drawer"
+			// PHONE hooks: app/phone.css makes this a full-screen drawer.
+			data-phone="notes"
+			data-phone-layout={phone ? phoneLayout : undefined}
+			data-phone-screen={phone ? phoneScreen : undefined}
+			data-phone-tree={phone ? (phoneTreeOpen ? "open" : "folded") : undefined}
 			className="relative flex h-dvh shrink-0 flex-col border-l border-border bg-background"
 			style={{ width }}
 		>
@@ -599,16 +631,33 @@ export function NotesDrawer({ chatId, onClose }: { chatId: string; onClose: () =
 				role="separator"
 				aria-orientation="vertical"
 				aria-label="Resize notes"
+				data-phone="hide"
 				onPointerDown={startWidthDrag}
 				className="absolute inset-y-0 -left-1 z-10 w-2 cursor-col-resize"
 			/>
-			<header className="lh-drag lh-wco-gutter flex h-15 shrink-0 select-none items-center gap-2 border-b border-border pl-3">
-				<span className="text-xs uppercase tracking-widest text-muted-foreground">Notes</span>
-				{status?.vaultName && <span className="min-w-0 truncate text-xs text-muted-foreground">· {status.vaultName}</span>}
+			<header data-phone="notes-header" className="lh-drag lh-wco-gutter flex h-15 shrink-0 select-none items-center gap-2 border-b border-border pl-3">
+				{phone && phoneLayout === "steps" && phoneScreen === "note" && (
+					<button
+						type="button"
+						data-phone="notes-back"
+						aria-label="Back to the note list"
+						onClick={() => {
+							void flush();
+							setPhoneScreen("list");
+						}}
+						className="flex shrink-0 items-center gap-1 rounded-md py-1.5 pr-2 text-xs uppercase tracking-widest text-muted-foreground"
+					>
+						<ChevronLeftIcon className="size-4" aria-hidden />
+						Notes
+					</button>
+				)}
+				<span data-phone="notes-title" className="text-xs uppercase tracking-widest text-muted-foreground">Notes</span>
+				{status?.vaultName && <span data-phone="notes-title" className="min-w-0 truncate text-xs text-muted-foreground">· {status.vaultName}</span>}
 				<div className="min-w-2 flex-1" />
 				<button
 					type="button"
 					onClick={startNewNote}
+					data-phone="notes-list-action"
 					disabled={!status?.configured}
 					className="flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-xs uppercase tracking-wider text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40"
 				>
@@ -618,6 +667,7 @@ export function NotesDrawer({ chatId, onClose }: { chatId: string; onClose: () =
 				<button
 					type="button"
 					aria-label="New folder"
+					data-phone="notes-list-action"
 					title="New folder"
 					disabled={!status?.configured}
 					onClick={() => setDialog({ kind: "folder", parent: selectedFolder ?? "" })}
@@ -628,6 +678,7 @@ export function NotesDrawer({ chatId, onClose }: { chatId: string; onClose: () =
 				<button
 					type="button"
 					aria-label="Notes settings"
+					data-phone="notes-list-action"
 					title="Vault folder"
 					onClick={() => setSetupOpen((v) => !v)}
 					className="shrink-0 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
@@ -665,6 +716,10 @@ export function NotesDrawer({ chatId, onClose }: { chatId: string; onClose: () =
 						</div>
 					)}
 
+					{/* PHONE: the list half and the note half are grouped so a phone can
+					    show one at a time. display:contents keeps the desktop layout
+					    exactly as it was. */}
+					<div data-phone="notes-list" className="contents">
 					{newBox && (
 						<NewNoteBox
 							box={newBox}
@@ -676,8 +731,8 @@ export function NotesDrawer({ chatId, onClose }: { chatId: string; onClose: () =
 						/>
 					)}
 
-					<div className="mx-3 mt-3 flex shrink-0 items-center gap-0.5 rounded-md border border-border/60 bg-background p-0.5">
-						{(["session", "all"] as const).map((v) => (
+					<div data-phone="notes-filter" className="mx-3 mt-3 flex shrink-0 items-center gap-0.5 rounded-md border border-border/60 bg-background p-0.5">
+							{(["session", "all"] as const).map((v) => (
 							<button
 								key={v}
 								type="button"
@@ -693,8 +748,8 @@ export function NotesDrawer({ chatId, onClose }: { chatId: string; onClose: () =
 						))}
 					</div>
 
-					<label className="relative mx-3 mt-2 block shrink-0">
-						<span className="sr-only">Search notes</span>
+					<label data-phone="notes-filter" className="relative mx-3 mt-2 block shrink-0">
+							<span className="sr-only">Search notes</span>
 						<SearchIcon className="pointer-events-none absolute left-1.5 top-1/2 size-3 -translate-y-1/2 text-muted-foreground/70" aria-hidden />
 						<input
 							value={query}
@@ -711,18 +766,19 @@ export function NotesDrawer({ chatId, onClose }: { chatId: string; onClose: () =
 						/>
 					</label>
 
-					<div className="mx-3 mt-2 flex shrink-0 items-center gap-1">
-						<button
-							type="button"
-							aria-expanded={treeOpen}
-							onClick={() => setTreeOpen((v) => !v)}
+					<div data-phone="notes-tree-head" className="mx-3 mt-2 flex shrink-0 items-center gap-1">
+							<button
+								type="button"
+								aria-expanded={treeShown}
+								data-phone="notes-tree-toggle"
+								onClick={() => (phone ? setPhoneTreeOpen((v) => !v) : setTreeOpen((v) => !v))}
 							className="flex items-center gap-1 text-[11px] uppercase tracking-widest text-muted-foreground transition-colors hover:text-foreground"
 						>
-							<ChevronRightIcon className={cn("size-3 transition-transform", treeOpen && "rotate-90")} aria-hidden />
+							<ChevronRightIcon className={cn("size-3 transition-transform", treeShown && "rotate-90")} aria-hidden />
 							{q ? "Results" : view === "session" ? "Notes from this session" : "Topics"}
 						</button>
 						<div className="flex-1" />
-						{treeOpen && !q && view === "all" && (
+						{treeShown && !q && view === "all" && (
 							<button
 								type="button"
 								onClick={() => setExpanded(new Set())}
@@ -734,9 +790,9 @@ export function NotesDrawer({ chatId, onClose }: { chatId: string; onClose: () =
 						)}
 					</div>
 
-					{treeOpen && (
+					{treeShown && (
 						<>
-							<div className="mx-2 mt-1 shrink-0 overflow-y-auto" style={{ height: treeHeight }}>
+							<div data-phone="notes-tree" className="mx-2 mt-1 shrink-0 overflow-y-auto" style={{ height: treeHeight }}>
 								<NotesTreeView
 									root={shownTree}
 									flat={results}
@@ -754,7 +810,10 @@ export function NotesDrawer({ chatId, onClose }: { chatId: string; onClose: () =
 										})
 									}
 									onSelectFolder={setSelectedFolder}
-									onOpenNote={(p) => void openNote(p)}
+									onOpenNote={(p) => {
+										showNoteOnPhone();
+										void openNote(p);
+									}}
 									onMove={onDragMove}
 									menuFor={menuFor}
 								/>
@@ -763,12 +822,15 @@ export function NotesDrawer({ chatId, onClose }: { chatId: string; onClose: () =
 								role="separator"
 								aria-orientation="horizontal"
 								aria-label="Resize the notes tree"
+								data-phone="hide"
 								onPointerDown={startTreeDrag}
 								className="mx-3 h-2 shrink-0 cursor-row-resize border-b border-border"
 							/>
 						</>
 					)}
+					</div>
 
+					<div data-phone="notes-note" className="contents">
 					<NoteArea
 						doc={doc}
 						docError={docError}
@@ -864,6 +926,7 @@ export function NotesDrawer({ chatId, onClose }: { chatId: string; onClose: () =
 					)}
 
 					{doc && <SaveLine state={saveState} error={saveError} path={doc.path} />}
+					</div>
 				</>
 			)}
 

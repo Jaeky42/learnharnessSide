@@ -22,6 +22,7 @@ import { useServerEvent, useServerResync } from "@/components/server-events";
 import type { ChatListItem } from "@/src/core";
 import { kbdEventForAction } from "@/src/core";
 import { notifySettingsSaved } from "@/components/settings-signal";
+import { useIsPhone } from "@/components/phone/use-phone";
 
 /**
  * Toggleable sidebar — NOT a modal drawer: no backdrop, no focus theft. It
@@ -108,6 +109,15 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 	const [open, setOpen] = useState(false);
 	const [narrow, setNarrow] = useState(false);
 	const [mounted, setMounted] = useState(false);
+	// PHONE (cloud sync Phase 3): the sidebar is a slide-over drawer. It has
+	// its own open state — always closed at first, closed again on every
+	// navigation — and never reads or writes the desktop preference.
+	const phone = useIsPhone();
+	const [phoneOpen, setPhoneOpen] = useState(false);
+	const pathname = usePathname();
+	useEffect(() => {
+		setPhoneOpen(false);
+	}, [pathname, phone]);
 
 	useEffect(() => {
 		// Electron shell detection (merged chrome, 2026-09-17): keys the
@@ -150,6 +160,10 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 	}, []);
 
 	const toggle = useCallback(() => {
+		if (phone) {
+			setPhoneOpen((v) => !v);
+			return;
+		}
 		// Opening while narrow (auto-closed, or the user's own closed-at-
 		// narrow): ask the shell to widen to the threshold — the resize
 		// listener flips `narrow` and the sidebar appears. The preference
@@ -165,7 +179,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 			localStorage.setItem(STORAGE_KEY, v ? "0" : "1");
 			return !v;
 		});
-	}, [narrow, open]);
+	}, [narrow, open, phone]);
 
 	// ⌘B: the global shortcut dispatches kbdEventForAction("toggle-sidebar")
 	// and the context answers on exactly that name — the shared spelling
@@ -181,7 +195,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 	}, [toggle]);
 
 	return (
-		<SidebarContext.Provider value={{ open: open && !narrow, toggle }}>
+		<SidebarContext.Provider value={{ open: phone ? phoneOpen : open && !narrow, toggle }}>
 			{/* transitions gated on mount: no slide-in flash on page load */}
 			<div className={cn("flex h-dvh", mounted && "[&_.sidebar-motion]:transition-[width,margin,opacity]")}>{children}</div>
 		</SidebarContext.Provider>
@@ -393,6 +407,7 @@ const KIND_FILTER_KEY = "lh:session-kind-filter";
 
 function SessionsSidebar() {
 	const { open, toggle } = useSidebar();
+	const phone = useIsPhone();
 	const [chats, setChats] = useState<ChatListItem[] | null>(null);
 	const [query, setQuery] = useState("");
 	const [kindFilter, setKindFilter] = useState<SessionKindFilter>("all");
@@ -648,7 +663,14 @@ function SessionsSidebar() {
 	}, [open, pathname, refresh]);
 
 	return (
+		<>
+		{/* PHONE: the dimmed area beside the open drawer; a tap closes it.
+		    Unstyled (and so invisible) outside app/phone.css's media query. */}
+		{phone && open && <div data-phone="backdrop" aria-hidden="true" onClick={toggle} />}
 		<aside
+			// PHONE hook: app/phone.css turns this into a slide-over drawer.
+			data-phone="sidebar"
+			data-open={open}
 			className={cn("sidebar-motion shrink-0 overflow-hidden duration-200", open ? "w-72" : "w-0")}
 			aria-hidden={!open}
 		>
@@ -941,6 +963,7 @@ function SessionsSidebar() {
 					onDeleted={onDeleted}
 				/>
 			</aside>
+		</>
 	);
 }
 
