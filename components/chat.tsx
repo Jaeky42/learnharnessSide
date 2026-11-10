@@ -2237,9 +2237,17 @@ function DockOverlay({
 	}, [scrollRef]);
 	// PHONE: the same forwarding for a finger drag (components/phone/use-dock-touch-scroll.ts).
 	// A touch while the transcript is still sliding to the bottom stops the
-	// slide, as a wheel does (owner's find: a swipe then was pulled back in).
-	useDockTouchScroll(blockRef, scrollRef, () => {
-		if (stickState.animation) stopScroll();
+	// slide, as a wheel does (owner's find: a swipe then was pulled back in),
+	// and lets the question fold again. A reveal counts from the moment it
+	// starts, before the slide's first frame.
+	useDockTouchScroll(blockRef, scrollRef, {
+		onTouchStart: () => {
+			if (!stickState.animation && !expandIntentRef.current) return;
+			stopScroll();
+			clearTimeout(intentTimerRef.current);
+			expandIntentRef.current = false;
+		},
+		isSliding: () => !!stickState.animation || expandIntentRef.current,
 	});
 
 	// Explicit expand (bar click): the smooth scroll to the bottom takes

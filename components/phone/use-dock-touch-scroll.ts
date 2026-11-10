@@ -20,8 +20,16 @@
  * it at once; a finger never did, so a swipe while the text was still
  * moving was pulled back into the question. `onTouchStart` runs on every
  * touch on the dock or the transcript; chat.tsx stops the slide there, and
- * only while one is running, the way a touch stops a moving list on an
- * iPhone. (Calling stopScroll on every move instead made scrolling jump up
+ * only while one is under way (running, or a reveal still waiting for its
+ * first frame), the way a touch stops a moving list on an iPhone.
+ *
+ * A TAP WHILE THE LESSON IS MOVING still taps. On an iPhone the first tap on
+ * something that is still scrolling only stops the scroll; Safari swallows
+ * it, so tapping the folded question then stopped the text with a jolt and
+ * left the question folded (owner's iPhone). A tap on the dock that began
+ * while the lesson was moving (a throw, a slide, or a scroll in the last
+ * 100ms) is replayed as a click on what was touched, and its own click is
+ * cancelled so it can't land twice. (Calling stopScroll on every move instead made scrolling jump up
  * and down on the owner's iPhone and was reverted.)
  *
  * Phone layout only. Horizontal drags (the confidence slider, wide tables)
@@ -107,10 +115,27 @@ function leaveAlone(target: EventTarget | null): boolean {
 	return target instanceof Element && !!target.closest('textarea, input, select, [contenteditable="true"], .cm-editor');
 }
 
-export function useDockTouchScroll(rootRef: RefObject<HTMLElement | null>, transcriptRef: RefObject<HTMLElement | null>, onTouchStart?: () => void) {
+/** How long a touch can last and still count as a tap, in ms. */
+export const TAP_MS = 500;
+
+/** Pure rule, exported for tests: does a touch that never became a drag
+ *  replay as a click? Only when the lesson was moving as it began (Safari
+ *  swallows that tap) and it was short. */
+export function replayTap(movingAtStart: boolean, durationMs: number): boolean {
+	return movingAtStart && durationMs <= TAP_MS;
+}
+
+export type DockTouchHooks = {
+	/** Every touch on the dock or the transcript, before anything else. */
+	onTouchStart?: () => void;
+	/** Is the transcript sliding to the bottom right now? */
+	isSliding?: () => boolean;
+};
+
+export function useDockTouchScroll(rootRef: RefObject<HTMLElement | null>, transcriptRef: RefObject<HTMLElement | null>, hooks: DockTouchHooks = {}) {
 	const phone = useIsPhone();
-	const touchStartRef = useRef(onTouchStart);
-	touchStartRef.current = onTouchStart;
+	const hooksRef = useRef(hooks);
+	hooksRef.current = hooks;
 	useEffect(() => {
 		const root = rootRef.current;
 		const transcript = transcriptRef.current;
@@ -122,17 +147,25 @@ export function useDockTouchScroll(rootRef: RefObject<HTMLElement | null>, trans
 		let mode: "idle" | "pending" | "native" | "forward" = "idle";
 		let target: EventTarget | null = null;
 		let frame = 0;
+		let startT = 0;
+		let movingAtStart = false;
+		let lastScrollAt = -Infinity;
+		const onTranscriptScroll = () => {
+			lastScrollAt = performance.now();
+		};
 		const stopFling = () => {
 			cancelAnimationFrame(frame);
 			frame = 0;
 		};
 		const onTranscriptStart = () => {
 			stopFling();
-			touchStartRef.current?.();
+			hooksRef.current.onTouchStart?.();
 		};
 		const onStart = (e: TouchEvent) => {
+			movingAtStart = frame !== 0 || performance.now() - lastScrollAt < 100 || !!hooksRef.current.isSliding?.();
+			startT = e.timeStamp;
 			stopFling();
-			touchStartRef.current?.();
+			hooksRef.current.onTouchStart?.();
 			if (e.touches.length !== 1 || leaveAlone(e.target)) {
 				mode = "idle";
 				return;
@@ -165,6 +198,12 @@ export function useDockTouchScroll(rootRef: RefObject<HTMLElement | null>, trans
 			transcript.scrollTop -= step;
 		};
 		const onEnd = (e: TouchEvent) => {
+			if (mode === "pending" && e.type === "touchend" && replayTap(movingAtStart, e.timeStamp - startT) && target instanceof HTMLElement) {
+				mode = "idle";
+				if (e.cancelable) e.preventDefault();
+				target.click();
+				return;
+			}
 			if (mode !== "forward") {
 				mode = "idle";
 				return;
@@ -193,6 +232,7 @@ export function useDockTouchScroll(rootRef: RefObject<HTMLElement | null>, trans
 		root.addEventListener("touchcancel", onEnd);
 		// A touch on the transcript itself stops a fling, as native scrolling does.
 		transcript.addEventListener("touchstart", onTranscriptStart, { passive: true });
+		transcript.addEventListener("scroll", onTranscriptScroll, { passive: true });
 		return () => {
 			stopFling();
 			root.removeEventListener("touchstart", onStart);
@@ -200,6 +240,7 @@ export function useDockTouchScroll(rootRef: RefObject<HTMLElement | null>, trans
 			root.removeEventListener("touchend", onEnd);
 			root.removeEventListener("touchcancel", onEnd);
 			transcript.removeEventListener("touchstart", onTranscriptStart);
+			transcript.removeEventListener("scroll", onTranscriptScroll);
 		};
 	}, [phone, rootRef, transcriptRef]);
 }

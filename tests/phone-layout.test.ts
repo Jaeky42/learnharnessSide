@@ -208,6 +208,12 @@ describe("drag on the dock scrolls the lesson", async () => {
 		assert.equal(dragDecision(0, 2, true, () => true), "native", "a panel under the finger can scroll");
 		assert.equal(dragDecision(0, 2, false, none), "native", "Safari already scrolling: leave it");
 	});
+	it("replays a short tap that Safari swallowed because the lesson was moving", async () => {
+		const { replayTap, TAP_MS } = await import("../components/phone/use-dock-touch-scroll.ts");
+		assert.equal(replayTap(true, 120), true);
+		assert.equal(replayTap(false, 120), false, "a still lesson: Safari's own click lands");
+		assert.equal(replayTap(true, TAP_MS + 1), false, "a long press is not a tap");
+	});
 	it("slows a fling and stops it, by time rather than by frame", () => {
 		assert.equal(flingStep(10), 9.5);
 		assert.equal(flingStep(0.5), 0);
