@@ -69,6 +69,19 @@ export function keyboardUp(fit: { height: number; top: number }, innerHeight: nu
 	return typing || fit.top > 0 || innerHeight - fit.height > 120;
 }
 
+/** Pure rule, exported for tests: the height to lay the app out in. While
+ *  the keyboard is closing the app takes the full height at once: iPhone
+ *  Safari reports the new visible height only after the keyboard has slid
+ *  away, so the app sat squeezed above an empty band for a moment and then
+ *  dropped down (owner's iPhone). At full height the message box sits at
+ *  the bottom behind the keyboard and is revealed as it slides away. */
+export function layoutHeight(visible: number, innerHeight: number, closing: boolean): number {
+	return closing ? Math.max(visible, innerHeight) : visible;
+}
+
+/** How long the keyboard-closing override waits for Safari's new height. */
+export const CLOSING_MAX_MS = 1200;
+
 /** Pure rule, exported for tests: does focusing this element bring up the
  *  on-screen keyboard? */
 export function typingTarget(el: { tagName: string; type?: string; isContentEditable?: boolean } | null): boolean {
@@ -106,10 +119,18 @@ export function PhoneViewport() {
 			return;
 		}
 		let typing = typingTarget(document.activeElement as HTMLElement | null);
+		let closing = false;
+		let closingTimer = 0;
+		const endClosing = () => {
+			closing = false;
+			window.clearTimeout(closingTimer);
+		};
 		const sync = () => {
 			const fit = viewportFit(vv);
 			if (!fit) return;
-			root.style.setProperty("--lh-vvh", `${fit.height}px`);
+			// Safari's new height has arrived: the keyboard is gone.
+			if (closing && fit.height >= window.innerHeight - 1) endClosing();
+			root.style.setProperty("--lh-vvh", `${layoutHeight(fit.height, window.innerHeight, closing)}px`);
 			const bleed = bleedFor({ userAgent: navigator.userAgent, standalone: standaloneNow(), keyboard: keyboardUp(fit, window.innerHeight, typing) });
 			if (bleed > 0) {
 				body.dataset.lhBleed = "";
@@ -134,9 +155,22 @@ export function PhoneViewport() {
 		// the browser paints, so following them at once keeps the app from
 		// showing one frame in the wrong place while the keyboard slides.
 		const onFocus = (e: FocusEvent) => {
+			// Focus moving straight to another text box keeps the keyboard up.
+			if (e.type === "focusout" && typingTarget(e.relatedTarget as HTMLElement | null)) return;
 			const next = e.type === "focusin" && typingTarget(e.target as HTMLElement | null);
+			if (next) endClosing();
 			if (next === typing) return;
 			typing = next;
+			if (!next && vv.height < window.innerHeight - 1) {
+				// The keyboard is closing: take the full height now, not when
+				// Safari reports it after the slide (layoutHeight).
+				closing = true;
+				window.clearTimeout(closingTimer);
+				closingTimer = window.setTimeout(() => {
+					closing = false;
+					sync();
+				}, CLOSING_MAX_MS);
+			}
 			sync();
 		};
 		sync();
@@ -151,6 +185,7 @@ export function PhoneViewport() {
 			window.removeEventListener("scroll", sync);
 			document.removeEventListener("focusin", onFocus);
 			document.removeEventListener("focusout", onFocus);
+			endClosing();
 			clear();
 		};
 	}, [phone]);

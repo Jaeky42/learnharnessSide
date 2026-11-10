@@ -163,6 +163,12 @@ describe("Safari tab bleed", async () => {
 		assert.equal(bleedFor({ userAgent: safari.replace("Version/18.0", "CriOS/130.0"), standalone: false, keyboard: false }), 0);
 		assert.equal(bleedFor({ userAgent: "Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Mobile Safari/537.36", standalone: false, keyboard: false }), 0);
 	});
+	it("takes the full height as soon as the keyboard starts closing", async () => {
+		const { layoutHeight } = await import("../components/phone/phone-viewport.tsx");
+		assert.equal(layoutHeight(470, 796, false), 470, "keyboard up: the visible part");
+		assert.equal(layoutHeight(470, 796, true), 796, "closing: full height before Safari reports it");
+		assert.equal(layoutHeight(796, 796, true), 796);
+	});
 	it("treats a focused text box as the keyboard, before its size arrives", async () => {
 		const { typingTarget } = await import("../components/phone/phone-viewport.tsx");
 		assert.equal(keyboardUp({ height: 796, top: 0 }, 796, true), true);
