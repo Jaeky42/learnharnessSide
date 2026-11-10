@@ -106,7 +106,7 @@ Graph extraction, research, compaction and visuals run on **whichever device hol
   - **The CLI owns the login.** It keeps its own credentials, and LearnHarness never stores a Claude token.
   - **Disconnect** runs the CLI's own sign-out.
   - **The desktop Settings stay unchanged** ("authenticate in your terminal").
-  - Which command to drive (`claude auth login`, preferred because it has a matching sign-out, or `claude setup-token`) is decided in Phase 0.
+  - The command is `claude auth login`, verified in Phase 0.
 - Subscription credentials are never copied between devices; each machine signs in on its own.
 
 ### Obsidian vault on the VPS
@@ -166,9 +166,9 @@ Graph extraction, research, compaction and visuals run on **whichever device hol
 0. **Checks.**
    - ✅ ChatGPT sign-in and model calls from a VPS (callback replayed by hand).
    - ✅ Graph id and rewrite analysis (above).
-   - ⏳ Which `claude` sign-in command the page can drive on a headless server.
-   - ⏳ `ob sync-config --excluded-folders` on a real install.
-1. ✅ **Server mode.** Dockerfile, the `LH_DATA_DIR` volume, the password login gate in `proxy.ts`, Caddy (HTTPS), the server image workflow, and automatic server updates. Built and tested locally; Caddy and the update timer get their first real run on the VPS.
+   - ✅ `claude auth login` works on a headless VPS. It prints the link as plain text (`If the browser didn't open, visit: https://claude.com/cai/oauth/authorize?...`). Claude's own page shows a code after the learner authorizes. A plain prompt (`Paste code here if prompted >`) takes it, then the CLI prints `Login successful.` The Sign in button drives this command; Disconnect runs `claude auth logout`. The native installer puts `claude` in `~/.local/bin`.
+   - ✅ `ob sync-config` has `--excluded-folders` (comma-separated, empty to clear). It also has `--configs` (which `.obsidian` setting categories sync; may close the `.obsidian` gap), `--conflict-strategy merge|conflict` (an owner decision for Phase 4), `--file-types` and `--device-name`.
+1. ✅ **Server mode.** Dockerfile, the `LH_DATA_DIR` volume, the password login gate in `proxy.ts`, Caddy (HTTPS), the server image workflow, and automatic server updates. Running on the permanent VPS: HTTPS via Caddy, setup and password, locked from outside, and the nightly timer installed.
 2. **Sign-in on the server.** The ChatGPT paste box, plus the Claude sign-in button and Disconnect.
 3. **Phone layouts.** PWA manifest; the teaching, practice, side tutor (bubble) and notes drawer (full screen) layouts.
 4. **Vault on the server.** The `ob sync` process, setup, and the automatic excluded-folders list.
