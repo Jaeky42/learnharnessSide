@@ -12,25 +12,12 @@
  * can still move that way, and only otherwise does the drag move the
  * transcript (which also folds an opened question, as scrolling does).
  *
- * LEAVING THE BOTTOM. The transcript is held to the bottom by
- * use-stick-to-bottom, which for 0.35s after the content changes size keeps
- * pulling the scroll back down until it sees the learner escape. It escapes
- * at once on a wheel scrolled up, but for touch it only reads scroll events,
- * and ignores those while the content is resizing, so a quick swipe right
- * after a question opened or folded was pulled back to the bottom, which
- * re-opened the question (owner's iPhone). `onEscape` (its stopScroll) is
- * called ONCE per forwarded drag, on its first move up: the touch twin of its
- * wheel escape. Calling it on every move (and on native drags and the
- * throw) brought back a quick up-and-down jumping on the owner's iPhone:
- * near the bottom, a tiny backwards twitch reads to the library as "back at
- * the bottom" and the next move escaped again, so the two kept flipping.
- *
  * Phone layout only. Horizontal drags (the confidence slider, wide tables)
  * and drags that start in a text box are left alone. The choice is made on
  * the drag's first movement (dragDecision).
  */
 
-import { useEffect, useRef, type RefObject } from "react";
+import { useEffect, type RefObject } from "react";
 import { useIsPhone } from "@/components/phone/use-phone";
 
 /** Per-frame velocity decay of the fling after the finger lifts. */
@@ -108,10 +95,8 @@ function leaveAlone(target: EventTarget | null): boolean {
 	return target instanceof Element && !!target.closest('textarea, input, select, [contenteditable="true"], .cm-editor');
 }
 
-export function useDockTouchScroll(rootRef: RefObject<HTMLElement | null>, transcriptRef: RefObject<HTMLElement | null>, onEscape?: () => void) {
+export function useDockTouchScroll(rootRef: RefObject<HTMLElement | null>, transcriptRef: RefObject<HTMLElement | null>) {
 	const phone = useIsPhone();
-	const escapeRef = useRef(onEscape);
-	escapeRef.current = onEscape;
 	useEffect(() => {
 		const root = rootRef.current;
 		const transcript = transcriptRef.current;
@@ -127,7 +112,6 @@ export function useDockTouchScroll(rootRef: RefObject<HTMLElement | null>, trans
 			cancelAnimationFrame(frame);
 			frame = 0;
 		};
-		let escaped = false;
 		const onStart = (e: TouchEvent) => {
 			stopFling();
 			if (e.touches.length !== 1 || leaveAlone(e.target)) {
@@ -139,7 +123,6 @@ export function useDockTouchScroll(rootRef: RefObject<HTMLElement | null>, trans
 			startX = t.clientX;
 			startY = lastY = t.clientY;
 			samples = [{ t: e.timeStamp, y: t.clientY }];
-			escaped = false;
 			target = e.target;
 			mode = "pending";
 		};
@@ -160,10 +143,6 @@ export function useDockTouchScroll(rootRef: RefObject<HTMLElement | null>, trans
 			samples.push({ t: e.timeStamp, y: t.clientY });
 			if (samples.length > 32) samples.shift();
 			lastY = t.clientY;
-			if (step > 0 && !escaped) {
-				escaped = true;
-				escapeRef.current?.();
-			}
 			transcript.scrollTop -= step;
 		};
 		const onEnd = (e: TouchEvent) => {

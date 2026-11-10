@@ -2047,7 +2047,7 @@ function DockOverlay({
 	 *  home and /chat/new carry, above the composer while slots are unset. */
 	setupCta?: React.ReactNode;
 }) {
-	const { isAtBottom, scrollToBottom, scrollRef, stopScroll } = useStickToBottomContext();
+	const { isAtBottom, scrollToBottom, scrollRef } = useStickToBottomContext();
 	// Render-fresh bottom state (flicker round): the arrival block below reads
 	// it DURING RENDER — the same value the after-paint effect used to read a
 	// frame too late. Assigned per render like the other refs below.
@@ -2236,7 +2236,7 @@ function DockOverlay({
 		return () => root.removeEventListener("wheel", onWheel);
 	}, [scrollRef]);
 	// PHONE: the same forwarding for a finger drag (components/phone/use-dock-touch-scroll.ts).
-	useDockTouchScroll(blockRef, scrollRef, stopScroll);
+	useDockTouchScroll(blockRef, scrollRef);
 
 	// Explicit expand (bar click): the smooth scroll to the bottom takes
 	// hundreds of ms, during which the position is still legitimately inside
