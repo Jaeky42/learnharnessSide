@@ -19,3 +19,6 @@ xai-credentials.json*
 
 # dev-fresh launcher scratch (fresh-user sim): disposable per launch
 .fresh-data/
+
+# server-mode login (side-tutor fork, src/store/server-auth.ts)
+server-login.json*

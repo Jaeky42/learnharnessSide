@@ -1,0 +1,19 @@
+# Keep the build context to source only: no dependencies, build output,
+# learning data or secrets (see next.config.ts and scripts/build-server.mjs,
+# which refuse to package data/ or auth files anyway).
+.git
+node_modules
+.next
+dist
+data
+.fresh-data
+.memory
+real-data-extraction
+deploy
+auth.json
+server-login.json*
+chatgpt-credentials.json*
+github-copilot-credentials.json*
+xai-credentials.json*
+.env*
+*.log

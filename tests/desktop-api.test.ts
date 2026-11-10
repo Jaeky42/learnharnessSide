@@ -53,7 +53,10 @@ test("all methods fail closed for desktop missing/wrong secret; API-only matcher
 	}
 	assert(desktopAPIAuthorized(new Headers({ [HEADER]: secret }), { LH_DESKTOP_SERVER: "1", LH_DESKTOP_API_SECRET: secret }));
 	for (const pathname of ["/api/events", "/api/chat", "/api/settings/models", "/api/chats/scratch/markdown"]) assert(unstable_doesProxyMatch({ config, nextConfig: {}, url: origin + pathname }));
-	assert(!unstable_doesProxyMatch({ config, nextConfig: {}, url: origin + "/chat/new" }));
+	// Side-tutor fork: the matcher now also covers pages (for server mode's
+	// login gate); without server mode a page still passes straight through.
+	assert(!unstable_doesProxyMatch({ config, nextConfig: {}, url: origin + "/_next/static/chunks/app.js" }));
+	assert.equal(proxy(new NextRequest(origin + "/chat/new")).headers.get("x-middleware-next"), "1");
 	const originalMarker = process.env.LH_DESKTOP_SERVER;
 	const originalSecret = process.env.LH_DESKTOP_API_SECRET;
 	try {

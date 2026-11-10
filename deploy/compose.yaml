@@ -1,0 +1,38 @@
+# LearnHarness on a VPS (side-tutor fork, cloud sync Phase 1).
+# Copy .env.example to .env, fill it in, then: docker compose up -d
+# LearnHarness is reachable only through Caddy, which serves HTTPS for
+# LH_DOMAIN with an automatic certificate.
+services:
+  lh:
+    image: ghcr.io/jaeky42/learnharnessside:${LH_CHANNEL:-latest}
+    restart: unless-stopped
+    environment:
+      # Caddy is the only way in, so its X-Forwarded-For is trusted for the
+      # login lockout (src/server/server-auth.ts clientAddress).
+      LH_TRUST_PROXY: "1"
+      TZ: ${TZ:-UTC}
+    volumes:
+      - lh-data:/data
+    expose:
+      - "3000"
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - lh
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      LH_DOMAIN: ${LH_DOMAIN:?Set LH_DOMAIN in deploy/.env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  lh-data:
+  caddy-data:
+  caddy-config:

@@ -1,0 +1,9 @@
+# HTTPS for LearnHarness. Caddy gets and renews the certificate itself.
+{$LH_DOMAIN} {
+	encode zstd gzip
+	reverse_proxy lh:3000 {
+		# Lesson replies and the live event stream arrive in pieces:
+		# pass them on immediately instead of buffering.
+		flush_interval -1
+	}
+}

@@ -52,6 +52,7 @@ import { AppearanceSection, GraphSection } from "./appearance-section.tsx";
 import { KeyboardSection } from "./keyboard-section.tsx";
 import { ChatGPTUIProvider } from "./chatgpt-connection.tsx";
 import { NativeSubscriptionUIProvider } from "./subscription-connections.tsx";
+import { AccountSection, useServerAccount } from "./account-section.tsx";
 
 /** Owner (2026-09-20): hints earn their place — mechanics-explaining
  *  prose is out; only the keyboard note stays (storage location is a
@@ -63,6 +64,8 @@ const SECTIONS = [
 	{ id: "graph", label: "Graph" },
 	{ id: "keyboard", label: "Keyboard", hint: "Stored on this device" },
 	{ id: "general", label: "General" },
+	// Side-tutor fork: shown only on a server-mode LearnHarness (account-section.tsx).
+	{ id: "account", label: "Account" },
 ] as const;
 type SectionId = (typeof SECTIONS)[number]["id"];
 
@@ -181,6 +184,7 @@ export function SettingsDialogBody({
 		};
 	}, []);
 	const [active, setActive] = useState<SectionId>(initialSection);
+	const account = useServerAccount();
 	// A deep-link fired while the dialog is ALREADY open (first exercised by
 	// the wave-6 embedding picker's "Add a provider key first…" link — the
 	// picker itself died with wave 7, the mechanism is general) changes
@@ -309,7 +313,7 @@ export function SettingsDialogBody({
 					data-testid="settings-nav"
 					className="flex w-44 shrink-0 flex-col gap-1 border-r border-border p-2"
 				>
-					{SECTIONS.map((s) => (
+					{SECTIONS.filter((s) => s.id !== "account" || account.devices).map((s) => (
 						<button
 							key={s.id}
 							type="button"
@@ -368,6 +372,11 @@ export function SettingsDialogBody({
 											void write("general", { ...record.general, autoUpdate: on })
 										}
 									/>
+								</SettingsSection>
+							)}
+							{active === "account" && account.devices && (
+								<SettingsSection title="Account" testid="section-account">
+									<AccountSection devices={account.devices} reload={account.reload} />
 								</SettingsSection>
 							)}
 							{active === "keys" && (

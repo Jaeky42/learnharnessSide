@@ -1,6 +1,6 @@
 # Cloud sync: approved plan
 
-Status: **planned, not built.** Work happens on a separate branch. It merges into `side-tutor` only once the whole feature works and the owner approves the merge, because every push to `side-tutor` publishes a release. Change these decisions only with the owner's approval.
+Status: **Phase 1 built (server mode); the rest is planned.** Work happens on a separate branch. It merges into `side-tutor` only once the whole feature works and the owner approves the merge, because every push to `side-tutor` publishes a release. Change these decisions only with the owner's approval.
 
 Goal: keep learning progress on several devices. The Windows desktop app stays fully usable, works offline, and keeps the Obsidian connection. A phone uses LearnHarness from the browser.
 
@@ -66,13 +66,33 @@ Graph extraction, research, compaction and visuals run on **whichever device hol
   - destructive changes sync as **operations** (for example "delete session X, mode delete-nodes") that each device replays. The deletion code is deterministic and idempotent, so replaying it is safe.
 - **Known limit:** whether a new concept matches an existing node is decided by the AI against the *local* graph. If two devices extract different sessions while out of sync, the same concept can end up as two nodes. This is accepted for v1. A merge pass may come later.
 
-### Login (VPS)
+### Login (VPS) — built in Phase 1
 
-- Browser mode currently has no authentication (`desktopAPIAuthorized` returns `true` when it isn't the desktop server). The VPS needs a login gate in `proxy.ts` before it's reachable from the internet.
-- **Password login.** A session cookie lasts a **fixed 30 days from login** and isn't extended by use.
-- Login attempts are rate-limited.
-- "Sign out everywhere" in Settings ends every login.
-- Desktop sync uses per-device tokens that can be revoked.
+- Browser mode had no authentication (`desktopAPIAuthorized` returns `true` when it isn't the desktop server). Server mode (`LH_SERVER_MODE=1`, set by the Docker image) puts a login gate in front of **every page and API**; only `/login`, `/setup` and static build files are open.
+- **First start:** the server prints a one-time **setup code** to its log (`docker compose logs lh`). `/setup` takes the code and a new password. It works once.
+- **Password:** at least **8 characters**, stored only as a scrypt hash.
+- **Logins** last a **fixed 30 days from sign-in** and aren't extended by use. The cookie is `__Host-lh_session` (HttpOnly, Secure, SameSite=Lax); only a SHA-256 of its token is stored.
+- **Wrong attempts:** after 5 from one address, logins from it pause for **15 min**. Each repeated pause doubles, up to **24 h**. A success, or a day without failures, resets it. Signed-in devices keep working.
+- **Writes** (any non-GET request) must carry an `Origin` that matches the `Host`, so other sites can't submit forms or requests on your behalf (CSRF).
+- **Settings → Account** (shown only in server mode):
+  - Change password: needs the current one, and **signs out every other device**.
+  - The signed-in devices list.
+  - **Sign out everywhere**, this device included.
+- **Forgot password:** `docker compose exec lh reset-password` removes the password and every login and prints a new setup code. Data isn't touched.
+- **Storage:** `server-login.json` beside `auth.json`, mode 0600. It's never synced, and the agents' file tools refuse it. A damaged file closes the site (503) instead of opening it.
+- **Later (Phase 6):** desktop sync will use per-device tokens that can be revoked.
+
+**Code:**
+- `src/core/server-auth.ts` (rules)
+- `src/store/server-auth.ts` (file)
+- `src/server/server-auth.ts` and `server-auth-pages.ts` (gate, routes, pages)
+- `proxy.ts` (calls the gate; the matcher now covers pages, which pass straight through outside server mode)
+- `instrumentation.ts` (prints the setup code)
+- `app/{login,setup}/route.ts`, `app/api/server-auth/*`
+- `components/settings/account-section.tsx`
+- `scripts/server-reset-password.mjs`
+
+**Tests:** `tests/server-auth.test.ts`.
 
 ### Model sign-in on the VPS
 
@@ -107,18 +127,33 @@ Graph extraction, research, compaction and visuals run on **whichever device hol
 - **Side tutor:** a chat bubble in the bottom-right corner of the teaching session that opens the tutor.
 - **Notes drawer:** slides in from the right and fills the screen. The owner reviews how this looks before it's settled.
 
-### Hosting
+### Hosting — built in Phase 1
 
-- A small VPS with Ubuntu, Docker and Caddy, plus a persistent volume for `/data` and `/vault`.
+- **Reached at your own domain** (for example `learn.<yourdomain>`). Caddy serves HTTPS with an automatic certificate.
+- **`Dockerfile`** builds the same standalone server the desktop app runs and starts it in server mode as the `node` user:
+  - `/data` is a volume: `/data/data` = `LH_DATA_DIR`, `/data/secrets` = the `auth.json` folder (mode 700);
+  - `reset-password` is on the PATH.
+- **`deploy/`:**
+  - `compose.yaml`: LearnHarness and Caddy. `LH_TRUST_PROXY=1`, because Caddy's `X-Forwarded-For` / `X-Forwarded-Proto` are trusted for the lockout and redirects.
+  - `Caddyfile`
+  - `.env.example`: `LH_DOMAIN`, `LH_CHANNEL`, `TZ`
+  - `update.sh`
+  - `install-update-timer.sh`
 - **Provider:** chosen at setup time. Hetzner CX23 is being considered, with DigitalOcean as the fallback.
   - Use **x86**, not ARM, because the native add-ons, the Claude CLI and `ob` are only confirmed on x86.
   - The server needs a **public IPv4** address.
-- The server image is built by a **separate** workflow, so it never triggers a desktop release.
+- **Images:** `.github/workflows/server-image.yml` runs typecheck, tests and lint, builds and smoke-tests the image, then pushes it to `ghcr.io/jaeky42/learnharnessside`:
+  - `:latest` from `side-tutor`;
+  - `:dev` from the cloud sync feature branch;
+  - plus a tag per commit.
+  - It never creates a GitHub Release, so it can't affect desktop updates.
+  - The package is **public**. GitHub creates it private, so set it to public once in the package settings.
+- Multi-user hosting isn't planned. If it's ever wanted, the approach is one container per user on one VPS, with no changes to the single-user app.
 
 ### Updates
 
 - **The desktop** keeps updating itself from this fork's releases, as now.
-- **The server updates automatically.** It checks for a new server image on a schedule, pulls it and restarts. `/data` and `/vault` live on persistent storage and aren't touched. The check interval is decided in Phase 1.
+- **The server updates automatically, nightly at 4 am** (the server's system time zone). A systemd timer (`deploy/install-update-timer.sh`) runs `deploy/update.sh`: `docker compose pull`, then `up -d`, which restarts only what changed. It catches up after downtime. `/data` and `/vault` live on volumes and aren't touched.
 - **Version rule:**
   - The desktop and server exchange a sync protocol version on every sync.
   - If they don't match, sync **pauses**: the desktop keeps working locally and shows "Update the server to continue syncing".
@@ -132,7 +167,7 @@ Graph extraction, research, compaction and visuals run on **whichever device hol
    - ✅ Graph id and rewrite analysis (above).
    - ⏳ Which `claude` sign-in command the page can drive on a headless server.
    - ⏳ `ob sync-config --excluded-folders` on a real install.
-1. **Server mode.** Dockerfile, the `LH_DATA_DIR` volume, the password login gate in `proxy.ts`, Caddy (HTTPS), the server image workflow, and automatic server updates.
+1. ✅ **Server mode.** Dockerfile, the `LH_DATA_DIR` volume, the password login gate in `proxy.ts`, Caddy (HTTPS), the server image workflow, and automatic server updates. Built and tested locally; Caddy and the update timer get their first real run on the VPS.
 2. **Sign-in on the server.** The ChatGPT paste box, plus the Claude sign-in button and Disconnect.
 3. **Phone layouts.** PWA manifest; the teaching, practice, side tutor (bubble) and notes drawer (full screen) layouts.
 4. **Vault on the server.** The `ob sync` process, setup, and the automatic excluded-folders list.
