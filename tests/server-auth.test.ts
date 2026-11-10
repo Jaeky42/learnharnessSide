@@ -240,6 +240,20 @@ describe("HTTP flow (server mode)", () => {
 		});
 	});
 
+	it("sign out ends only this device's login", async () => {
+		await withServerModeAsync(async () => {
+			const code = freshWithCode();
+			const phone = cookieFrom(await server.setupResponse(post("/api/server-auth/setup", { code, password: "longenough" })));
+			const laptop = cookieFrom(await server.loginResponse(post("/api/server-auth/login", { password: "longenough" })));
+			const out = await server.logoutResponse(post("/api/server-auth/logout", {}, phone));
+			assert.equal(out.status, 200);
+			assert.match(out.headers.get("set-cookie") ?? "", /Max-Age=0/);
+			const state = store.readServerAuthState();
+			assert.equal(core.findSession(state, phone.split("=")[1], Date.now()), null);
+			assert.ok(core.findSession(state, laptop.split("=")[1], Date.now()), "other devices stay signed in");
+		});
+	});
+
 	it("reset-password removes the password and every login, and issues a working code", async () => {
 		await withServerModeAsync(async () => {
 			const code = freshWithCode();
@@ -263,7 +277,7 @@ describe("gate", () => {
 	it("before setup: pages go to /setup; APIs answer 401; login pages and static files are open", () => {
 		assert.equal(gate("/chat/new")?.headers.get("location"), "/setup");
 		assert.equal(gate("/api/settings")?.status, 401);
-		for (const open of ["/setup", "/login", "/_next/static/chunks/a.js", "/fonts/x.woff2", "/favicon.ico"]) assert.equal(gate(open), null, open);
+		for (const open of ["/setup", "/login", "/_next/static/chunks/a.js", "/_next/hmr", "/fonts/x.woff2", "/favicon.ico"]) assert.equal(gate(open), null, open);
 	});
 
 	it("after setup: no cookie → /login; a valid cookie passes; an expired one doesn't", () => {

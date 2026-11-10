@@ -57,7 +57,9 @@ const NO_STORE = { "Cache-Control": "no-store", "X-Content-Type-Options": "nosni
 /** Paths reachable without a session. Everything else needs one. */
 const PUBLIC_PAGES = new Set(["/login", "/setup"]);
 const PUBLIC_APIS = new Set(["/api/server-auth/login", "/api/server-auth/setup"]);
-const PUBLIC_PREFIXES = ["/_next/static/", "/_next/image", "/fonts/"];
+// /_next/ is Next's own build output and dev live-reload socket: no user
+// data. Gating the dev socket made every page reload in a loop.
+const PUBLIC_PREFIXES = ["/_next/", "/fonts/"];
 const PUBLIC_FILES = new Set(["/favicon.ico", "/robots.txt"]);
 
 // ─── Request helpers ─────────────────────────────────────────────────────────

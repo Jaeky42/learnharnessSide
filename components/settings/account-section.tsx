@@ -5,7 +5,7 @@
  * answers 404 everywhere else, and the tab stays hidden.
  *
  * Change password (signs out every other device), the signed-in devices
- * list, and Sign out everywhere (this device included). No browser
+ * list, Sign out (this device), and Sign out everywhere (this device included). No browser
  * confirm(): the destructive button asks once more inline.
  */
 
@@ -82,6 +82,13 @@ export function AccountSection({ devices, reload }: { devices: AccountDevice[]; 
 		}
 	};
 
+	const signOut = async () => {
+		setSignOutError(null);
+		const result = await post("/api/server-auth/logout");
+		if (result.ok) window.location.replace("/login");
+		else setSignOutError(result.error ?? "Something went wrong. Try again.");
+	};
+
 	const signOutEverywhere = async () => {
 		setSignOutError(null);
 		const result = await post("/api/server-auth/sign-out-everywhere");
@@ -128,7 +135,10 @@ export function AccountSection({ devices, reload }: { devices: AccountDevice[]; 
 						<button type="button" className={buttonClass} onClick={() => setConfirmingSignOut(false)}>Cancel</button>
 					</div>
 				) : (
-					<button type="button" className={buttonClass} onClick={() => setConfirmingSignOut(true)} data-testid="account-sign-out">Sign out everywhere</button>
+					<div className="flex flex-wrap gap-2">
+						<button type="button" className={buttonClass} onClick={() => void signOut()} data-testid="account-sign-out-here">Sign out</button>
+						<button type="button" className={buttonClass} onClick={() => setConfirmingSignOut(true)} data-testid="account-sign-out">Sign out everywhere</button>
+					</div>
 				)}
 				{signOutError && <p role="alert" className="text-xs text-red-500">{signOutError}</p>}
 			</SettingsGroup>

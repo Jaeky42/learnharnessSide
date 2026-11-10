@@ -77,6 +77,7 @@ Graph extraction, research, compaction and visuals run on **whichever device hol
 - **Settings → Account** (shown only in server mode):
   - Change password: needs the current one, and **signs out every other device**.
   - The signed-in devices list.
+  - **Sign out**: this device only.
   - **Sign out everywhere**, this device included.
 - **Forgot password:** `docker compose exec lh reset-password` removes the password and every login and prints a new setup code. Data isn't touched.
 - **Storage:** `server-login.json` beside `auth.json`, mode 0600. It's never synced, and the agents' file tools refuse it. A damaged file closes the site (503) instead of opening it.
