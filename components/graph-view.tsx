@@ -66,7 +66,8 @@
 import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { NotesImportControl, NotesImportErrors, NotesImportNotices, useNotesImport } from "@/components/notes-import.tsx";
 import Link from "next/link";
-import { FileTextIcon, ListTreeIcon, Loader2Icon, SearchIcon, SettingsIcon, WaypointsIcon } from "lucide-react";
+import { FileTextIcon, ListTreeIcon, Loader2Icon, SearchIcon, SettingsIcon, WaypointsIcon, XIcon } from "lucide-react";
+import { useIsPhone } from "@/components/phone/use-phone";
 import { incrementalLayout, propositionSessionHref, type GraphCostSummary, type GraphNode, type GraphSnapshot } from "@/src/core";
 import { planCostLabel } from "@/components/usage-format";
 import { GraphCanvasRenderer, type GraphRenderSettings } from "./graph-canvas.ts";
@@ -864,10 +865,35 @@ export function GraphChromeRow({
 	 *  2026-09-29). */
 	onOpenChains: () => void;
 }) {
+	// PHONE (cloud sync Phase 3): search is an icon that opens a full-width
+	// field (the other controls step aside while it's open); it closes when
+	// it's emptied and loses focus, or with its ✕.
+	const phone = useIsPhone();
+	const [phoneSearch, setPhoneSearch] = useState(false);
+	const searchShown = !phone || phoneSearch || query !== "";
+	const openPhoneSearch = () => {
+		setPhoneSearch(true);
+		window.setTimeout(() => searchInputRef.current?.focus(), 0);
+	};
 	return (
 		<>
-			{!isEmpty && (
-				<div className="graph-chrome-fade-in w-56 min-w-0 shrink rounded-xl border bg-card/85 px-1 py-[3px] shadow-lg backdrop-blur">
+			{!isEmpty && !searchShown && (
+				<button
+					type="button"
+					data-phone="graph-search-button"
+					aria-label="Search nodes"
+					onClick={openPhoneSearch}
+					className="graph-chrome-fade-in flex size-9 shrink-0 items-center justify-center rounded-xl border bg-card/85 text-muted-foreground shadow-lg backdrop-blur"
+				>
+					<SearchIcon className="size-4" />
+				</button>
+			)}
+			{!isEmpty && searchShown && (
+				<div
+					data-phone="graph-search"
+					data-open={phone ? "true" : undefined}
+					className="graph-chrome-fade-in w-56 min-w-0 shrink rounded-xl border bg-card/85 px-1 py-[3px] shadow-lg backdrop-blur"
+				>
 					<Hint
 						// ⌘F focuses node search (surface-scoped registry action).
 						label="Search nodes"
@@ -883,8 +909,27 @@ export function GraphChromeRow({
 							placeholder="Search nodes…"
 							aria-label="Search nodes"
 							spellCheck={false}
+							onBlur={() => {
+								if (phone && query === "") setPhoneSearch(false);
+							}}
 							className="h-7 w-full rounded-lg border bg-background pl-8 text-xs outline-none placeholder:text-muted-foreground focus:border-ring"
 						/>
+						{phone && (
+							<button
+								type="button"
+								aria-label="Close search"
+								// Keep focus in the field until the tap lands, so the
+								// blur above doesn't unmount this button first.
+								onMouseDown={(e) => e.preventDefault()}
+								onClick={() => {
+									onQuery("");
+									setPhoneSearch(false);
+								}}
+								className="absolute right-1 top-1/2 flex size-8 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground"
+							>
+								<XIcon className="size-4" />
+							</button>
+						)}
 					</div>
 					</Hint>
 					{noMatch && (
@@ -1564,7 +1609,7 @@ export function GraphView({
 			    against the full-bleed parent) — the row NEVER wraps (owner
 			    rejected the two-row fold); in narrow windows the search is
 			    the flexible element and shrinks instead. */}
-			<div className="lh-no-drag lh-wco-floating absolute right-2 top-2 z-10 flex max-w-[calc(100%-5.5rem)] flex-col items-end gap-2">
+			<div data-phone="graph-chrome" className="lh-no-drag lh-wco-floating absolute right-2 top-2 z-10 flex max-w-[calc(100%-5.5rem)] flex-col items-end gap-2">
 			{/* z-20 (2026-09-20): the row paints above the cost number below
 			    it — without this, the later-in-DOM cost control layered over
 			    the settings/coverage dropdowns (owner report), still hoverable

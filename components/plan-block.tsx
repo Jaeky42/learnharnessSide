@@ -13,6 +13,7 @@ import { layout as dagreLayout } from "dagre-d3-es/src/dagre/index.js";
 // d3's curveBasis (the exact recipe dagre-d3's own renderer uses).
 import { curveBasis, line } from "d3-shape";
 import { fitGraphView, fitZoomFor, zoomedGraphView, type Viewport } from "@/components/pan-zoom";
+import { usePinchZoom } from "@/components/phone/use-pinch-zoom";
 import type { PlanBlockData, PlanNodeStatus, PlanTree } from "@/src/core";
 import { derivedNodeStatus, derivePlanStatuses } from "@/src/core";
 import { Hint } from "@/components/ui/hint";
@@ -834,6 +835,11 @@ export function PlanPopup({ messages, onClose }: { messages: readonly PopupMessa
 		el.addEventListener("wheel", onWheel, { passive: false });
 		return () => el.removeEventListener("wheel", onWheel);
 	}, [fitZoom, box, size]);
+	// PHONE (Phase 3): two-finger pinch zooms around the fingers.
+	usePinchZoom(viewportRef, (factor, focus) => {
+		setView((v) => zoomedGraphView(v, factor, fitZoom, focus, box, size));
+		userAdjustedRef.current = true;
+	});
 
 	// Smooth zoom: the transform eases between states (CSS retargets from the
 	// current computed value, so chained wheel ticks stay fluid). Panning is

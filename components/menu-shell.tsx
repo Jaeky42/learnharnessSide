@@ -2,6 +2,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
+import { isPhoneNow } from "@/components/phone/use-phone";
 
 /**
  * THE shared menu shell (menu standardization, fix wave chunk B): one
@@ -96,6 +97,18 @@ export function computeMenuPlacement(
 	const vertical: Record<string, number> =
 		side === "down" ? { top: rect.bottom + GAP } : { bottom: viewport.height - rect.top + GAP };
 	return { side, style: { ...horizontal, ...vertical }, maxHeight };
+}
+
+/** PHONE (cloud sync Phase 3): keep a menu fully on screen. A narrow screen
+ *  can't fit a menu beside its anchor (a session row's menu opened to the
+ *  row's left, off the edge), so it slides back inside the 8px margin. Used
+ *  only in the phone layout; the desktop placement is unchanged. */
+export function clampMenuToScreen(placement: MenuPlacement, menuWidth: number, viewportWidth: number): MenuPlacement {
+	const { left, right, ...rest } = placement.style as { left?: number; right?: number };
+	const width = Math.min(menuWidth, viewportWidth - 2 * EDGE);
+	const start = typeof left === "number" ? left : viewportWidth - (right ?? 0) - menuWidth;
+	const clamped = Math.min(Math.max(EDGE, start), viewportWidth - EDGE - width);
+	return { ...placement, style: { ...rest, left: clamped, maxWidth: viewportWidth - 2 * EDGE } };
 }
 
 /** The shared shell. Exactly one anchor seam: pass `anchorRef` (a live
@@ -205,7 +218,7 @@ export function MenuShell({
 				preferredSide,
 				align,
 			);
-			setPlaced(p);
+			setPlaced(isPhoneNow() ? clampMenuToScreen(p, menuRef.current.offsetWidth, window.innerWidth) : p);
 		};
 		place();
 		const rePlace = () => {

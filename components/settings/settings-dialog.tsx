@@ -53,6 +53,7 @@ import { KeyboardSection } from "./keyboard-section.tsx";
 import { ChatGPTUIProvider } from "./chatgpt-connection.tsx";
 import { NativeSubscriptionUIProvider } from "./subscription-connections.tsx";
 import { AccountSection, useServerAccount } from "./account-section.tsx";
+import { useIsPhone } from "@/components/phone/use-phone";
 
 /** Owner (2026-09-20): hints earn their place — mechanics-explaining
  *  prose is out; only the keyboard note stays (storage location is a
@@ -87,8 +88,12 @@ export function SettingsDialogProvider({
 	const [show, setShow] = useState(false);
 	const [landOn, setLandOn] = useState<SectionId>("keys");
 	const [landOnRow, setLandOnRow] = useState<string | null>(null);
+	// PHONE (Phase 3): a link to a specific section opens straight on it;
+	// plain "Settings" opens on the section list.
+	const [landOnExplicit, setLandOnExplicit] = useState(false);
 	const open = useCallback((section?: string, row?: string) => {
 		setLandOn(section ? section as SectionId : "keys");
+		setLandOnExplicit(!!section);
 		setLandOnRow(row ?? null);
 		setShow(true);
 	}, []);
@@ -97,7 +102,7 @@ export function SettingsDialogProvider({
 		<ChatGPTUIProvider><NativeSubscriptionUIProvider><DialogContext.Provider value={{ open }}>
 			{children}
 			{show && (
-				<SettingsDialog onClose={() => setShow(false)} initialSection={landOn} initialRow={landOnRow} />
+				<SettingsDialog onClose={() => setShow(false)} initialSection={landOn} initialRow={landOnRow} phoneOpensSection={landOnExplicit} />
 			)}
 		</DialogContext.Provider></NativeSubscriptionUIProvider></ChatGPTUIProvider>
 	);
@@ -111,11 +116,13 @@ function SettingsDialog({
 	onClose,
 	initialSection,
 	initialRow,
+	phoneOpensSection,
 }: {
 	onClose: () => void;
 	initialSection: SectionId;
 	/** The keys-section row to unfold (see DialogContext above). */
 	initialRow: string | null;
+	phoneOpensSection: boolean;
 }) {
 	const backdropDismiss = useBackdropDismiss(onClose);
 	// Plain dim backdrop (no blur — nothing decorative); a genuine
@@ -126,7 +133,7 @@ function SettingsDialog({
 			data-testid="settings-backdrop"
 			{...backdropDismiss}
 		>
-			<SettingsDialogBody onClose={onClose} initialSection={initialSection} initialRow={initialRow} />
+			<SettingsDialogBody onClose={onClose} initialSection={initialSection} initialRow={initialRow} phoneOpensSection={phoneOpensSection} />
 		</div>,
 		document.body,
 	);
@@ -138,12 +145,15 @@ export function SettingsDialogBody({
 	onClose,
 	initialSection = "keys",
 	initialRow = null,
+	phoneOpensSection = false,
 }: {
 	onClose: () => void;
 	initialSection?: SectionId;
 	/** The keys row to unfold on arrival (null = none). While-open
 	 *  retargets follow it exactly like initialSection below. */
 	initialRow?: string | null;
+	/** PHONE: open straight on initialSection instead of the section list. */
+	phoneOpensSection?: boolean;
 }) {
 	const { onAppearanceChange } = useAppearance();
 	const [record, setRecord] = useState<UserSettings | null | undefined>(
@@ -193,6 +203,14 @@ export function SettingsDialogBody({
 	useEffect(() => {
 		setActive(initialSection);
 	}, [initialSection]);
+	// PHONE (cloud sync Phase 3): full screen, the section list first, then
+	// the section with a back arrow. Keyboard shortcuts are hidden there.
+	const phone = useIsPhone();
+	const [phoneScreen, setPhoneScreen] = useState<"list" | "section">(phoneOpensSection ? "section" : "list");
+	useEffect(() => {
+		if (phoneOpensSection) setPhoneScreen("section");
+	}, [initialSection, phoneOpensSection]);
+	const activeLabel = SECTIONS.find((s) => s.id === active)?.label ?? "Settings";
 
 	// Fetch once per dialog mount. 200 {settings: null} is FIRST BOOT
 	// (no record = factory everything), not a failure — the error state is
@@ -273,12 +291,28 @@ export function SettingsDialogBody({
 			aria-modal="true"
 			aria-label="Settings"
 			data-testid="settings-dialog"
+			data-phone="settings"
+			data-phone-screen={phone ? phoneScreen : undefined}
 			className="settings-dialog-pop flex h-[620px] max-h-[85vh] w-[920px] max-w-[90vw] flex-col overflow-hidden rounded-md border border-border bg-card shadow-xl"
 			onClick={(e) => e.stopPropagation()}
 		>
 			{/* Header — the app's quiet CMU title language. */}
 			<header className="flex h-15 shrink-0 items-center gap-3 border-b border-border px-5">
-				<h2 className="font-title text-2xl tracking-tight">Settings</h2>
+				{phone && phoneScreen === "section" && (
+					<button
+						type="button"
+						data-phone="settings-back"
+						aria-label="Back to all settings"
+						onClick={() => setPhoneScreen("list")}
+						className="-ml-2 flex items-center gap-1 rounded-md py-2 pr-2 font-title text-2xl tracking-tight"
+					>
+						<svg viewBox="0 0 16 16" className="size-5" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+							<path d="M10 3L5 8l5 5" />
+						</svg>
+						{activeLabel}
+					</button>
+				)}
+				<h2 data-phone="settings-title" className="font-title text-2xl tracking-tight">Settings</h2>
 				<Hint
 						// Esc closes the dialog (its own listener) — surface it.
 						label="Close"
@@ -313,7 +347,7 @@ export function SettingsDialogBody({
 					data-testid="settings-nav"
 					className="flex w-44 shrink-0 flex-col gap-1 border-r border-border p-2"
 				>
-					{SECTIONS.filter((s) => s.id !== "account" || account.devices).map((s) => (
+					{SECTIONS.filter((s) => (s.id !== "account" || account.devices) && !(phone && s.id === "keyboard")).map((s) => (
 						<button
 							key={s.id}
 							type="button"
@@ -324,7 +358,10 @@ export function SettingsDialogBody({
 									? "bg-accent text-foreground"
 									: "text-muted-foreground hover:bg-accent hover:text-foreground"
 							}`}
-							onClick={() => setActive(s.id)}
+							onClick={() => {
+								setActive(s.id);
+								setPhoneScreen("section");
+							}}
 						>
 							{s.label}
 						</button>

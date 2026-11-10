@@ -124,3 +124,20 @@ describe("phone rules", () => {
 		assert.equal(stillHolding({ x: 100, y: 100 }, { x: 100, y: 100 + HOLD_SLOP + 1 }), false);
 	});
 });
+
+describe("menus stay on a phone screen", async () => {
+	const { clampMenuToScreen } = await import("../components/menu-shell.tsx");
+	it("slides a menu that would open off the left edge back inside the margin", () => {
+		const p = clampMenuToScreen({ side: "down", style: { right: 390 - 167, top: 100 }, maxHeight: 300 }, 208, 390);
+		assert.deepEqual(p.style, { top: 100, left: 8, maxWidth: 374 });
+	});
+	it("leaves a menu that already fits where it was", () => {
+		const p = clampMenuToScreen({ side: "up", style: { left: 40, bottom: 80 }, maxHeight: 300 }, 208, 390);
+		assert.equal(p.style.left, 40);
+	});
+	it("keeps a menu wider than the screen inside both margins", () => {
+		const p = clampMenuToScreen({ side: "up", style: { left: 0, bottom: 80 }, maxHeight: 300 }, 352, 360);
+		assert.equal(p.style.left, 8);
+		assert.equal(p.style.maxWidth, 344);
+	});
+});
