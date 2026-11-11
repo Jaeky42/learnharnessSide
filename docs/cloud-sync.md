@@ -217,7 +217,8 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 - **Wiring:** `sidebar.tsx` (drawer state, backdrop, press-and-hold on rows), `top-bar.tsx`, `chat.tsx` (dock hook, practice hint, dock drag), `side-tutor.tsx`, `notes/notes-drawer.tsx`, `notes/notes-tree.tsx`, `settings/settings-dialog.tsx` (a link to a section opens on it; plain Settings opens on the list), `graph-view.tsx` (search icon), `stats-bar.tsx`, `menu-shell.tsx`, `session-overlay.tsx` and `plan-block.tsx` (pinch), and the Enter handlers in `composer.tsx`, `question-dock.tsx`, `practice-dock.tsx`, `reading-thinking.tsx`.
 - **Tests:** `tests/phone-layout.test.ts` checks that every rule in `phone.css` is phone-only and browser-only, and covers the Enter rule, the bubble position, the hold slop and menu clamping. `tests/server-auth.test.ts` pins the open manifest and icon paths.
 - **Desktop check:** desktop screenshots (1280 and 700 wide) and a dump of every element's position and size, compared before and after. Nothing moved; the only pixel differences are the see-through footer pills, whose blur picks up whatever transcript text sits behind them.
-- **Real-phone check (owner, iPhone, iOS 27):** most of it worked. Fixed after it: the keyboard pushing the app up, the session list's strips, Settings' Account row popping in, and the missing dictation waveform; Settings became the centred panel. Those fixes were checked in a phone-sized Chromium only (the keyboard state recreated from the owner's screenshot) and need another look on the phone.
+- **Real-phone checks (owner, iPhone, iOS 27), two rounds.** Round 1: most of it worked; fixed after it were the keyboard pushing the app up, the session list's strips, Settings' Account row popping in and the missing dictation waveform, and Settings became the centred panel. Round 2 confirmed on the phone: Settings (centred panel, fades), the dictation waveform, the keyboard opening and closing, the session list's full-height colours (Safari tab and home-screen app), 120 fps scrolling, dragging on and out of an opened question (no jumping, no pull-back), tapping the folded question while the lesson moves, the home-screen app filling the screen to the bottom, and the model picker in a Safari tab. Every fix above was found on the owner's iPhone and is described in its own bullet.
+- **Testing these without an iPhone:** Playwright `devices["iPhone 13"]` (iOS Safari user agent, so the Safari-tab bleed turns on); real touch through CDP `Input.dispatchTouchEvent`; the keyboard by replacing `window.visualViewport` with a fake whose `height` you set and fire `resize` on (an init script); the home-screen app by overriding `navigator.standalone` (Chromium has no clock strip, so `env(safe-area-inset-top)` is 0 there and `standaloneGap` stays 0). Chromium never shows iOS's rubber band, its top blur, its swallowed taps or its keyboard pan, so anything touching those needs the owner's phone; a temporary on-screen readout (`?scrolldebug=1`, since removed) was the way to see what the phone did.
 
 **Not in this phase:** a tablet layout, the side tutor in practice sessions, offline use, and renaming notes in the drawer.
 
@@ -263,7 +264,7 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
    - ✅ `ob sync-config` has `--excluded-folders` (comma-separated, empty to clear). It also has `--configs` (which `.obsidian` setting categories sync; may close the `.obsidian` gap), `--conflict-strategy merge|conflict` (an owner decision for Phase 4), `--file-types` and `--device-name`.
 1. ✅ **Server mode.** Dockerfile, the `LH_DATA_DIR` volume, the password login gate in `proxy.ts`, Caddy (HTTPS), the server image workflow, and automatic server updates. Running on the permanent VPS: HTTPS via Caddy, setup and password, locked from outside, and the nightly timer installed.
 2. ✅ **Sign-in on the server.** The ChatGPT paste box, plus the Claude sign-in button and Disconnect. Verified on the VPS: Claude Code installed itself onto the volume, and both ChatGPT and Claude connected from Settings.
-3. ✅ **Phone layouts.** Every view, the side tutor bubble and sheet, the full-screen notes drawer, Settings, press and hold, and the home-screen app. First real-phone check done; its fixes wait on a second look (see "Phone layouts — built in Phase 3").
+3. ✅ **Phone layouts.** Every view, the side tutor bubble and sheet, the full-screen notes drawer, Settings, press and hold, and the home-screen app. Two real-phone rounds done; a final short pass is left (see the Handoff).
 4. **Vault on the server.** The `ob sync` process, setup, and the automatic excluded-folders list.
 5. **Sync engine.** The lease API, session sync with take-over and desktop copies, graph line and operation sync, per-key settings merges, and the sync protocol version check.
    - Built as wrapper stores at the composition root (`src/server/stores.ts`) over the `core/ports.ts` interfaces, so upstream store code stays untouched and rebasing onto upstream stays cheap.
@@ -277,14 +278,23 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 - **Branch:** `claude/pensive-goldberg-7dty2m`. All cloud sync work lives here.
   - Pushes build only the server image (`:dev`), never a desktop release.
   - **Never push to `side-tutor`** until the owner approves merging the whole feature.
-- **Phase 3 (phone layouts) is built and pushed.** The owner checked it on an iPhone (iOS 27); its second round on the phone confirmed the keyboard (opening and closing), the session list's full-height colours in a Safari tab (bleed experiment), 120 fps scrolling (a Safari setting) and dragging on an opened question, including the pull-back fixes. Not yet re-checked: Settings, the dictation waveform, and the home-screen app.
+- **Phase 3 (phone layouts) is built and pushed, with two real-phone rounds done** (see "Real-phone checks" above). What's left before Phase 4:
+  1. **Confirm the last fixes on the phone** (pushed last, not yet seen by the owner):
+     - the home-screen app's top inset tuned from +40 to +26 points (`--lh-safe-top`): the top bar should sit higher and stay sharp. If its top edge looks soft, go back up a few points;
+     - the model list staying above the keyboard in the home-screen app (`phoneTopPlacement`, and `standaloneGap` off while the keyboard is up);
+     - Fable listed as `claude-code · fable`, at the bottom with the other Claude models, and answering a message (it depends on the owner's Claude plan).
+  2. **A final short pass on parts not re-checked in round 2:** the notes drawer (list, then note, "‹ Notes"), the side tutor sheet, press and hold on sessions and notes, pinch zoom in the plan and diagrams, and the home graph's search icon.
+  3. **Then close Phase 3:** mark it done here, and refresh the owner's phone-guide checklist (an Artifact page the owner has).
+- **Open by design:** the Safari-tab bleed stays marked as an experiment (it works on the owner's phone); a tablet layout is not built.
+- **Also on this branch (not phone work):** Claude Fable in the Claude Code model list and the Claude-models-last menu order (see `docs/side-tutor.md`, "Claude Code: Fable in the model list"). It reaches the desktop app only with the merge.
+- **Known CI flake:** `tests/notes-import-route.test.ts` (first test, "out-of-order completion remains supported") depends on timer order and fails now and then on GitHub's runners. It isn't related to this work: re-run the failed job. A separate task to make it deterministic was offered to the owner.
 - **Phases 0–2 are done and verified on the owner's VPS:**
   - HTTPS and the password login work;
   - the nightly update timer is installed;
   - Claude Code installed itself onto the volume;
   - ChatGPT and Claude are both connected from Settings.
 - **The cloud copy and the desktop app are separate libraries** until Phase 5.
-- **The owner's server follows `LH_CHANNEL=dev`.** To update it right away instead of waiting for the nightly run: `cd ~/learnharnessSide && git pull && cd deploy && ./update.sh`. The `git pull` is needed only when files in `deploy/` changed.
+- **The owner's server follows `LH_CHANNEL=dev`.** To update it right away instead of waiting for the nightly run: `cd ~/learnharnessSide && git pull && cd deploy && ./update.sh`. The `git pull` is needed only when files in `deploy/` changed. After an update, a home-screen app has to be swiped away and reopened to load it.
 
 ### How the owner works
 
@@ -302,7 +312,7 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 
 ### Next: Phase 4, the vault on the server
 
-- Start once the owner has tried Phase 3 on a real phone and any fixes are in.
+- Start once the Phase 3 items in "State" are confirmed on the owner's phone.
 - The open questions for Phase 4 are listed below. Ask them one at a time, with pictures.
 - **Sample data for UI screenshots:** copy `tests/fixtures/golden-data` to a scratch `LH_DATA_DIR`. Truncating a copy of the teaching chat right after a `quiz` tool call gives a session with an open question. Phone screenshots: Playwright `devices["iPhone 13"]`; real touch (press and hold, pinch) through CDP `Input.dispatchTouchEvent`.
 
@@ -341,4 +351,6 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
   - Docker works after starting `dockerd`. Builds need the sandbox CA and proxy passed in from outside: a local Dockerfile copy adding `COPY --from=ca ca-bundle.crt` and `NODE_EXTRA_CA_CERTS`, `--build-context ca=/root/.ccr`, `--network host`, plus the proxy build args. Never change the real Dockerfile for this.
   - Docker Hub may answer 429 (rate limit), and `apt` can't run (the proxy is HTTPS-only), so test entrypoint changes on top of an image that's already built.
 - **On Node 22**, `tests/subscription-auth.test.ts` has one known failure. CI uses Node 26.
+- **The local dev server** (`next dev` on port 3100) doesn't survive between turns in a cloud session; start it with `setsid nohup … &` and check it answers before each browser run.
+- **The owner's phone screenshots are the ground truth for iPhone behaviour.** Measure them (PIL: pixel rows and columns; a full iPhone screenshot is 3 px per point, a cropped or resized one scales from the status-bar icons) before deciding what iOS does; several early guesses about Safari's bars were wrong until measured.
 - **Desktop must not change:** server-only UI keys off `isServerMode()` (the `lh_server` cookie) with no extra requests. `tests/claude-code-status-ui.test.tsx` pins the desktop's exact request list.
