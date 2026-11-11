@@ -794,7 +794,7 @@ The sync protocol version stays at 1: nothing has been paired anywhere yet.
 - **What is off** (`syncTroubleDueIn` and `syncTrouble` in `src/core/sync/screens.ts`, `useSyncTrouble()` in `cloud-state.tsx`): `offline`, `paused` or `needs-pairing`; nothing for `ok`, `starting`, `unpaired` and `off`, and nothing on the server's site. Paused and removed show at once. Offline shows 30 seconds after the first failed attempt (`OFFLINE_QUIET_MS`), or at once when the app hasn't reached the server since it started. The hook sets one timer for the moment the 30 seconds are up.
 - **The sync chip** (`components/cloud/sync-chip.tsx`, mounted in `components/sidebar.tsx` between Background agents and Settings): an outline ring (lucide's `CircleIcon`, the Settings gear's weight) and the word, both `text-amber-500`, in the Settings row's own type. A click opens Settings → Cloud. It goes the moment a round reaches the server again.
 - **The offline heads-up** is one more state of the strip (`session-strip.tsx`, `data-strip="sync-offline"`, `sync-paused` or `sync-needs-pairing`): the approved sentence and no button, in a session this PC can continue. The message box stays. A held session keeps its own strip.
-- **The side tutor's window keeps below a strip** (found in the browser run; added without being asked, for the owner to review). The tutor starts open at the lesson's top right, 12 px under the top bar, which is where a strip opens, so it covered the end of the heads-up. While a strip is open the window is shown 12 px under it and glides there with the strip (200 ms); when the strip goes it is back at its own place. Its remembered place changes only if it is dragged meanwhile. A window too tall to move down stays. `clearBelow` on `SideTutor`, `onBottom` on `SessionStrip`.
+- **The side tutor's window may cover the strip** (owner's decision). The tutor starts open at the lesson's top right, 12 px under the top bar, which is where a strip opens, so at its default place it covers the end of the heads-up. A version that moved the window below an open strip was built and removed at the owner's word: "it's fine for the tutor window to be able to cover the strip".
 - **The discard box** (`components/cloud/discard-notice.tsx`, mounted once in the root layout): reads `notices`, so it shows on any screen as soon as a round discards something, or at the next app start. **Only OK closes it**: Esc and a click outside do nothing, so it can't be lost by accident. OK sends `dismiss-notice` for every notice shown; they stay away at once and don't come back.
 - **A lesson opened in the same moment as the app's first round** (found in the browser run): the page is rendered from the session as it was, the round then replaces it, and the page isn't listening yet when that is announced. The live channel also has no first frame, so its "open" can come late. Where sync is in use, `components/chat.tsx` reads the record once more a second after a lesson opens (`SYNC_CATCH_UP_MS`) and after every reconnect of the channel, unless a reply is being written. An app that isn't paired asks nothing more than before.
 - **Wording added while building, beyond the plan page, for the owner to review:**
@@ -803,12 +803,12 @@ The sync protocol version stays at 1: nothing has been paired anywhere yet.
 - **Read while building:**
   - The discard sentence says "while this PC was offline" also when the discard comes from pairing again after an Unpair (both sides had continued the session). The owner hasn't been asked for a second wording.
   - The chip's words are stored as "Offline", "Sync paused" and "Not paired" and shown in capitals by the row's style.
-- **Tests:** `tests/cloud-notices-ui.test.tsx` (the words, the quiet rule with a moved clock, the chip in every state and where it never shows, the heads-up, the discard box), the window under a strip in `tests/side-tutor-ui.test.tsx`, and `offlineSince` and the signal in `tests/sync-pairing.test.ts`.
+- **Tests:** `tests/cloud-notices-ui.test.tsx` (the words, the quiet rule with a moved clock, the chip in every state and where it never shows, the heads-up, the discard box), and `offlineSince` and the signal in `tests/sync-pairing.test.ts`.
 - **Run between two built copies** with the loop on:
   - never paired: no chip, no strip, no marker;
   - the server stopped while a lesson was open: nothing for the first 30 seconds, then the chip and the heads-up (30 to 40 s after the stop, depending on where in its 10-second rhythm the PC was); the same strip in a practice session; the chip alone on the home screen; a click opening Settings → Cloud on "Can't reach the server. Trying again.";
   - the app started with the server away: the chip at once;
-  - the server back: the chip and the strip gone 7 s later, and the tutor's window back at its place;
+  - the server back: the chip and the strip gone 7 s later;
   - the PC stopped, three messages added to its copy, the session taken over on the server, the PC started: the box with "3 messages …", still there after Esc and a click outside, gone for good after OK;
   - two sessions at once: one box, one line each;
   - Remove on the server's site: NOT PAIRED within 10 s;
@@ -837,7 +837,7 @@ One run between two built copies with the loop on, through the real screens, nob
 ### Later phases: decisions still open (ask when you get there)
 
 - **Phase 5 (sync engine):** answered and built. The owner confirmed the wording listed under slices 1 and 2 with the Phase 6 plan page, and settled the two readings of "the desktop's value is kept" (decisions 15 and 16 above).
-- **Phase 6 (sync screens):** answered and built; see "Phase 6, the sync screens". For the owner to review: the wording and the two behaviours listed as added while building, under slices 1 to 3.
+- **Phase 6 (sync screens):** answered and built; see "Phase 6, the sync screens". For the owner to review: the wording listed as added while building, under slices 1 to 3, and the lesson's one extra read of its session (slice 3).
 - **Phase 7 and the merge:** not started. The merge into `side-tutor` needs the owner's approval and a guide for pairing the real PC with the real server.
 
 ### Development notes for this work

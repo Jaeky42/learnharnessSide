@@ -298,8 +298,6 @@ export function Chat({
 	// Cloud sync (Phase 6): another device holds this session, so it is
 	// read-only here until it is taken over. Always false where sync isn't in use.
 	const heldElsewhere = useSessionHolder(chatId) !== null;
-	/** Where the strip under the top bar ends (0 = none); the tutor's window keeps below it. */
-	const [stripBottom, setStripBottom] = useState(0);
 	const [titleDraft, setTitleDraft] = useState("");
 	const titleInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -1338,7 +1336,7 @@ export function Chat({
 		<div className="flex h-dvh">
 			{/* The side-tutor window (fixed overlay): quick questions answered by a
 			    second agent that reads the lesson but never writes into it. */}
-			{kind !== "practice" && <SideTutor chatId={chatId} dictation={dictation} held={heldElsewhere} clearBelow={stripBottom} />}
+			{kind !== "practice" && <SideTutor chatId={chatId} dictation={dictation} held={heldElsewhere} />}
 			<div className="flex min-w-0 flex-1 flex-col">
 				{/* The top bar is its own block (owner, top-fade round 4): in flow
 				    above the scroller on the plain page background — no gradient. Its
@@ -1479,7 +1477,7 @@ export function Chat({
 				</TopBar>
 				{/* Cloud sync (Phase 6): "Held by …" and Take over, when another
 				    device holds this session. Nothing where sync isn't in use. */}
-				<SessionStrip chatId={chatId} title={titleText} onBottom={setStripBottom} />
+				<SessionStrip chatId={chatId} title={titleText} />
 
 				<SessionFind scopeRef={sessionFindScopeRef} scrollContextRef={scrollContextRef} />
 				<div ref={sessionFindScopeRef} className="relative flex min-h-0 flex-1">

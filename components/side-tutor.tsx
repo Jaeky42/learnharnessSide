@@ -79,8 +79,6 @@ const SIZE_KEY = "lh:side-tutor:size";
 const DEFAULT_WIDTH = 352;
 const DEFAULT_TOP = 72;
 const DEFAULT_RIGHT_GAP = 16;
-/** Under a strip the window keeps the gap it has under the top bar at its default place. */
-const STRIP_GAP = 12;
 const EDGE = TUTOR_EDGE;
 
 /** The window's size until it is resized (the phone's sheet is sized by app/phone.css). */
@@ -148,17 +146,13 @@ function clampPos(pos: Pos, width: number, height = 64): Pos {
 	};
 }
 
-export function SideTutor({ chatId, dictation, held = false, clearBelow = 0 }: {
+export function SideTutor({ chatId, dictation, held = false }: {
 	chatId: string;
 	/** The page's dictation run, for the tutor's Dictate button. */
 	dictation?: Dictation;
 	/** Cloud sync (Phase 6): another device holds this session. The tutor can't
 	 *  be asked until it is taken over: its window closes to a greyed bubble. */
 	held?: boolean;
-	/** Cloud sync (Phase 6): where a strip open under the top bar ends, in px
-	 *  from the top (0 = no strip). On a computer the window keeps below it for
-	 *  as long as the strip is there, and is back at its own place after. */
-	clearBelow?: number;
 }) {
 	const [mounted, setMounted] = useState(false);
 	const [openWanted, setOpen] = useState(true);
@@ -346,29 +340,12 @@ export function SideTutor({ chatId, dictation, held = false, clearBelow = 0 }: {
 		}
 	};
 
-	// ── keeping clear of the strip under the top bar (cloud sync) ─────────
-	// The window is shown below the strip while there is one; its own place
-	// (pos, and what is remembered) doesn't change unless it is dragged then.
-	// A window too tall to move down stays where it is.
-	const shownTop = phone || clearBelow <= 0 ? pos.top
-		: Math.max(pos.top, Math.min(clearBelow + STRIP_GAP, Math.max(pos.top, window.innerHeight - EDGE - (panelRef.current?.offsetHeight ?? 0))));
-	// It glides there with the strip (200 ms, the strip's own easing), and
-	// only then: a transition on `top` would make dragging lag.
-	const [gliding, setGliding] = useState(false);
-	const glidedRef = useRef(false);
-	useEffect(() => {
-		if (!glidedRef.current) { glidedRef.current = true; return; }
-		setGliding(true);
-		const timer = setTimeout(() => setGliding(false), 260);
-		return () => clearTimeout(timer);
-	}, [clearBelow]);
-
 	// ── dragging by the header ────────────────────────────────────────────
 	const onDragStart = (e: React.PointerEvent) => {
 		if (phone || (e.target as HTMLElement).closest("button")) return;
 		e.preventDefault();
 		(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-		dragRef.current = { x: e.clientX, y: e.clientY, start: { left: pos.left, top: shownTop } };
+		dragRef.current = { x: e.clientX, y: e.clientY, start: pos };
 	};
 	const onDragMove = (e: React.PointerEvent) => {
 		const d = dragRef.current;
@@ -394,7 +371,7 @@ export function SideTutor({ chatId, dictation, held = false, clearBelow = 0 }: {
 		e.preventDefault(); // no text selection, and the typing box keeps its focus
 		(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
 		// From the size it really has: a remembered size can be held smaller by a small app window.
-		resizeRef.current = { edge, x: e.clientX, y: e.clientY, start: { left: pos.left, top: shownTop, width: el.offsetWidth, height: el.offsetHeight } };
+		resizeRef.current = { edge, x: e.clientX, y: e.clientY, start: { left: pos.left, top: pos.top, width: el.offsetWidth, height: el.offsetHeight } };
 	};
 	const onResizeMove = (e: React.PointerEvent) => {
 		const r = resizeRef.current;
@@ -501,8 +478,8 @@ export function SideTutor({ chatId, dictation, held = false, clearBelow = 0 }: {
 		    (the sheet is placed by app/phone.css). */}
 		<div
 			data-testid="side-tutor-frame"
-			style={(phone ? {} : { left: pos.left, top: shownTop, ...(size ? { width: size.width, height: size.height } : {}), ...(gliding ? { transition: "top 200ms cubic-bezier(0.2, 0.8, 0.2, 1)" } : {}), WebkitAppRegion: "no-drag" }) as React.CSSProperties}
-			className={phone ? "contents" : cn("fixed z-30 motion-reduce:!transition-none", WINDOW_SIZE, FRAME_MAX_HEIGHT)}
+			style={(phone ? {} : { left: pos.left, top: pos.top, ...(size ? { width: size.width, height: size.height } : {}), WebkitAppRegion: "no-drag" }) as React.CSSProperties}
+			className={phone ? "contents" : cn("fixed z-30", WINDOW_SIZE, FRAME_MAX_HEIGHT)}
 		>
 		<div
 			ref={panelRef}

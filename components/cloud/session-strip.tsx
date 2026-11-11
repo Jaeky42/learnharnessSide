@@ -63,13 +63,7 @@ async function ask(chatId: string, force: boolean): Promise<Record<string, unkno
 	}
 }
 
-export function SessionStrip({ chatId, title, onBottom }: {
-	chatId: string;
-	title: string;
-	/** Where the open strip ends, in px from the top of the window; 0 while it is closed.
-	 *  The side tutor's window keeps below it, so it never covers the strip's words. */
-	onBottom?: (px: number) => void;
-}) {
+export function SessionStrip({ chatId, title }: { chatId: string; title: string }) {
 	const cloud = useCloud();
 	const holder = cloud.held[chatId] ?? null;
 	const trouble = useSyncTrouble();
@@ -168,34 +162,16 @@ export function SessionStrip({ chatId, title, onBottom }: {
 	const has = shown !== null;
 	useEffect(() => { setOpen(has); }, [has]);
 	const view = shown ?? lastRef.current;
-
-	const stripRef = useRef<HTMLDivElement>(null);
-	const wordsRef = useRef<HTMLDivElement>(null);
-	const onBottomRef = useRef(onBottom);
-	onBottomRef.current = onBottom;
-	const key = shown?.key;
-	useEffect(() => {
-		const report = () => {
-			const strip = stripRef.current, words = wordsRef.current;
-			// Its full height, not the height it has part-way through sliding open.
-			onBottomRef.current?.(has && strip && words && typeof strip.getBoundingClientRect === "function" ? Math.round(strip.getBoundingClientRect().top + words.offsetHeight) : 0);
-		};
-		report();
-		if (!has) return;
-		window.addEventListener("resize", report);
-		return () => window.removeEventListener("resize", report);
-	}, [has, key]);
-
 	if (cloud.role === null && !view) return null;
 
 	const warning = phase.kind === "warning" && holder ? takeOverWarning(title, phase.holder, since(phase.holder)) : null;
 
 	return (
 		<>
-			<div ref={stripRef} className="lh-strip" data-open={open && has ? "" : undefined} data-testid="session-strip" data-strip={has ? view?.key : undefined} inert={!(open && has)}>
+			<div className="lh-strip" data-open={open && has ? "" : undefined} data-testid="session-strip" data-strip={has ? view?.key : undefined} inert={!(open && has)}>
 				<div>
 					{view && (
-						<div ref={wordsRef} role="status" className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-border bg-card px-3 py-2 font-ui text-sm text-foreground">
+						<div role="status" className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-border bg-card px-3 py-2 font-ui text-sm text-foreground">
 							<p key={view.key} className="lh-strip-words min-w-0 flex-1 basis-56">
 								{view.busy && <span aria-hidden className="mr-2 inline-block size-2.5 animate-spin rounded-full border-[1.5px] border-muted-foreground border-t-transparent align-[-1px]" />}
 								<span data-testid="session-strip-text">{view.text}</span>
