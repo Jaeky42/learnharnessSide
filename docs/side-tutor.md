@@ -107,6 +107,12 @@ The learner's own notes beside the lesson, stored as Markdown in their Obsidian 
 - **Wiring:** `components/chat.tsx` (Notes chip and drawer mount), `src/core/keyboard.ts` (`toggle-notes`, `focus-notes`), and `src/server/chats.ts` (session deletion hook).
 - **Tests:** `tests/notes-core.test.ts`, `notes-store.test.ts`, `notes-privacy.test.ts`, `notes-ui.test.tsx`.
 
+## Claude Code: Fable in the model list
+
+- The Claude Code (CLI billing) list is upstream's three aliases (`opus`, `sonnet`, `haiku`, which the CLI resolves to the newest of each) plus a fork entry, **Claude Fable**, passed to `claude --model` by its full id `claude-fable-5-2` (owner's ask). It shows on the desktop and the server alike.
+- Whether a Claude plan can use Fable through Claude Code is up to Anthropic; if not, the CLI's error shows in the lesson.
+- Code: `src/agent/claude-code/provider.ts` (`CLAUDE_CODE_MODELS`). Tests that pin the list: `tests/claude-code-provider.test.ts`, `model-catalog.test.ts`, `claude-code-usage.test.tsx`, `claude-code-opt-in.test.ts`.
+
 ## Development notes
 
 - CI uses Node 26 with npm 11. Use npm 11 for lockfile changes (`npx npm@11 install …`); npm 10 rewrites the lockfile's `libc` fields.

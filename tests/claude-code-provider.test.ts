@@ -18,15 +18,15 @@ function createCollection() {
 	return collection;
 }
 
-test("lists exactly the opus, sonnet and haiku aliases", () => {
+test("lists exactly the opus, sonnet and haiku aliases, plus Fable by its model id (fork)", () => {
 	const models = createCollection().getModels(CLAUDE_CODE_PROVIDER);
 	assert.deepEqual(
 		models.map((m) => m.id),
-		["opus", "sonnet", "haiku"],
+		["opus", "sonnet", "haiku", "claude-fable-5-2"],
 	);
 	assert.deepEqual(
 		models.map((m) => m.name),
-		["Claude Opus", "Claude Sonnet", "Claude Haiku"],
+		["Claude Opus", "Claude Sonnet", "Claude Haiku", "Claude Fable"],
 	);
 });
 
@@ -53,5 +53,5 @@ test("every cost field is zero", () => {
 test("auth resolves as configured without any key", async () => {
 	const collection = createCollection();
 	assert.ok(await collection.checkAuth(CLAUDE_CODE_PROVIDER));
-	assert.equal((await collection.getAvailable(CLAUDE_CODE_PROVIDER)).length, 3);
+	assert.equal((await collection.getAvailable(CLAUDE_CODE_PROVIDER)).length, 4); // opus, sonnet, haiku + the fork's Fable
 });
