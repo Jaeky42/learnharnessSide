@@ -55,6 +55,12 @@ jobs:
         run: npx tsx --test tests/side-tutor.test.ts tests/side-tutor-install.test.ts tests/notes-core.test.ts tests/notes-store.test.ts tests/notes-privacy.test.ts
         env:
           NODE_ENV: test
+      - name: Cloud sync tests on Windows
+        # The sync engine and its screens run inside the desktop app. A test
+        # that fails here stops the run before anything is published.
+        run: npx tsx --test tests/sync-*.test.ts tests/cloud-*.test.tsx
+        env:
+          NODE_ENV: test
       - name: Native renderer tests on Windows
         run: npx electron --import tsx --test tests/pdf-native-render.test.ts tests/pdf-ops.test.ts tests/svg-native-render.test.ts tests/browser-service.test.ts
         env:

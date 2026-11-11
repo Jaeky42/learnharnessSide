@@ -18,10 +18,11 @@ Branch `side-tutor`, based on upstream amosblomqvist/learnharness @ da08cb5 (v0.
 - `publish` **must stay a single object**. The `extends` merge concatenates arrays (builder-util-runtime `deepAssign`), so a list would keep the official feed first.
 - `.github/workflows/side-tutor-windows.yml` runs on every push to `side-tutor`, in this order:
   1. Stamps version `<major>.<minor>.<run number>` into the runner's package.json (never committed). electron-builder 26 has no `--em` flag.
-  2. Runs the side-tutor and notes tests on Windows, builds, and smoke-tests the server and the packaged app.
+  2. Runs the side-tutor, notes and cloud sync tests on Windows, builds, and smoke-tests the server and the packaged app.
   3. Checks that the packaged `app-update.yml` points at this fork and that the package name and version are right.
   4. Only then publishes a GitHub Release (`gh release create`, with the installer, blockmap and latest.yml).
 - Pushes that only change `CLAUDE.md` or `docs/**` don't run the workflow.
+- **A dry run:** started by hand (`workflow_dispatch`) on any branch, the workflow does everything except the last step. It tests, builds and attaches the installer to the run, and publishes no release. Used to check the cloud sync branch on Windows before its merge.
 - `LH_BUILD_VERSION` / `LH_BUILD_HOMEPAGE` (next.config.ts) make Settings show the stamped version and link release notes to this fork.
 - To pick up upstream: rebase `side-tutor` onto the new upstream release and push.
 
