@@ -78,7 +78,22 @@ import { useServerMode } from "@/components/settings/server-mode";
 const TREE_POLL_MS = 4000;
 const NOTE_POLL_MS = 2500;
 const SAVE_DEBOUNCE_MS = 900;
-const TOAST_MS = 20_000;
+/**
+ * How long the message line stays before it goes by itself (it can always be
+ * closed with its ✕). The owner's choices; every message used to stay 20
+ * seconds, which was "way too long".
+ *
+ * - A message with Undo (a split, a merge, a selection moved to a new note)
+ *   stays 20 seconds: its button is the only way to undo.
+ * - Every other message goes after 5 seconds: "Moved …", "Deleted …", and
+ *   the ones that say why something didn't happen.
+ */
+const TOAST_UNDO_MS = 20_000;
+const TOAST_MS = 5_000;
+export type NotesMessage = { text: string; opId?: string; reopen?: string };
+export function notesMessageMs(message: NotesMessage): number {
+	return message.opId ? TOAST_UNDO_MS : TOAST_MS;
+}
 const MIN_WIDTH = 300;
 const MAX_WIDTH = 720;
 
@@ -155,7 +170,7 @@ export function NotesDrawer({ chatId, onClose }: { chatId: string; onClose: () =
 	const [saveError, setSaveError] = useState<string | null>(null);
 	const [conflict, setConflict] = useState<{ body: string; hash: string } | null>(null);
 	const [dialog, setDialog] = useState<Dialog | null>(null);
-	const [toast, setToast] = useState<{ text: string; opId?: string; reopen?: string } | null>(null);
+	const [toast, setToast] = useState<NotesMessage | null>(null);
 	const [dismissed, setDismissed] = useState<string[]>(() => load("lh:notes-split-dismissed", []));
 	const [selection, setSelection] = useState({ start: 0, end: 0 });
 	const [newBox, setNewBox] = useState<{ title: string; folder: string | null; error: string | null } | null>(null);
@@ -390,7 +405,7 @@ export function NotesDrawer({ chatId, onClose }: { chatId: string; onClose: () =
 	const showToast = (text: string, opId?: string, reopen?: string) => setToast({ text, opId, reopen });
 	useEffect(() => {
 		if (!toast) return;
-		const id = setTimeout(() => setToast(null), TOAST_MS);
+		const id = setTimeout(() => setToast(null), notesMessageMs(toast));
 		return () => clearTimeout(id);
 	}, [toast]);
 
@@ -618,7 +633,7 @@ export function NotesDrawer({ chatId, onClose }: { chatId: string; onClose: () =
 
 	// ─── The message line ───────────────────────────────────────────────────
 	const toastBar = toast && (
-		<div role="status" data-testid="notes-toast" className="mx-3 mb-2 flex shrink-0 items-center gap-2 rounded-lg border border-border bg-card px-3 py-1.5 text-xs">
+		<div role="status" data-testid="notes-toast" data-stays-ms={notesMessageMs(toast)} className="mx-3 mb-2 flex shrink-0 items-center gap-2 rounded-lg border border-border bg-card px-3 py-1.5 text-xs">
 			<span className="flex-1 text-muted-foreground">{toast.text}</span>
 			{toast.opId && (
 				<button type="button" className="text-foreground underline" onClick={() => void undo()}>

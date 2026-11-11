@@ -283,6 +283,20 @@ describe("drawer", () => {
 		// One message line, in the note half, as before.
 		assert.equal(host.querySelectorAll("[data-testid='notes-toast']").length, 1);
 		assert.ok(host.querySelector("[data-phone='notes-note'] [data-testid='notes-toast']"));
+		// It goes by itself after 5 seconds (owner's ask): the list already shows what happened.
+		assert.equal(host.querySelector("[data-testid='notes-toast']")?.getAttribute("data-stays-ms"), "5000");
+	});
+
+	it("the message line goes after 5 seconds, or after 20 when it has an Undo button", async () => {
+		const { notesMessageMs } = await import("../components/notes/notes-drawer.tsx");
+		assert.equal(notesMessageMs({ text: "Moved “Current” to Physics/." }), 5_000);
+		assert.equal(notesMessageMs({ text: "Deleted “Current”." }), 5_000);
+		// One that says why something didn't happen goes as quickly (owner's choice).
+		assert.equal(notesMessageMs({ text: "A note named “Current” is already in that folder." }), 5_000);
+		// With Undo: its button is the only way to undo.
+		assert.equal(notesMessageMs({ text: "Split into 2 new notes.", opId: "op_1", reopen: "A.md" }), 20_000);
+		assert.equal(notesMessageMs({ text: "Merged “Charge” into “Electricity”.", opId: "op_2", reopen: "Charge.md" }), 20_000);
+		assert.equal(notesMessageMs({ text: "Moved the selection to “Charge”.", opId: "op_3", reopen: "A.md" }), 20_000);
 	});
 
 	it("on a phone the message line also shows on the list screen, which hides the note half", async () => {

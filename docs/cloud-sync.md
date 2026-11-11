@@ -433,7 +433,8 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
   - Resizing was driven with a real mouse in the browser: the pointer over each zone and over the top bar, each side and corner, the limits, the remembered size after minimizing and after a reload, and a smaller app window. The owner approved the plan (a picture of the zones) and chose "remember the size"; they have seen a picture of the zones, tinted for the picture only.
   - Playwright hides scrollbars by default; launch with `ignoreDefaultArgs: ["--hide-scrollbars"]` to get real ones. The run of the larger zones did, and dragged the conversation's scrollbar thumb beside the right strip.
 - **Nothing is queued after this round.** The owner then asked whether anything was left in Phase 4 (nothing is) and was told Phase 5 is next.
-- **Wording and behaviour added without being asked, for the owner to review:** the message `Deleted “Electricity”.` after a delete, and the message line showing on the phone's list screen.
+- **The drawer's message line** now goes after 5 seconds, or 20 with an Undo button (the owner's ask and choice; "The message line" under "Notes drawer" in `docs/side-tutor.md`). Timed in a browser.
+- **Wording and behaviour added without being asked:** the message `Deleted “Electricity”.` after a delete, and the message line showing on the phone's list screen. The owner has used both and asked only for the messages to go sooner, so they stand unless the owner says otherwise.
 
 ### Next: Phase 5, the sync engine
 
@@ -484,6 +485,7 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
   - `locator.dispatchEvent("contextmenu")` sends an event without a position, so the row menu lands off screen. Use a real press and hold (or a right-click) instead.
   - At desktop width the side tutor's floating window opens over the notes list and swallows clicks there. Minimise it first (the button labelled "Minimize the side tutor").
   - Playwright's `devices["iPhone 13"]` screen is 390 × 664 CSS px (Safari's bars are taken off), not 844 high.
+  - The topic list is a short box above the note. A row below its visible part can't be pressed: scroll it into view first, and clear the notes earlier runs left in the scratch vault so the list stays short.
   - To have notes for a run, write files into the server's vault folder and wait until they show in the stand-in's `remote.json`; a later deletion then shows there as a record with `deleted: true`.
 - **The local dev server** (`next dev` on port 3100) doesn't survive between turns in a cloud session; start it with `setsid nohup … &` and check it answers before each browser run.
 - **The owner's phone screenshots are the ground truth for iPhone behaviour.** Measure them (PIL: pixel rows and columns; a full iPhone screenshot is 3 px per point, a cropped or resized one scales from the status-bar icons) before deciding what iOS does; several early guesses about Safari's bars were wrong until measured.

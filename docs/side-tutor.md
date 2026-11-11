@@ -127,7 +127,12 @@ The learner's own notes beside the lesson, stored as Markdown in their Obsidian 
   - The open note closes when it is deleted or sits in the deleted folder. Its unsaved typing is dropped, never saved back.
   - A session whose home folder is deleted has no home folder again.
   - The notes folder itself can't be deleted.
-  - Afterwards the drawer's message line reads `Deleted “Electricity”.` (wording added while building, for the owner to review).
+  - Afterwards the drawer's message line reads `Deleted “Electricity”.` for 5 seconds (the wording was added while building; the owner has seen it and asked only for it to go sooner).
+- **The message line** at the bottom of the drawer ("Moved …", "Deleted …", a split's "… Undo", the reason a move was refused) goes by itself (owner's choices; every message used to stay 20 seconds, which was "way too long"):
+  - **after 5 seconds**: every message without an Undo button, so "Moved …", "Deleted …" and the ones that say why something didn't happen;
+  - **after 20 seconds**: a message with **Undo** (a split, a merge, a selection moved to a new note), because that button is the only way to undo;
+  - its ✕ closes any of them at once.
+  - `notesMessageMs` in `components/notes/notes-drawer.tsx`.
 - **Editor:** CodeMirror for editing (sections fold while typing), plus a Read view with formatted math, folding, clickable links and images.
 - **Where it appears:** both **teaching and practice** sessions.
 - **On a phone:** the drawer fills the screen and shows the list, then the note. Rows open their menu on press and hold; holding and then moving the finger drags the row into a folder. See "Phone layouts" in `docs/cloud-sync.md`.
