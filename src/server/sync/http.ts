@@ -41,6 +41,7 @@ import { readServerAuthState, updateServerAuthState } from "../../store/server-a
 import { MAX_BUNDLE_BYTES } from "../../core/sync/sessions.ts";
 import { clientAddress, json, lockedMessage, notFound, readBody, serverModeEnabled, signedIn } from "../server-auth.ts";
 import { syncAuthority } from "./engine.ts";
+import { graphAuthority } from "./graph-engine.ts";
 
 const NOT_PAIRED = { error: "This desktop app isn't paired with this server.", code: "not_paired" } as const;
 
@@ -176,5 +177,20 @@ export async function sessionTakeResponse(request: Request, chatId: string): Pro
 	if (caller instanceof Response) return caller;
 	const body = (await syncBody(request)) as { force?: unknown } | undefined;
 	const reply = syncAuthority().takeOver(caller.id, chatId, body?.force === true);
+	return json(reply.body, reply.status);
+}
+
+// ─── The graph log (slice 4) ─────────────────────────────────────────────────
+
+/** GET ?after=<seq>: the log entries a desktop hasn't seen. POST {after, entries}: its own. */
+export async function graphLogResponse(request: Request): Promise<Response> {
+	const caller = syncCaller(request);
+	if (caller instanceof Response) return caller;
+	if (request.method === "GET") {
+		const params = new URL(request.url).searchParams;
+		const reply = graphAuthority().pull(Number(params.get("after") ?? "x"), params.get("log"));
+		return json(reply.body, reply.status);
+	}
+	const reply = graphAuthority().push(caller.id, await syncBody(request));
 	return json(reply.body, reply.status);
 }

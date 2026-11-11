@@ -17,7 +17,8 @@
 import { CLOUD_HOLDER, isSessionId } from "../../core/sync/sessions.ts";
 import { json, readBody, serverModeEnabled } from "../server-auth.ts";
 import { cloudStatus, contactServer, pairWithServer } from "./client.ts";
-import { desktopSync, runSyncRound, syncAuthority } from "./engine.ts";
+import { desktopSync, syncAuthority } from "./engine.ts";
+import { runSyncRound } from "./round.ts";
 
 export function cloudStatusResponse(): Response {
 	if (serverModeEnabled()) return json({ role: "server", held: syncAuthority().held() });

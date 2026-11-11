@@ -1,6 +1,6 @@
 # Cloud sync: approved plan
 
-Status: **Phases 1–4 done (server mode, sign-in on the server, phone layouts, the Obsidian vault on the server). Phase 5 (the sync engine) is approved and being built in slices; slices 1 to 3 of 6 are done.** Work happens on a separate branch. It merges into `side-tutor` only once the whole feature works and the owner approves the merge, because every push to `side-tutor` publishes a release. Change these decisions only with the owner's approval.
+Status: **Phases 1–4 done (server mode, sign-in on the server, phone layouts, the Obsidian vault on the server). Phase 5 (the sync engine) is approved and being built in slices; slices 1 to 4 of 6 are done.** Work happens on a separate branch. It merges into `side-tutor` only once the whole feature works and the owner approves the merge, because every push to `side-tutor` publishes a release. Change these decisions only with the owner's approval.
 
 Goal: keep learning progress on several devices. The Windows desktop app stays fully usable, works offline, and keeps the Obsidian connection. A phone uses LearnHarness from the browser.
 
@@ -439,7 +439,7 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 
 ### Next: Phase 5, the sync engine
 
-**The owner approved the Phase 5 plan page.** It is being built in six slices ("Build order" below). Built so far: slices 1 to 3 (pairing and the version check; sessions and leases; take-over); see "Phase 5: what is built".
+**The owner approved the Phase 5 plan page.** It is being built in six slices ("Build order" below). Built so far: slices 1 to 4 (pairing and the version check; sessions and leases; take-over; the graph log); see "Phase 5: what is built".
 
 #### Phase 5 decisions (owner, asked one at a time)
 
@@ -539,6 +539,30 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 - **Where this copy's own work is wired:** `src/server/sync/local-work.ts` gives the engine "is a reply being written" and "stop helpers and extraction" from the real turn and job modules. It is loaded by the server barrel. `engine.ts` itself stays small because `proxy.ts` loads it.
 - **Tests:** `tests/sync-takeover.test.ts` (every path above with one or two desktops), `tests/sync-local-work.test.ts` (the cloud's side against the real turn registry, job aborts and the recovery sweep).
 - **Real run:** between two built copies: an online hand-over, taking it back, and a take-over during the desktop's silence followed by the discard and its notice.
+
+**Slice 4: the graph log**
+
+- **What travels:** the four ledgers (`nodes`, `chains`, `coverage`, and the checkpoints in `sessions.jsonl`). `sources.json` and `positions.json` are maps and belong to slice 5.
+- **One ordered log on the server**, `<data>/sync/graph-log.jsonl`, one entry per line: `{seq, by, eid, change}`. A change is one of (`src/core/sync/graph-log.ts`):
+  - `line`: one line appended to one ledger;
+  - `delete-sources` (ids, mode), `delete-node` (id), `simplify-chains`: a deletion logged as what was done. Each device runs the app's own deletion code for it (`deleteSourcesTraces`, `deleteNodeTraces`, `simplifyChains`);
+  - `rewrite`: the exact result of a rewrite the engine can't name: which lines went (by hash) and which changed. Nothing in the app produces one today; it is the net under a future rewrite.
+- **Every device applies the same entries in the same order with the same code**, so the ledgers end identical, byte for byte.
+- **Where it attaches:** `stores.graphStore` is a wrapper (`loggedGraphStore` in `src/server/sync/graph-sync.ts`) that writes each change down before making it. The three named deletions are wrapped where they happen (`recordGraphAction` in `src/server/chats.ts`, `source-deletion.ts` and `graph.ts`), so the ledger writes inside them aren't logged a second time. The clean-up of redundant arguments at the end of an extraction is recognised inside `rewriteLedgers`.
+- **A desktop's round** (after the sessions round): fetch the entries it hasn't seen, redo its own unsent entries on top of them, send them. The server takes them only on top of everything it has (`409 behind` otherwise, and the desktop fetches again). An entry carries its own id (`eid`), so one that arrives twice, after a lost answer, is applied once. A big send goes in pieces of at most 1,000 entries or 4 MB.
+  - The desktop keeps `graph.json` (its place in the log, and the log's name), `graph-outbox.jsonl` (its unsent entries) and `graph-base/` (the ledgers as the server has them, kept only while something is unsent) under `<data>/sync/`.
+- **The first sync needs no special case:** the server's graph as it stands becomes the start of the log the first time a desktop asks, and everything on the desktop counts as unsent on top of nothing. Both graphs are joined: the server's lines, then the desktop's.
+- **The owner's example holds** (a test pins it): the desktop, offline, deletes "Circuits" with its concepts; meanwhile "Motors" on the phone teaches Ohm's law too. After the sync Ohm's law is on both, with its name and statement, minus what only Circuits said about it; a concept only Circuits taught is gone.
+- **A session lost to a take-over** takes its unsent graph entries with it (`discardSession`): the lines that only that session taught. The new holder extracts again.
+- **A server that was reset or restored** has a log with a new name (`graph-log-id`). A desktop that sees another name treats everything it has as unsent again and combines afresh.
+- **Nothing is recorded before the first graph sync:** no log on the server until a paired desktop first asks, no files on a desktop until its first round.
+- **Known limits:**
+  - The same concept learned separately on two devices before they synced is two nodes (accepted for v1; see "Graph sync").
+  - A crash in the instant between writing an entry down and making the change leaves that one change in the log but not in the ledger. There is no repair pass.
+- **Routes for a paired desktop:** `GET /api/sync/graph?after=<seq>&log=<name>` and `POST /api/sync/graph {after, log, entries}`.
+- **`POST /api/cloud {op:"sync"}`** now answers `{round: {sessions, graph}}` (`src/server/sync/round.ts`).
+- **Tests:** `tests/sync-graph.test.ts` (the rules, with each side's graph in memory and real log files), `tests/sync-graph-wiring.test.ts` (the real ledger files and the app's real deletion entry points, this process as the server).
+- **Real run:** two built copies with the test library on the desktop and two concepts on the server: first sync (ledgers identical on both), a concept deleted on each side, and a session deleted with its concepts.
 
 #### What the investigation found (for whoever builds it)
 

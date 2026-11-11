@@ -5,6 +5,7 @@ import { stores } from "./stores.ts";
 import { sourceDirectory } from "./source-organization.ts";
 import { deleteIdleChatRecord, runningWorkBlocker } from "./chats.ts";
 import { graphRevision } from "./graph.ts";
+import { recordGraphAction } from "./sync/graph-engine.ts";
 
 export class SourceDeletionError extends Error {
 	constructor(message: string, public status = 400, public code = "invalid_source_deletion") { super(message); }
@@ -37,7 +38,9 @@ export function deleteSources(raw: unknown): SourceDirectory & { graphRevision: 
 	}
 	// Clear the whole selected batch in one graph rewrite. Kept chats lose
 	// coverage/checkpoints too, so their unchanged messages can be re-extracted.
-	deleteSourcesTraces(stores.graphStore, new Set(targets.map((s) => s.id)), "delete-nodes");
+	// Side-tutor fork (cloud sync): logged as what it is, so other devices repeat it.
+	const traceIds = targets.map((s) => s.id);
+	if (traceIds.length > 0) recordGraphAction({ kind: "delete-sources", ids: traceIds, mode: "delete-nodes" }, () => deleteSourcesTraces(stores.graphStore, new Set(traceIds), "delete-nodes"));
 	stores.graphStore.deleteSources(new Set(targets.filter((s) => s.kind === "notes").map((s) => s.id)));
 	const removed = new Set(request.sourceIds.filter((id) => !directory.sources.some((s) => s.id === id)));
 	for (const entry of targets) {

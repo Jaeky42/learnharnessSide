@@ -81,6 +81,8 @@ export interface DesktopSyncDeps {
 	announce?: (chatId: string, what: "written" | "removed") => void;
 	/** This desktop's own work on its sessions. */
 	localWork?: LocalWork;
+	/** A session was lost to a take-over (its unsent graph knowledge goes too). */
+	onDiscard?: (chatId: string) => void;
 }
 
 export type TickResult =
@@ -161,6 +163,7 @@ export function createDesktopSync(deps: DesktopSyncDeps): DesktopSync {
 		if (!reply.ok) return false;
 		const remote = checkBundle(change.id, reply.body.bundle);
 		if (!remote) return false;
+		deps.onDiscard?.(change.id);
 		const local = files.read(change.id);
 		if (local && entry && bundleDigest(local) !== entry.digest && bundleDigest(local) !== bundleDigest(remote)) {
 			const lost = unsentTurns(local, remote);

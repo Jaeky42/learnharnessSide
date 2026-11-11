@@ -24,7 +24,7 @@ import { stateFile } from "../../store/sync/state-file.ts";
 import { serverModeEnabled } from "../server-auth.ts";
 import { createAuthority, isAuthorityState, type Authority, type LocalWork } from "./authority.ts";
 import { syncRequest } from "./client.ts";
-import { createDesktopSync, isDesktopState, type DesktopSync, type TickResult } from "./desktop-sync.ts";
+import { createDesktopSync, isDesktopState, type DesktopSync } from "./desktop-sync.ts";
 
 /** This device's own sync bookkeeping. Never synced. */
 export function syncStateDir(): string {
@@ -49,7 +49,7 @@ function backup(): string | null {
 	}
 }
 
-interface Engine { authority?: Authority; desktop?: DesktopSync; localWork?: LocalWork }
+interface Engine { authority?: Authority; desktop?: DesktopSync; localWork?: LocalWork; discarded?: Array<(chatId: string) => void> }
 const globals = globalThis as typeof globalThis & { __lhSyncEngine?: Engine };
 const engine = (): Engine => (globals.__lhSyncEngine ??= {});
 
@@ -66,6 +66,11 @@ const localWork: LocalWork = {
 	replying: (chatId) => engine().localWork?.replying(chatId) ?? false,
 	stop: (chatId, options) => engine().localWork?.stop(chatId, options),
 };
+
+/** Other parts of sync (the graph log) hear when a desktop gives a session up. */
+export function onSessionDiscarded(listener: (chatId: string) => void): void {
+	(engine().discarded ??= []).push(listener);
+}
 
 export function syncAuthority(): Authority {
 	return (engine().authority ??= createAuthority({
@@ -96,6 +101,7 @@ export function desktopSync(): DesktopSync {
 		makeBackup: backup,
 		announce,
 		localWork,
+		onDiscard: (chatId) => { for (const listener of engine().discarded ?? []) listener(chatId); },
 	}));
 }
 
@@ -131,8 +137,3 @@ export function sessionWritePath(method: string, pathname: string): string | nul
 	return match[1]!;
 }
 
-/** One round with the server (desktop only). */
-export async function runSyncRound(): Promise<TickResult> {
-	if (serverModeEnabled()) return { ok: false, reason: "not-paired" };
-	return desktopSync().tick();
-}

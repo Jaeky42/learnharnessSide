@@ -15,6 +15,7 @@ import { sideTutorStore } from "../store/side-tutor.ts";
 import { resolveSettings, type EffectiveSettings } from "../core/settings-resolution.ts";
 import { syncCustomProvider } from "./custom-provider.ts";
 import { holdsSession } from "./sync/engine.ts";
+import { loggedGraph } from "./sync/graph-engine.ts";
 import { guardChatStore, guardJobStore, guardSideTutorStore } from "./sync/guarded-stores.ts";
 /** The wired adapters. Satisfies core/graph.ts's GraphDeps structurally.
  *
@@ -23,7 +24,9 @@ import { guardChatStore, guardJobStore, guardSideTutorStore } from "./sync/guard
  * Until a desktop has synced, the wrappers pass everything through. */
 export const stores = {
 	chatStore: guardChatStore(chatStore, holdsSession),
-	graphStore,
+	// Cloud sync: every change to the graph ledgers is logged before it is made
+	// (sync/graph-sync.ts). Until graph sync has started, a plain pass-through.
+	graphStore: loggedGraph,
 	sourceOrganizationStore,
 	jobStore: guardJobStore(jobStore, holdsSession),
 	settingsStore,

@@ -11,6 +11,7 @@ import { isTurnRunning } from "./turn-liveness.ts";
 import { clearTurnFailure } from "./turn-runs.ts";
 import { discardChatDeliveries } from "./jobs.ts";
 import { holdsSession } from "./sync/engine.ts";
+import { recordGraphAction } from "./sync/graph-engine.ts";
 import { HELD_ELSEWHERE_CODE, HELD_ELSEWHERE_MESSAGE } from "../core/sync/sessions.ts";
 
 /**
@@ -150,7 +151,8 @@ export function deleteIdleChatRecord(chatId: string): Extract<ChatDeleteOutcome,
 function finishChatDeletion(chatId: string, mode: ChatDeleteMode): Extract<ChatDeleteOutcome, { ok: true }> {
 	// THE SYNC BLOCK — no awaits below (see the doc comment). Order:
 	// ledgers → jobs → the chat record.
-	const stats = deleteChatTraces(stores.graphStore, chatId, mode);
+	// Side-tutor fork (cloud sync): logged as what it is, so other devices repeat it.
+	const stats = recordGraphAction({ kind: "delete-sources", ids: [chatId], mode }, () => deleteChatTraces(stores.graphStore, chatId, mode));
 	const jobsRemoved = finishChatRecordDeletion(chatId);
 	return { ok: true, mode, stats, jobsRemoved, graphRevision: graphRevision() };
 }
