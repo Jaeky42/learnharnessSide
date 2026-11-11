@@ -83,16 +83,19 @@ function phoneAnchorRect(r: DOMRect): { top: number; bottom: number; left: numbe
 	return { top: r.top - shift, bottom: r.bottom - shift, left: r.left, right: r.right };
 }
 
-/** PHONE: an upward menu is pinned by `bottom`, which counts from the bottom
- *  of its fixed frame: the shifted body while the keyboard is up, otherwise
- *  the full layout height, which the iPhone keyboard covers without
- *  shrinking. Move it up by the covered part so it sits above the keyboard. */
-function phoneFrameBottom(p: MenuPlacement, visible: number): MenuPlacement {
-	const bottom = p.style.bottom;
-	if (typeof bottom !== "number") return p;
-	const body = document.body;
-	const frame = body.dataset.lhKeyboard !== undefined ? body.getBoundingClientRect().height : window.innerHeight;
-	return { ...p, style: { ...p.style, bottom: bottom + Math.max(0, frame - visible) } };
+/** PHONE: an upward menu is pinned by its `top` (the anchor's top, minus
+ *  the gap and the menu's own height) instead of `bottom`. `bottom` counts
+ *  from the bottom of the fixed frame, and the iPhone doesn't report that
+ *  reliably: the home-screen app's frame is taller than innerHeight, and the
+ *  keyboard covers it without shrinking it, so the model list sat behind the
+ *  keyboard (owner's iPhone). The top of the frame is the top of the screen
+ *  (or of the shifted body, see phoneAnchorRect) in every case. Pure,
+ *  exported for tests. */
+export function phoneTopPlacement(p: MenuPlacement, anchorTop: number, menuHeight: number): MenuPlacement {
+	if (typeof p.style.bottom !== "number") return p;
+	const { bottom: _bottom, ...rest } = p.style;
+	const height = Math.min(menuHeight, p.maxHeight);
+	return { ...p, style: { ...rest, top: Math.max(EDGE, anchorTop - GAP - height) } };
 }
 
 /** Pure: the placement decision — anchored rect + viewport + the menu's
@@ -245,15 +248,22 @@ export function MenuShell({
 			const el = anchor();
 			if (!el || !menuRef.current) return;
 			const phone = isPhoneNow();
-			const visible = phone ? phoneVisibleHeight() : window.innerHeight;
+			const menu = menuRef.current;
+			const rect = phone ? phoneAnchorRect(el.getBoundingClientRect()) : el.getBoundingClientRect();
 			const p = computeMenuPlacement(
-				phone ? phoneAnchorRect(el.getBoundingClientRect()) : el.getBoundingClientRect(),
-				{ width: window.innerWidth, height: visible },
-				menuRef.current.scrollHeight,
+				rect,
+				{ width: window.innerWidth, height: phone ? phoneVisibleHeight() : window.innerHeight },
+				menu.scrollHeight,
 				preferredSide,
 				align,
 			);
-			setPlaced(phone ? phoneFrameBottom(clampMenuToScreen(p, menuRef.current.offsetWidth, window.innerWidth), visible) : p);
+			if (!phone) {
+				setPlaced(p);
+				return;
+			}
+			// The rendered height: content plus the border, within the cap.
+			const borders = menu.offsetHeight - menu.clientHeight;
+			setPlaced(phoneTopPlacement(clampMenuToScreen(p, menu.offsetWidth, window.innerWidth), rect.top, menu.scrollHeight + borders));
 		};
 		place();
 		const rePlace = () => {
@@ -262,13 +272,18 @@ export function MenuShell({
 		};
 		window.addEventListener("scroll", rePlace, true);
 		window.addEventListener("resize", rePlace);
-		// PHONE: the iPhone keyboard changes only the visual viewport.
+		// PHONE: the iPhone keyboard changes only the visual viewport, and a
+		// top-pinned menu re-places when its content changes (a search
+		// filtering the list), so it stays attached to its anchor.
 		window.visualViewport?.addEventListener("resize", rePlace);
+		const contentObserver = isPhoneNow() && menuRef.current ? new ResizeObserver(rePlace) : null;
+		if (contentObserver && menuRef.current) for (const child of Array.from(menuRef.current.children)) contentObserver.observe(child);
 		return () => {
 			cancelAnimationFrame(raf);
 			window.removeEventListener("scroll", rePlace, true);
 			window.removeEventListener("resize", rePlace);
 			window.visualViewport?.removeEventListener("resize", rePlace);
+			contentObserver?.disconnect();
 		};
 	}, [anchorRef, anchorTestid, preferredSide, align]);
 

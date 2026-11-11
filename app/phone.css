@@ -190,17 +190,21 @@
 		min-height: var(--lh-vvh, 100dvh);
 	}
 	/* Every top edge clears the clock by --lh-safe-top. In the home-screen
-	   app it's 40 points more: since iOS 26 the iPhone blurs the top of a
-	   home-screen web app that runs under the clock, about 40 points below
-	   it, which softened the top bar (owner's iPhone). No setting turns the
-	   blur off and a solid strip behind the clock didn't stop it, so the
-	   controls move below it (owner's choice). body[data-lh-standalone] is
-	   set by components/phone/phone-viewport.tsx. */
+	   app it's 26 points more: since iOS 26 the iPhone blurs the top of a
+	   home-screen web app that runs under the clock, which softened the top
+	   bar (owner's iPhone). No setting turns the blur off and a solid strip
+	   behind the clock didn't stop it, so the controls move below it (owner's
+	   choice). Measured on the owner's screenshot (iPhone, 62-point clock
+	   strip): the blur fades out between about 65 and 100 points from the
+	   top. +26 puts the top bar's round buttons (their top edge 12 points
+	   into the bar) at about 100 points, the highest they can sit and stay
+	   sharp; +40 left them at 114. body[data-lh-standalone] is set by
+	   components/phone/phone-viewport.tsx. */
 	html:not(.lh-electron) body {
 		--lh-safe-top: env(safe-area-inset-top, 0px);
 	}
 	html:not(.lh-electron) body[data-lh-standalone] {
-		--lh-safe-top: calc(env(safe-area-inset-top, 0px) + 40px);
+		--lh-safe-top: calc(env(safe-area-inset-top, 0px) + 26px);
 	}
 	/* While the iPhone keyboard is up, the app follows the visible area
 	   (components/phone/phone-viewport.tsx). The transform also makes the

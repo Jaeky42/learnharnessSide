@@ -250,3 +250,17 @@ describe("model menu order (fork)", async () => {
 		assert.deepEqual([...models].sort(compareModels).map((m) => m.id), ["gpt-6-astra", "qwen-3", "fable", "haiku", "opus", "sonnet"]);
 	});
 });
+
+describe("phone menus above their anchor are pinned by their top", async () => {
+	const { phoneTopPlacement } = await import("../components/menu-shell.tsx");
+	it("sits the menu's bottom just above the anchor, whatever the frame's height", () => {
+		const up = { side: "up" as const, style: { left: 22, bottom: 43 }, maxHeight: 228 };
+		assert.deepEqual(phoneTopPlacement(up, 341, 124).style, { left: 22, top: 341 - 4 - 124 });
+		assert.deepEqual(phoneTopPlacement(up, 341, 900).style, { left: 22, top: 341 - 4 - 228 }, "capped at maxHeight");
+		assert.deepEqual(phoneTopPlacement(up, 60, 400).style, { left: 22, top: 8 }, "never above the screen edge");
+	});
+	it("leaves a menu that opens downward alone", () => {
+		const down = { side: "down" as const, style: { left: 22, top: 120 }, maxHeight: 300 };
+		assert.deepEqual(phoneTopPlacement(down, 100, 200), down);
+	});
+});
