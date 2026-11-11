@@ -415,8 +415,8 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
   - Docker Hub may answer 429 (rate limit), and `apt` can't run (the proxy is HTTPS-only), so test entrypoint changes on top of an image that's already built.
 - **On Node 22**, `tests/subscription-auth.test.ts` has one known failure. CI uses Node 26.
 - **The Obsidian sync tests need the real `ob` program.** It isn't a dependency of the app (licence; and its native add-on would ride into the desktop build). Install it once into a scratch folder and point the tests at it:
-  - `npm install --prefix <scratch>/ob --allow-scripts=better-sqlite3 obsidian-headless@0.0.14`
-  - `LH_TEST_OB_CLI=<scratch>/ob/node_modules/obsidian-headless/cli.js npm test`
+  - `npm install -g --prefix <scratch>/ob --allow-scripts=better-sqlite3 obsidian-headless@0.0.14` (the entrypoint's command; newer npm versions refuse `--allow-scripts` without `-g`)
+  - `LH_TEST_OB_CLI=<scratch>/ob/lib/node_modules/obsidian-headless/cli.js npm test`
   - Its add-on is built for the Node that ran the install, so use the same Node for both.
   - Without `LH_TEST_OB_CLI` the end-to-end tests are skipped; CI always runs them.
 - **Obsidian's servers (`api.obsidian.md`) are blocked in the sandbox.** To see Settings → Obsidian work in a browser, run server mode with the stand-in: a wrapper script `exec node --require tests/fixtures/obsidian-fake/preload.cjs <cli.js> "$@"` as `LH_OB_BINARY`, `LH_FAKE_OBSIDIAN=<remote.json>` (its shape is described at the top of the preload file), plus `LH_VAULT_DIR` and `XDG_CONFIG_HOME` in scratch folders.

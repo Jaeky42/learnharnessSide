@@ -48,8 +48,11 @@ jobs:
         run: |
           version="$(sed -n 's/^OB_VERSION="\(.*\)"$/\1/p' deploy/docker-entrypoint.sh)"
           test -n "$version"
-          npm install --prefix "$RUNNER_TEMP/ob" --no-audit --no-fund --allow-scripts=better-sqlite3 "obsidian-headless@$version"
-          echo "LH_TEST_OB_CLI=$RUNNER_TEMP/ob/node_modules/obsidian-headless/cli.js" >> "$GITHUB_ENV"
+          # The same command shape as the entrypoint: npm takes --allow-scripts
+          # only on a global install.
+          npm install -g --prefix "$RUNNER_TEMP/ob" --no-audit --no-fund --allow-scripts=better-sqlite3 "obsidian-headless@$version"
+          test "$("$RUNNER_TEMP/ob/bin/ob" --version)" = "$version"
+          echo "LH_TEST_OB_CLI=$RUNNER_TEMP/ob/lib/node_modules/obsidian-headless/cli.js" >> "$GITHUB_ENV"
       - run: npm test
       - run: npm run lint
 
