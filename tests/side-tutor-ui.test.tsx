@@ -128,7 +128,7 @@ describe("the open window", () => {
 		const classes = (el: Element) => (el.getAttribute("class") ?? "").split(/\s+/);
 		const [bar, body, row] = [...panel.children];
 		assert.equal(body, panel.querySelector("[data-testid='side-tutor-body']"));
-		assert.ok(classes(body!).includes("bg-black/70"));
+		assert.ok(classes(body!).includes("bg-black/60"));
 		// The bars keep the app's background, nearly solid.
 		assert.ok(classes(bar!).includes("bg-background/95"));
 		assert.ok(classes(row!).includes("bg-background/95"));

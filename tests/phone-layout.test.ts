@@ -134,6 +134,16 @@ describe("phone rules", () => {
 		assert.match(css, /:is\(textarea,[^{]*\{\s*font-size: 16px;/);
 	});
 
+	it("the dim behind the tutor sheet covers only the lesson above it, so the sheet's middle shows the lesson", () => {
+		const sheet = /\[data-phone="tutor-sheet"\] \{([^}]*)\}/.exec(css)?.[1] ?? "";
+		const dim = /\[data-phone="backdrop"\]\[data-phone-layer="sheet"\] \{([^}]*)\}/.exec(css)?.[1] ?? "";
+		// The sheet starts 26% down and has rounded top corners; the dim ends
+		// one corner radius below that, behind the sheet's solid top.
+		assert.match(sheet, /top: calc\(var\(--lh-vvh, 100dvh\) \* 0\.26\);/);
+		assert.match(sheet, /border-radius: 1\.125rem 1\.125rem 0 0;/);
+		assert.match(dim, /height: calc\(var\(--lh-vvh, 100dvh\) \* 0\.26 \+ 1\.125rem\);/);
+	});
+
 	it("a hold survives a small drift but not a scroll", () => {
 		assert.equal(stillHolding({ x: 100, y: 100 }, { x: 104, y: 106 }), true);
 		assert.equal(stillHolding({ x: 100, y: 100 }, { x: 100, y: 100 + HOLD_SLOP + 1 }), false);

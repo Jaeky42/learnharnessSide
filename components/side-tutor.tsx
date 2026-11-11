@@ -51,7 +51,7 @@ const BUBBLE_TOP = 72;
  * lesson behind it shows through, blurred.
  */
 const BAR_BG = "bg-background/95";
-const BODY_BG = "bg-black/70";
+const BODY_BG = "bg-black/60";
 
 /**
  * The typing row's sizes. The Dictate and Send buttons are squares as tall as

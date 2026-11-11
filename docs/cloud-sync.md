@@ -228,6 +228,7 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 - **Side tutor** (teaching sessions only, as on the desktop):
   - A round bubble in the bottom-right corner, just above the message box, in the app's floating-control look (card background, thin border, grey icon; the owner found the bright version out of place). It shows a spinner while an answer is being written. On a phone the tutor starts closed and isn't focused on open (that would pop up the keyboard).
   - The bubble opens a **bottom sheet** covering about three quarters of the screen, with the lesson dimmed above it. It closes on a tap on the dimmed lesson or the – button. No dragging or resizing.
+    - Only the lesson above the sheet is dimmed. Behind the sheet it is left as it is, so it shows through the sheet's see-through middle ("The window's look" in `docs/side-tutor.md`).
   - While an opened question leaves no room above the dock, the bubble moves to the top-right corner under the top bar.
 - **Notes drawer:** slides in from the right and fills the screen.
   - **List, then note** (owner's choice from screenshots of two layouts): the topic list first; tapping a note shows it full screen, and "‹ Notes" goes back. It opens on the note last open in that session, if any. The list can't fold there; a divider line under the "Topics" heading replaces the fold arrow (owner's ask).
@@ -424,7 +425,8 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
   - The "what to try" page was last updated for the redone drag; it doesn't cover this round.
 - **A fourth round, the tutor window's look** (decisions in `docs/side-tutor.md`, "The window's look"): the middle of the window is closer to black and more see-through, Dictate and Send are as tall as the typing box, and the hint "Ask a follow-up…" is a little smaller.
   - The owner asked for it with "do not push yet", to batch it with more features. **It is committed here but not pushed; push only when the owner says so.**
-  - The owner has seen before-and-after screenshots (computer and phone). The exact shade (black at 70%) and the hint's size (14 px) are readings of "a little darker, more translucent" and "slightly smaller".
+  - The owner has seen before-and-after screenshots (computer and phone). The shade is the owner's pick (black at 60%; 70% was too black). The hint's size (14 px) is a reading of "slightly smaller".
+  - The owner asked why the phone's sheet wasn't see-through: the dim behind it covered the whole screen. It now covers only the lesson above the sheet. Shown as a screenshot; not confirmed on the iPhone, where the blur behind a sheet that slides in is the thing to look at.
   - Checked in a browser at both sizes: the box and the buttons measure the same at reading sizes from 14 to 22 px, the box keeps its height when typing starts, and dictation still lands its words in the tutor's box.
 - **The owner said more features are coming.** Ask what they are; nothing is queued.
 - **Wording and behaviour added without being asked, for the owner to review:** the message `Deleted “Electricity”.` after a delete, and the message line showing on the phone's list screen.

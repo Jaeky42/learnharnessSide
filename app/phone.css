@@ -407,8 +407,14 @@
 	html:not(.lh-electron) [data-phone="tutor-sheet"] > div:nth-child(2) {
 		font-size: 1rem;
 	}
+	/* The dim behind the tutor sheet covers only the lesson above it (owner's
+	   ask: the sheet's middle is see-through, and a dimmed lesson behind it
+	   showed through as plain black). It reaches down past the sheet's top
+	   by the corner radius, so the lesson at the rounded corners is dimmed
+	   too; that strip is behind the sheet's solid top. */
 	html:not(.lh-electron) [data-phone="backdrop"][data-phone-layer="sheet"] {
 		z-index: 45;
+		height: calc(var(--lh-vvh, 100dvh) * 0.26 + 1.125rem);
 		animation: lh-phone-fade 200ms ease;
 	}
 	@keyframes lh-phone-in-up {
