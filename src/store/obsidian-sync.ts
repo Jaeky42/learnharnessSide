@@ -154,6 +154,42 @@ function writeExcludedFolders(configDir: string, vaultId: string, folders: reado
 	}
 }
 
+function samePath(a: string, b: string): boolean {
+	return path.resolve(/* turbopackIgnore: true */ a) === path.resolve(/* turbopackIgnore: true */ b);
+}
+
+/** Whether ob remembers a sync of this vault (its state database exists).
+ *  With no such memory ob can only download and merge, never delete. */
+function hasSyncState(configDir: string, vaultId: string): boolean {
+	if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(vaultId)) return false;
+	try { return fs.statSync(/* turbopackIgnore: true */ path.join(/* turbopackIgnore: true */ configDir, "sync", vaultId, "state.db")).isFile(); } catch { return false; }
+}
+
+/** Before a vault is connected: removes what ob still holds for this vault
+ *  id or for this vault folder (settings it can no longer read count too).
+ *  A fresh setup on top of an old sync memory would make ob "notice" that
+ *  every remembered file is missing and delete them all from Obsidian.
+ *  Call only when ob doesn't list the folder as set up and isn't running. */
+function removeStaleSyncState(configDir: string, vaultDir: string, vaultId: string): void {
+	const root = path.join(/* turbopackIgnore: true */ configDir, "sync");
+	let entries: fs.Dirent[];
+	try { entries = fs.readdirSync(/* turbopackIgnore: true */ root, { withFileTypes: true }); } catch { return; }
+	for (const entry of entries) {
+		if (!entry.isDirectory()) continue;
+		const dir = path.join(/* turbopackIgnore: true */ root, entry.name);
+		let stale = entry.name === vaultId;
+		if (!stale) {
+			try {
+				const config = JSON.parse(fs.readFileSync(/* turbopackIgnore: true */ path.join(/* turbopackIgnore: true */ dir, "config.json"), "utf-8")) as { vaultPath?: unknown };
+				stale = typeof config.vaultPath !== "string" || samePath(config.vaultPath, vaultDir);
+			} catch {
+				stale = true; // unreadable settings: ob can't use them, but its memory would still be found
+			}
+		}
+		if (stale) fs.rmSync(/* turbopackIgnore: true */ dir, { recursive: true, force: true });
+	}
+}
+
 export const obsidianSyncFiles = {
 	readRecord,
 	writeRecord,
@@ -164,6 +200,8 @@ export const obsidianSyncFiles = {
 	isEmptyDir,
 	emptyVault,
 	hasToken,
+	hasSyncState,
+	removeStaleSyncState,
 	writeExcludedFolders,
 };
 

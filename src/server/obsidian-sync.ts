@@ -69,6 +69,7 @@ import { notesStore } from "../store/notes.ts";
 
 const MAX_OUTPUT = 256 * 1024;
 const SIGN_IN_AGAIN = "Sign in to Obsidian again.";
+const NO_ANSWER = "Obsidian's sync program didn't answer. Try again.";
 
 export interface ObsidianSyncDeps {
 	/** The installed `ob`, or null while it isn't there yet. */
@@ -181,6 +182,8 @@ export function createObsidianSync(deps: ObsidianSyncDeps = defaultDeps()) {
 	let installTimer: ReturnType<typeof setTimeout> | null = null;
 	let unsyncedCache: { at: number; value: boolean } | null = null;
 	let booted = false;
+	/** ob's last answer about the vault setup was unusable (see readVaultSetup). */
+	let setupUnknown = false;
 
 	// One operation at a time: sign-in, connect, disconnect, (re)starts.
 	let chain: Promise<unknown> = Promise.resolve();
@@ -226,25 +229,30 @@ export function createObsidianSync(deps: ObsidianSyncDeps = defaultDeps()) {
 		return path.resolve(/* turbopackIgnore: true */ a) === path.resolve(/* turbopackIgnore: true */ b);
 	}
 
-	/** Whether ob has this server's vault folder set up, and with what. */
-	async function readVaultSetup(): Promise<{ vault: ObsidianVault; leftOut: string[] } | null> {
+	/** Whether ob has this server's vault folder set up, and with what.
+	 *  null = it certainly hasn't. undefined = ob didn't give a usable
+	 *  answer: nothing may be concluded, and above all nothing removed. */
+	async function readVaultSetup(): Promise<{ vault: ObsidianVault; leftOut: string[] } | null | undefined> {
 		const local = await run(["sync-list-local", "--json"]);
-		let listed = false;
+		let listed: boolean;
 		try {
 			const parsed = JSON.parse(local.stdout) as { vaults?: { path?: unknown }[] };
-			listed = Array.isArray(parsed.vaults) && parsed.vaults.some((v) => typeof v.path === "string" && sameDir(v.path, deps.vaultDir));
-		} catch { /* no list */ }
+			if (local.code !== 0 || !Array.isArray(parsed.vaults)) return undefined;
+			listed = parsed.vaults.some((v) => typeof v.path === "string" && sameDir(v.path, deps.vaultDir));
+		} catch {
+			return undefined;
+		}
 		if (!listed) return null;
 		const status = await run(["sync-status", "--path", deps.vaultDir, "--json"]);
 		try {
 			const parsed = JSON.parse(status.stdout) as { vaultId?: unknown; vaultName?: unknown; excludedFolders?: unknown };
-			if (!validVaultId(parsed.vaultId)) return null;
+			if (status.code !== 0 || !validVaultId(parsed.vaultId)) return undefined;
 			return {
 				vault: { id: parsed.vaultId, name: typeof parsed.vaultName === "string" ? parsed.vaultName : "" },
 				leftOut: Array.isArray(parsed.excludedFolders) ? parsed.excludedFolders.filter((f): f is string => typeof f === "string") : [],
 			};
 		} catch {
-			return null;
+			return undefined;
 		}
 	}
 
@@ -254,7 +262,8 @@ export function createObsidianSync(deps: ObsidianSyncDeps = defaultDeps()) {
 		const result = await run(["login"]);
 		const found = parseLoggedIn(result.output);
 		if (found) { account = found; tokenRefused = false; return; }
-		if (result.code !== 0 && !looksUnreachable(result.output)) {
+		// Only Obsidian's own refusal counts; a hiccup or no network doesn't.
+		if (result.code !== 0 && result.code !== null && obsidianErrorText(result.output)) {
 			tokenRefused = true;
 			if (vault) await haltSync("needs-sign-in");
 		}
@@ -273,6 +282,8 @@ export function createObsidianSync(deps: ObsidianSyncDeps = defaultDeps()) {
 		if (!hasToken) { account = null; tokenRefused = false; }
 		if (!recordLoaded) { record = deps.files.readRecord(); recordLoaded = true; }
 		const setup = await readVaultSetup();
+		setupUnknown = setup === undefined;
+		if (setup === undefined) return; // keep what was known
 		vault = setup?.vault ?? null;
 		leftOut = setup?.leftOut ?? [];
 		if (!vault) sync = null;
@@ -319,9 +330,9 @@ export function createObsidianSync(deps: ObsidianSyncDeps = defaultDeps()) {
 		"vault-gone": "the vault no longer exists in Obsidian Sync",
 	};
 
-	async function haltSync(state: ObsidianSyncState): Promise<void> {
+	async function haltSync(state: ObsidianSyncState, obsidianSaid = ""): Promise<void> {
 		clearRestart();
-		if (sync !== state) deps.log(`stopped: ${HALT_REASON[state] ?? state}`);
+		if (sync !== state) deps.log(`stopped: ${HALT_REASON[state] ?? state}${obsidianSaid ? ` (Obsidian said: ${obsidianSaid})` : ""}`);
 		sync = state;
 		await stopChild("halt");
 		sync = state;
@@ -401,7 +412,7 @@ export function createObsidianSync(deps: ObsidianSyncDeps = defaultDeps()) {
 				break;
 			case "auth":
 				tokenRefused = true;
-				void haltSync("needs-sign-in");
+				void haltSync("needs-sign-in", parsed.detail);
 				break;
 			case "subscription":
 				void haltSync("subscription");
@@ -456,6 +467,7 @@ export function createObsidianSync(deps: ObsidianSyncDeps = defaultDeps()) {
 		if (reason === "leave-out") {
 			void exclusive(async () => {
 				const folders = [...waitingToLeaveOut];
+				if (!vault) { waitingToLeaveOut.clear(); return; } // disconnected meanwhile
 				if (await leaveOut(folders)) {
 					waitingToLeaveOut.clear();
 					deps.log(`left out ${folders.length === 1 ? "a folder" : `${folders.length} folders`}`);
@@ -482,10 +494,20 @@ export function createObsidianSync(deps: ObsidianSyncDeps = defaultDeps()) {
 		if (!binary) { ready = false; watchInstall(); return; }
 		if (!hasToken || tokenRefused) { sync = "needs-sign-in"; return; }
 		// The safety check (owner-approved): never start with the notes gone.
-		if (vaultLooksEmptied(record.notesSeen, deps.files.countNotes(deps.vaultDir))) {
+		const notesNow = deps.files.countNotes(deps.vaultDir);
+		// LearnHarness's own record is gone (or ob was set up over SSH), so there
+		// is no count to compare with. ob's memory decides: with one, an empty
+		// notes folder means the notes went missing.
+		const noRecord = record.connectedAt === null;
+		const remembered = deps.files.hasSyncState(deps.configDir, vault.id);
+		if (vaultLooksEmptied(record.notesSeen, notesNow) || (noRecord && remembered && notesNow === 0)) {
 			sync = "paused";
 			deps.log("paused: the server's copy of the notes is missing or much smaller than before");
 			return;
+		}
+		if (noRecord) {
+			record = { ...record, connectedAt: deps.now(), notesSeen: notesNow, firstSyncDone: remembered && notesNow > 0 };
+			saveRecord();
 		}
 		if (!(await leaveOut(foldersToLeaveOut(deps.files.topLevelFolders(deps.vaultDir), leftOut)))) {
 			deps.log("couldn't update the excluded folders; trying again shortly");
@@ -647,7 +669,7 @@ export function createObsidianSync(deps: ObsidianSyncDeps = defaultDeps()) {
 			const list = result.code === 0 ? parseVaultList(result.stdout) : null;
 			if (list) return list.length ? { ok: true, vaults: list } : { ok: false, error: OBSIDIAN_TEXT.noVaults };
 			if (result.output.includes("No account logged in")) { hasToken = false; account = null; return { ok: false, error: SIGN_IN_AGAIN }; }
-			if (looksUnreachable(result.output) && !obsidianErrorText(result.output)) return { ok: false, error: OBSIDIAN_TEXT.unreachable };
+			if (!obsidianErrorText(result.output)) return { ok: false, error: OBSIDIAN_TEXT.unreachable };
 			tokenRefused = true;
 			return { ok: false, error: SIGN_IN_AGAIN };
 		});
@@ -660,10 +682,14 @@ export function createObsidianSync(deps: ObsidianSyncDeps = defaultDeps()) {
 		return exclusive(() => during("connect", async (): Promise<ObsidianActionResult> => {
 			await refresh();
 			if (!ready) return { ok: false, error: OBSIDIAN_TEXT.installing };
+			if (setupUnknown) return { ok: false, error: NO_ANSWER };
 			if (vault) return { ok: false, error: "A vault is already connected. Disconnect it first." };
 			if (!hasToken) return { ok: false, error: SIGN_IN_AGAIN };
-			// No vault is set up, so nothing here is synced: leftovers from an
-			// interrupted disconnect must not be merged into the fresh download.
+			// ob has no setup for this folder, so nothing in it is synced. Start
+			// clean on both sides: no memory of an earlier sync in ob (it would
+			// delete every remembered file from Obsidian), and no leftover files
+			// here (they would be merged into the fresh download).
+			deps.files.removeStaleSyncState(deps.configDir, deps.vaultDir, vaultId);
 			fs.mkdirSync(/* turbopackIgnore: true */ deps.vaultDir, { recursive: true });
 			if (!deps.files.isEmptyDir(deps.vaultDir)) deps.files.emptyVault(deps.vaultDir);
 			const result = await run(["sync-setup", "--vault", vaultId, "--path", deps.vaultDir, "--device-name", OB_DEVICE_NAME], secret);
@@ -674,6 +700,7 @@ export function createObsidianSync(deps: ObsidianSyncDeps = defaultDeps()) {
 			}
 			await run(["sync-config", "--path", deps.vaultDir, "--conflict-strategy", OB_CONFLICT_STRATEGY, "--json"]);
 			const setup = await readVaultSetup();
+			setupUnknown = setup === undefined;
 			if (!setup) return { ok: false, error: "The vault couldn't be connected. Try again." };
 			vault = setup.vault;
 			leftOut = setup.leftOut;
@@ -695,6 +722,7 @@ export function createObsidianSync(deps: ObsidianSyncDeps = defaultDeps()) {
 		return exclusive(() => during("disconnect", async (): Promise<ObsidianActionResult> => {
 			await refresh();
 			if (!ready) return { ok: false, error: OBSIDIAN_TEXT.installing };
+			if (setupUnknown) return { ok: false, error: NO_ANSWER };
 			if (vault) {
 				unsyncedCache = null;
 				if (force !== true && unsyncedNow()) return { ok: false, error: OBSIDIAN_TEXT.unsynced, unsynced: true };
@@ -703,7 +731,7 @@ export function createObsidianSync(deps: ObsidianSyncDeps = defaultDeps()) {
 				await run(["sync-unlink", "--path", deps.vaultDir]);
 				// The copy is removed only once ob no longer syncs this folder:
 				// a removal ob could still see would delete the notes everywhere.
-				if (await readVaultSetup()) return { ok: false, error: "Obsidian's sync program couldn't be disconnected, so nothing was removed. Try again." };
+				if ((await readVaultSetup()) !== null) return { ok: false, error: "Obsidian's sync program couldn't be disconnected, so nothing was removed. Try again." };
 				vault = null;
 				pointNotes();
 				deps.files.emptyVault(deps.vaultDir);

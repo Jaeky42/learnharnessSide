@@ -101,7 +101,7 @@ export type ObLine =
 	| { kind: "connecting" }
 	| { kind: "connected" }
 	| { kind: "offline" }
-	| { kind: "auth" }
+	| { kind: "auth"; detail: string }
 	| { kind: "subscription" }
 	| { kind: "vault-gone" }
 	| { kind: "locked" }
@@ -114,7 +114,7 @@ export function parseObLine(raw: string): ObLine {
 	if (!line) return { kind: "other" };
 	if (line.includes("Your subscription to Obsidian Sync has expired")) return { kind: "subscription" };
 	if (line.includes("The connected remote vault no longer exists") || line.includes("Vault not found")) return { kind: "vault-gone" };
-	if (line.includes("Failed to authenticate")) return { kind: "auth" };
+	if (line.includes("Failed to authenticate")) return { kind: "auth", detail: line.slice(line.indexOf("Failed to authenticate") + "Failed to authenticate".length).replace(/^[:\s]+/, "").slice(0, 200) };
 	if (line.includes("Another sync instance is already running")) return { kind: "locked" };
 	if (line.startsWith("Downloading ")) return { kind: "downloading", path: line.slice("Downloading ".length) };
 	if (line.startsWith("Downloaded ")) return { kind: "downloaded", path: line.slice("Downloaded ".length) };

@@ -77,7 +77,7 @@ describe("Obsidian sync rules", () => {
 		for (const line of ["Error: Unable to connect to server.", "Error: The connection to the server has encountered an error.", "Disconnected from server", "Waiting to connect to server", "Error: Disconnected. Code: 1001 going away"]) {
 			assert.equal(parseObLine(line).kind, "offline", line);
 		}
-		assert.equal(parseObLine("Error: Failed to authenticate: Not logged in").kind, "auth");
+		assert.deepEqual(parseObLine("Error: Failed to authenticate: Not logged in"), { kind: "auth", detail: "Not logged in" });
 		// The subscription and missing-vault messages arrive inside the same error.
 		assert.equal(parseObLine("Error: Failed to authenticate: Your subscription to Obsidian Sync has expired").kind, "subscription");
 		assert.equal(parseObLine("The connected remote vault no longer exists.").kind, "vault-gone");
@@ -218,6 +218,27 @@ describe("Obsidian sync files", () => {
 		assert.deepEqual(fs.readdirSync(vault), [], "the folder itself stays");
 	});
 
+	it("clears ob's memory of this vault or folder before a fresh connect, and nothing else", () => {
+		const config = path.join(TMP, "ob-stale");
+		const vaultDir = path.join(TMP, "ob-stale-vault");
+		const make = (id: string, settings: string | null, state = true) => {
+			const dir = path.join(config, "sync", id);
+			fs.mkdirSync(dir, { recursive: true });
+			if (settings !== null) fs.writeFileSync(path.join(dir, "config.json"), settings);
+			if (state) fs.writeFileSync(path.join(dir, "state.db"), "memory");
+		};
+		make("vault1", "{ damaged");                                                  // the vault being connected
+		make("oldvault", JSON.stringify({ vaultId: "oldvault", vaultPath: vaultDir })); // another vault, same folder
+		make("unreadable", null);                                                     // no settings at all
+		make("elsewhere", JSON.stringify({ vaultId: "elsewhere", vaultPath: path.join(TMP, "some-other-folder") }));
+		assert.equal(obsidianSyncFiles.hasSyncState(config, "vault1"), true);
+		assert.equal(obsidianSyncFiles.hasSyncState(config, "../vault1"), false);
+		obsidianSyncFiles.removeStaleSyncState(config, vaultDir, "vault1");
+		assert.deepEqual(fs.readdirSync(path.join(config, "sync")), ["elsewhere"], "a vault set up for another folder is left alone");
+		assert.equal(obsidianSyncFiles.hasSyncState(config, "vault1"), false);
+		obsidianSyncFiles.removeStaleSyncState(path.join(TMP, "no-such-config"), vaultDir, "vault1");
+	});
+
 	it("writes excluded folders into ob's own settings only for the right vault", () => {
 		const config = path.join(TMP, "ob-config");
 		const file = path.join(config, "sync", "vault1", "config.json");
@@ -347,7 +368,7 @@ function world(name: string) {
 
 	const spawned: string[][] = [];
 	const notesPointer: { dir: string | null } = { dir: null };
-	const flags = { installed: true, crash: false };
+	const flags = { installed: true, crash: false, noAnswer: false };
 	const log: string[] = [];
 	const deps: ObsidianSyncDeps = {
 		binary: () => (flags.installed ? realOb : null),
@@ -355,6 +376,7 @@ function world(name: string) {
 			spawned.push(args);
 			const env = { ...process.env, LH_FAKE_OBSIDIAN: remoteFile, XDG_CONFIG_HOME: xdg, HOME: dir };
 			if (flags.crash && args[0] === "sync") return spawn(process.execPath, ["-e", "process.exit(1)"], { stdio: "pipe" }) as ChildProcessWithoutNullStreams;
+			if (flags.noAnswer && args[0] === "sync-list-local") return spawn(process.execPath, ["-e", "process.exit(1)"], { stdio: "pipe" }) as ChildProcessWithoutNullStreams;
 			return spawn(process.execPath, ["--require", PRELOAD, binary, ...args], { env, stdio: "pipe" }) as ChildProcessWithoutNullStreams;
 		},
 		vaultDir,
@@ -366,7 +388,7 @@ function world(name: string) {
 		timing: { restartBaseMs: 80, restartMaxMs: 400, scanMs: 150, commandMs: 30_000, stopMs: 8_000, installPollMs: 80, lockMs: 5_200, offlineGraceMs: 300 },
 	};
 	const inVault = (...parts: string[]) => path.join(vaultDir, ...parts);
-	return { dir, vaultDir, xdg, deps, spawned, notesPointer, flags, log, addRemote, editRemote, readRemote, inVault };
+	return { dir, vaultDir, xdg, recordFile, deps, spawned, notesPointer, flags, log, addRemote, editRemote, readRemote, inVault };
 }
 
 const SEED: [string, string | null][] = [
@@ -660,6 +682,91 @@ describe("Obsidian sync manager with the real ob program", { skip: realOb ? fals
 		const commands = w.spawned.map((args) => args[0]);
 		assert.ok(commands.lastIndexOf("sync-unlink") > commands.lastIndexOf("sync"));
 		assert.ok(commands.lastIndexOf("logout") > commands.lastIndexOf("sync-unlink"));
+	});
+
+	it("never deletes from Obsidian when its own memory, LearnHarness's record or ob's answers go wrong", async () => {
+		const seed: [string, string | null][] = [...SEED, ["LearnHarness/Third.md", "3\n"]];
+		const connected = async (name: string) => {
+			const w = world(name);
+			w.addRemote(...seed);
+			const m = start(w);
+			await m.boot();
+			await m.signIn("learner@example.invalid", "right password", "");
+			await m.connect("vault1", "vault password");
+			await until(() => m.view().sync === "up-to-date", "the first download");
+			return { w, m };
+		};
+		const nothingDeleted = (w: ReturnType<typeof world>) => assert.equal(w.readRemote().records.some((r) => r.deleted), false, "nothing was deleted from Obsidian");
+		const syncMemory = (w: ReturnType<typeof world>) => path.join(w.xdg, "obsidian-headless", "sync", "vault1");
+
+		// 1. ob loses its settings but keeps its memory of the sync. A new
+		// connect empties the folder; on top of the old memory ob would then
+		// delete every remembered note. The memory is cleared first.
+		{
+			const { w, m } = await connected("stale-memory");
+			await m.shutdown();
+			assert.ok(fs.existsSync(path.join(syncMemory(w), "state.db")), "ob remembers the sync");
+			fs.writeFileSync(path.join(syncMemory(w), "config.json"), "{ damaged");
+			const again = start(w);
+			await again.boot();
+			assert.equal(again.view().phase, "signed-in", "ob no longer lists the folder");
+			assert.deepEqual(await again.connect("vault1", "vault password"), { ok: true });
+			await until(() => again.view().sync === "up-to-date", "the fresh download");
+			assert.equal(fs.readFileSync(w.inVault("LearnHarness", "Third.md"), "utf8"), "3\n");
+			await sleep(300);
+			nothingDeleted(w);
+			await again.shutdown();
+		}
+
+		// 2. LearnHarness's own record is lost and the notes folder is empty,
+		// but ob remembers a sync: paused, whatever the record says.
+		{
+			const { w, m } = await connected("lost-record");
+			await m.shutdown();
+			fs.rmSync(w.recordFile, { force: true });
+			fs.rmSync(w.inVault("LearnHarness"), { recursive: true, force: true });
+			const again = start(w);
+			await again.boot();
+			assert.equal(again.view().sync, "paused");
+			await sleep(300);
+			nothingDeleted(w);
+			await again.shutdown();
+		}
+
+		// 3. Only the record is lost: the notes are there, so sync carries on.
+		{
+			const { w, m } = await connected("lost-record-only");
+			await m.shutdown();
+			fs.rmSync(w.recordFile, { force: true });
+			const again = start(w);
+			await again.boot();
+			await until(() => again.view().sync === "up-to-date", "sync without the record");
+			nothingDeleted(w);
+			assert.equal(obsidianSyncFiles.readRecord(w.recordFile).notesSeen, 3, "the record is rebuilt from what is there");
+			await again.shutdown();
+		}
+
+		// 4. ob gives no usable answer about its setup: nothing is concluded
+		// from that, and nothing is removed.
+		{
+			const { w, m } = await connected("no-answer");
+			w.flags.noAnswer = true;
+			assert.deepEqual(await m.disconnect(true), { ok: false, error: "Obsidian's sync program didn't answer. Try again." });
+			assert.equal(m.view().phase, "connected");
+			assert.ok(fs.existsSync(w.inVault("LearnHarness", "Third.md")), "the server's copy is untouched");
+			assert.deepEqual(await m.connect("vault1", "vault password"), { ok: false, error: "Obsidian's sync program didn't answer. Try again." });
+			assert.ok(fs.existsSync(w.inVault("LearnHarness", "Third.md")));
+			// A restart while ob isn't answering doesn't forget the vault for good.
+			await m.shutdown();
+			const again = start(w);
+			await again.boot();
+			assert.ok(fs.existsSync(w.inVault("LearnHarness", "Third.md")));
+			w.flags.noAnswer = false;
+			await again.retry();
+			await until(() => again.view().sync === "up-to-date", "sync once ob answers again");
+			nothingDeleted(w);
+			await again.shutdown();
+		}
 	});
 
 	/** The running `ob sync` process, found by its lock folder's owner being alive. */
