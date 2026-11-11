@@ -287,19 +287,110 @@ describe("a desktop's first sync", () => {
 		assert.deepEqual(desk.requests[1], { changes: 0, all: false });
 	});
 
-	it("a second desktop's first sync follows the same rule", async () => {
+	it("the server's records lost: the next desktop to sync is the first again", async () => {
 		const { w, desk } = before();
 		await desk.sync.round();
+		w.resetServer();
 		const laptop = w.desktop("dev_bbbbbbbbbbbbbbbb");
 		laptop.set("s|appearance.mode", "light");
 		w.pass(HOUR);
 		await laptop.sync.round();
-		assert.equal(w.server.get("s|appearance.mode"), "light");
-		assert.equal(w.server.get("s|dictation.language"), null, "not set on the laptop: back to its default");
-		assert.equal(w.server.get("p|teacher/20-teaching.md"), "the desktop's text", "texts are joined, never dropped");
+		assert.equal(w.server.get("s|appearance.mode"), "light", "nobody is on record as having synced, so it brings its values");
+	});
+});
+
+describe("a PC paired later takes the server's settings (only the first PC brings its own)", () => {
+	/** The first PC has synced; the server now carries its settings. */
+	async function withFirstPc() {
+		const w = world();
+		const desk = w.desktop("dev_aaaaaaaaaaaaaaaa");
+		desk.set("s|appearance.mode", "dark");
+		desk.set("s|dictation.language", "sv");
+		desk.set("f|fold_d", { id: "fold_d", name: "Physics", parentId: null, createdAt: "2026-10-01" });
+		desk.set("p|teacher/20-teaching.md", "the desktop's text");
+		desk.set("x|n_1", { x: 1, y: 1 });
+		await desk.sync.round();
+		w.pass(HOUR);
+		return { w, desk };
+	}
+
+	it("a fresh install changes nothing anywhere, and gets everything", async () => {
+		const { w, desk } = await withFirstPc();
+		const before = w.server.all();
+		const laptop = w.desktop("dev_bbbbbbbbbbbbbbbb");
+		assert.deepEqual(await laptop.sync.round(), { ok: true, sent: 0, applied: 5 });
+		assert.deepEqual(w.server.all(), before, "nothing went back to a default");
+		assert.deepEqual(laptop.all(), before);
+		await desk.sync.round();
+		assert.deepEqual(desk.all(), before);
+	});
+
+	it("its synced settings become the server's, \"not set\" included", async () => {
+		const { w, desk } = await withFirstPc();
+		const laptop = w.desktop("dev_bbbbbbbbbbbbbbbb");
+		laptop.set("s|appearance.mode", "light"); // differs from the server's
+		laptop.set("s|appearance.proseFontSize", 22); // not set on the server
+		laptop.set("s|agent.tools|web_search", false); // not set on the server
+		await laptop.sync.round();
+		assert.equal(w.server.get("s|appearance.mode"), "dark");
+		assert.equal(laptop.get("s|appearance.mode"), "dark");
+		assert.equal(laptop.get("s|dictation.language"), "sv", "set on the server only: the laptop takes it");
+		assert.equal(w.server.get("s|appearance.proseFontSize"), null, "the server's stays not set");
+		assert.equal(laptop.get("s|appearance.proseFontSize"), null, "and the laptop goes back to the default");
+		assert.equal(laptop.get("s|agent.tools|web_search"), null);
+		assert.deepEqual(laptop.all(), w.server.all());
+		// It doesn't come back at the next round, on either PC.
+		w.pass(10_000);
+		assert.deepEqual(await laptop.sync.round(), { ok: true, sent: 0, applied: 0 });
+		await desk.sync.round();
+		assert.equal(desk.get("s|appearance.mode"), "dark");
+		assert.equal(desk.get("s|appearance.proseFontSize"), null);
+	});
+
+	it("where both have the same item the server's is kept; what only the new PC has is added", async () => {
+		const { w, desk } = await withFirstPc();
+		const laptop = w.desktop("dev_bbbbbbbbbbbbbbbb");
+		laptop.set("p|teacher/20-teaching.md", "the laptop's text");
+		laptop.set("x|n_1", { x: 7, y: 7 });
+		laptop.set("f|fold_d", { id: "fold_d", name: "Renamed on the laptop", parentId: null, createdAt: "2026-10-01" });
+		laptop.set("f|fold_l", { id: "fold_l", name: "Only on the laptop", parentId: null, createdAt: "2026-10-05" });
+		laptop.set("p|system-prompt.md", "only on the laptop");
+		laptop.set("x|n_9", { x: 9, y: 9 });
+		laptop.set("n|src_l", { id: "src_l", filePath: "C:\\notes.md", importedAt: "2026-10-06" });
+		await laptop.sync.round();
+		assert.equal(w.server.get("p|teacher/20-teaching.md"), "the desktop's text");
+		assert.deepEqual(w.server.get("x|n_1"), { x: 1, y: 1 });
+		assert.equal((w.server.get("f|fold_d") as { name: string }).name, "Physics");
+		assert.equal((w.server.get("f|fold_l") as { name: string }).name, "Only on the laptop");
+		assert.equal(w.server.get("p|system-prompt.md"), "only on the laptop");
+		assert.deepEqual(w.server.get("x|n_9"), { x: 9, y: 9 });
+		assert.equal((w.server.get("n|src_l") as { id: string }).id, "src_l");
+		assert.deepEqual(laptop.all(), w.server.all());
 		await desk.sync.round();
 		assert.deepEqual(desk.all(), w.server.all());
-		assert.deepEqual(laptop.all(), w.server.all());
+	});
+
+	it("afterwards the laptop is like any other PC: its latest change wins", async () => {
+		const { w, desk } = await withFirstPc();
+		const laptop = w.desktop("dev_bbbbbbbbbbbbbbbb");
+		laptop.set("s|appearance.mode", "light");
+		await laptop.sync.round();
+		assert.equal(laptop.get("s|appearance.mode"), "dark");
+		w.pass(HOUR);
+		laptop.set("s|appearance.mode", "light");
+		await laptop.sync.round();
+		assert.equal(w.server.get("s|appearance.mode"), "light");
+		await desk.sync.round();
+		assert.equal(desk.get("s|appearance.mode"), "light");
+	});
+
+	it("the first PC removed and paired anew is still not a first PC", async () => {
+		const { w } = await withFirstPc();
+		// A new device id (it paired with another server in between, or was reinstalled).
+		const again = w.desktop("dev_cccccccccccccccc");
+		again.set("s|appearance.mode", "light");
+		await again.sync.round();
+		assert.equal(w.server.get("s|appearance.mode"), "dark");
 	});
 });
 

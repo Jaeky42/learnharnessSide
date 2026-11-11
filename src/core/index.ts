@@ -95,3 +95,7 @@ export * from "./side-tutor.ts";
 export * from "./notes.ts";
 // The Obsidian vault on the cloud server (cloud sync Phase 4): rules and wording.
 export * from "./obsidian-sync.ts";
+// The sync screens (cloud sync Phase 6): the approved wording, and the
+// server address rule the pairing form shares with the engine. Both pure.
+export * from "./sync/screens.ts";
+export { normalizeServerAddress, type ServerAddress } from "./sync/address.ts";

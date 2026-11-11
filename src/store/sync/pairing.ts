@@ -8,8 +8,10 @@
  * files (src/agent/tools/fs-shared.ts). Absent = this app has never been
  * paired, and then nothing in the sync engine runs.
  *
- * `key: null` means the server has unpaired this desktop: the device id and
- * address are kept, so pairing again reconnects it as the same device.
+ * `key: null` means this desktop is unpaired: the device id and address are
+ * kept, so pairing again reconnects it as the same device. `unpairedHere`
+ * says the learner unpaired it on this PC ("Unpair this PC", Phase 6);
+ * without it, the server removed this desktop.
  */
 
 import fs from "node:fs";
@@ -28,6 +30,8 @@ export interface CloudPairing {
 	server: string;
 	key: string | null;
 	pairedAt: number | null;
+	/** The learner pressed "Unpair this PC" here: nothing reminds them to pair again. */
+	unpairedHere?: true;
 }
 
 export function cloudPairingFile(authFile: string = AUTH_FILE): string {
@@ -53,6 +57,7 @@ export function readCloudPairing(file: string = cloudPairingFile()): CloudPairin
 		server: value.server,
 		key: value.key,
 		pairedAt: typeof value.pairedAt === "number" ? value.pairedAt : null,
+		...(value.key === null && value.unpairedHere === true ? { unpairedHere: true as const } : {}),
 	};
 }
 

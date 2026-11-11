@@ -108,3 +108,12 @@ export interface SessionChange {
 /** The refusal every write to a session held elsewhere gets. */
 export const HELD_ELSEWHERE_CODE = "session_held_elsewhere";
 export const HELD_ELSEWHERE_MESSAGE = "This session is held by another device. Take it over to continue it here.";
+
+/**
+ * A plain marker cookie the app's own server sets only where sync is in use
+ * (Phase 6): a PC that is paired or was removed by its server, and a server
+ * some desktop has synced with. Pages with the marker ask their server about
+ * sync; pages without it never do, so an unpaired app makes no new request.
+ * Not a credential.
+ */
+export const SYNC_MARKER_COOKIE = "lh_cloud";

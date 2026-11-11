@@ -49,7 +49,11 @@ export function resetCloudLink(): void {
 	delete globals.__lhCloudLink;
 }
 
-export type CloudSyncState = "off" | "starting" | "ok" | "offline" | "paused" | "needs-pairing";
+/**
+ * "needs-pairing": the server removed this desktop. "unpaired": the learner
+ * unpaired it here (Phase 6), and nothing reminds them to pair again.
+ */
+export type CloudSyncState = "off" | "starting" | "ok" | "offline" | "paused" | "needs-pairing" | "unpaired";
 
 export interface CloudStatus {
 	role: "desktop";
@@ -69,7 +73,7 @@ export function cloudStatus(): CloudStatus {
 	const pairing = readCloudPairing();
 	if (!pairing) return { role: "desktop", paired: false, server: null, device: null, sync: { state: "off", message: null, lastContactAt: null } };
 	const state = link();
-	const syncState: CloudSyncState = !pairing.key ? "needs-pairing"
+	const syncState: CloudSyncState = !pairing.key ? (pairing.unpairedHere ? "unpaired" : "needs-pairing")
 		: state.pause ? "paused"
 		: state.offline ? "offline"
 		: state.lastContactAt === null ? "starting"

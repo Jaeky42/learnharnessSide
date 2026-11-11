@@ -161,6 +161,11 @@ export function startSyncLoop(): SyncLoop {
 	return loop;
 }
 
+/** "Unpair this PC": this app's loop, if it runs, stops and sets no further timer. */
+export function stopSyncLoop(): void {
+	globals.__lhSyncLoop?.stop();
+}
+
 /** After pairing, or for "Sync now": make sure the loop runs, and run a round at once. */
 export function kickSyncLoop(): void {
 	startSyncLoop().now();

@@ -1,6 +1,6 @@
 # Cloud sync: approved plan
 
-Status: **Phases 1–4 done (server mode, sign-in on the server, phone layouts, the Obsidian vault on the server). Phase 5 (the sync engine) is built, all six slices: a paired desktop and the server keep sessions, the graph, settings and folders in step. It has no screens yet; those are Phase 6, and until then nothing can be paired from the app.** Work happens on a separate branch. It merges into `side-tutor` only once the whole feature works and the owner approves the merge, because every push to `side-tutor` publishes a release. Change these decisions only with the owner's approval.
+Status: **Phases 1–4 done (server mode, sign-in on the server, phone layouts, the Obsidian vault on the server). Phase 5 (the sync engine) is built, all six slices: a paired desktop and the server keep sessions, the graph, settings and folders in step. Phase 6 (the screens) is planned and approved, and its first slice is built: Settings → Cloud on the desktop app (pairing, sync state, Unpair) and on the server's site (paired desktop apps, pairing codes). "Held by …", Take over, the sync chip and the notices are still to build.** Work happens on a separate branch. It merges into `side-tutor` only once the whole feature works and the owner approves the merge, because every push to `side-tutor` publishes a release. Change these decisions only with the owner's approval.
 
 Goal: keep learning progress on several devices. The Windows desktop app stays fully usable, works offline, and keeps the Obsidian connection. A phone uses LearnHarness from the browser.
 
@@ -355,7 +355,10 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 4. ✅ **Vault on the server.** Settings → Obsidian, the sync manager around `ob`, folders left out automatically, the safety check and Disconnect. Verified by the owner on the server with their real Obsidian account.
 5. ✅ **Sync engine.** Pairing and device keys, the lease API, session sync with take-over (no copies: unsent turns are discarded), graph line and operation sync, per-key settings merges, and the sync protocol version check. Run between two built copies; not yet between the owner's real PC and server, which needs Phase 6's screens.
    - Built as wrapper stores at the composition root (`src/server/stores.ts`) over the `core/ports.ts` interfaces, so upstream store code stays untouched and rebasing onto upstream stays cheap.
-6. **Desktop sync UI.** Settings → Cloud (server URL, sign-in, device name, Sync now); a sync status chip; lease state on each session.
+6. **Sync screens** (desktop app, server's site and phone). Plan approved by the owner; see "Phase 6, the sync screens".
+   - ✅ Slice 1: Settings → Cloud on both sides (pairing, sync state, Sync now, Unpair this PC; paired desktop apps and pairing codes on the server), with four engine changes.
+   - Slice 2: a held session (the list line, the strip, Take over, the warning box, greyed controls).
+   - Slice 3: the desktop's own notices (the sync chip, the offline strip, the discard box).
 7. **Tests and docs.** Lease, take-over and graph operation tests; an end-to-end test with two servers and one cloud; and an update of this file from "planned" to built.
 
 ## Handoff: where things stand and how to continue
@@ -439,19 +442,20 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 
 ### Phase 5, the sync engine (built), and what comes next
 
-**The owner approved the Phase 5 plan page, and all six slices are built** ("Phase 5: what is built"). **Next is Phase 6, the screens** ("Later phases" lists its open questions; ask them one at a time before building).
+**The owner approved the Phase 5 plan page, and all six slices are built** ("Phase 5: what is built"). **Phase 6, the screens, is under way**: its plan is approved and slice 1 is built ("Phase 6, the sync screens", below). Phase 6 changed four of the engine's rules at the owner's request; they are listed there, and the Phase 5 text below is corrected where it described the old rule.
 
 **What the owner can and can't see now**
 
-- **Can't see:** anything new. There is no Settings → Cloud, no pairing form, no "Held by …" line, no Take over button. Nothing in the app can pair a desktop yet, so on the owner's server and phone the engine stays switched off.
+- **Can see, since Phase 6 slice 1:** a Cloud row in the server's Settings ("No desktop app is paired.", Add a desktop app). There is no desktop app with this code installed anywhere, so nothing is paired and the engine stays switched off on the owner's server and phone.
+- **Can't see yet:** a "Held by …" line, Take over, the sync chip or the notices (slices 2 and 3).
 - **What an update to the server should look like:** exactly as before. That is the thing to check.
 - **Can see:** the page of screenshots and timings from two copies syncing (shown to the owner at the end of Phase 5).
-- **Only the API exists:** `GET | POST /api/cloud` on the app, `POST /api/server-auth/desktops` on the server's site. Phase 6 puts screens on them.
+- **The API under the screens:** `GET | POST /api/cloud` on the app, `POST /api/server-auth/desktops` on the server's site.
 
 #### Phase 5 decisions (owner, asked one at a time)
 
 1. **Signing in: a pairing code.** The server's site (Settings → Account, signed in) shows a code that works once, for 10 minutes. The desktop app takes the server address and the code and gets its own device key. The key works only for the sync API, is stored on the server only as a hash, and never involves the server password.
-2. **Pairing lasts until removed.** No time limit. A desktop is unpaired by its own Remove button, and also by Sign out everywhere, a password change and `reset-password`, as those sign out every other device. Unpairing deletes nothing on the PC. A new code reconnects it as the same device, with whatever it hadn't synced.
+2. **Pairing lasts until removed.** No time limit. A desktop is unpaired by its own Remove button, and also by Sign out everywhere, a password change and `reset-password`, as those sign out every other device. Unpairing deletes nothing on the PC. A new code reconnects it as the same device, with whatever it hadn't synced. (Phase 6 added the PC's own **Unpair this PC**; see there.)
 3. **Trying the desktop side: two server copies only.** No desktop test build and no run from source. One copy plays the desktop and one plays the server, in automated tests and browser runs. The owner tries nothing on the PC before the merge, so **sync must stay off in the app until it is paired**, and an unpaired app must behave exactly as today.
 4. **First sync: combine both libraries.** Pairing deletes nothing. Desktop sessions go up and cloud sessions come down, each still held by the side it came from. The graphs are joined; a concept learned on both sides before pairing shows twice (the known limit).
 5. **A backup once per side**, right before that side's first sync: a dated folder under `backups/` beside the data folder (sessions, graph, side-tutor threads, jobs, settings; no credentials, not the vault). Restored by hand with a guide.
@@ -522,7 +526,7 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
   3. The stores (`src/server/sync/guarded-stores.ts`, wired in `src/server/stores.ts`): a write that still arrives, for example from background work that was running when a session moved, is dropped, never saved.
   - The notes home folder: its route leaves the record as it is on a held session and answers normally, so the drawer keeps working.
   - `recoverStaleJobs` skips sessions this copy doesn't hold, so fetching a session whose helper is still running elsewhere doesn't start it here.
-- **While unpaired or paused** the desktop still knows which sessions are held elsewhere (its identity is kept in `cloud-sync.json`), so they stay read-only and nothing is discarded.
+- **While paused, or unpaired by the server,** the desktop still knows which sessions are held elsewhere (its identity is kept in `cloud-sync.json`), so they stay read-only and nothing is discarded. After the learner's own **Unpair this PC** every session can be continued there (Phase 6, engine change 4).
 - **Deleting:** the holder's delete removes the session's files on the server and on every other device at their next round; a deleted id is never accepted again. The graph side of a deletion comes with slice 4.
 - **Wording added while building, for Phase 6:** "This session is held by another device. Take it over to continue it here." (the 409's text).
 - **The store wrappers call the inner store's method as it is at that moment**, never a reference taken at wiring time: upstream's tests replace methods on the inner store object.
@@ -586,11 +590,16 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
   - A desktop notes its changes with their times while it is offline or paused (`detect()`), so a change made on Monday is still Monday's when it reconnects on Wednesday.
   - A time from the future is cut back to the server's "now".
 - **One exchange** (`POST /api/sync/maps`): the desktop sends its changes and its place in the server's counter; the server takes each one newer than what it has and answers with everything changed since that place (and, for each item the desktop sent, either "same" or what the server has instead).
-- **A desktop's first sync** (owner: "where the two sides differ, the desktop's value is kept"):
+- **The first desktop's first sync** (owner: "where the two sides differ, the desktop's value is kept"; since Phase 6 only for the first desktop a server ever syncs with):
   - an item both sides have, with different values: the desktop's;
   - a synced **setting** the server has set and the desktop hasn't: it goes back to its default on the server too (not set is the desktop's value);
   - everything else is joined: a folder, a prompt text, an imported-file record or a node place that only one side has is kept on both.
-  - **Read this way while building, for the owner to review:** the rule is applied at each desktop's first sync with a server, so a second desktop's settings would replace the first's; and a prompt text that only the server has is kept, with its switch off (the desktop's value).
+  - A prompt text that only the server has is kept, with its switch off (the desktop's value). The owner confirmed this in Phase 6.
+- **A desktop paired later** (owner, Phase 6: "only the first PC brings its settings", so a fresh install can't put every device back to its defaults). At its first sync:
+  - its synced settings become the server's, "not set" included;
+  - where both have the same folder, prompt text, imported-file record or node place, the server's is kept;
+  - anything of those kinds that only the new PC has is added on both sides.
+  - "First" is the server's record of which desktops have done a first sync (`devices` in `maps.json`). A server that lost that record treats the next desktop as the first again.
 - **A file that is there but can't be read is left alone**, on both sides: its items are neither sent, taken nor deleted that round. Reading a damaged `settings.json` as "no settings" would have reset the other side's.
 - **Chains-view folders changed on two devices at once** are made whole after every change that arrives (`withOrganizationItems`): a folder whose parent is gone, or that would sit inside itself, moves to the top; a source filed in a missing folder is unfiled. The same on every device.
 - **A value a file adjusts on the way in** (the settings sanitizer clamps a number, say) is recorded as adjusted and sent back once; it doesn't bounce.
@@ -671,16 +680,100 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 - **Phase 5 has no screens.** The owner sees nothing new until Phase 6; the thing to check after each update is that the server and phone work as before. The phase ended with a page of screenshots and timings from two copies syncing.
 - **Sample data for UI screenshots:** copy `tests/fixtures/golden-data` to a scratch `LH_DATA_DIR`. Truncating a copy of the teaching chat right after a `quiz` tool call gives a session with an open question. Phone screenshots: Playwright `devices["iPhone 13"]`; real touch (press and hold, pinch) through CDP `Input.dispatchTouchEvent`.
 
+### Phase 6, the sync screens (slice 1 built)
+
+**The plan was approved by the owner** after one question per decision and a plan page with a drawing of every screen. Slices 2 and 3 build what is listed under "Still to build"; their design is settled here, so build them as written and ask only about what this section doesn't cover.
+
+#### Phase 6 decisions (owner)
+
+1. **Trying it:** pictures and recordings from two copies (one plays the PC, one the server). Nothing is installed on the owner's PC before the merge.
+2. **An app that isn't paired** gets one new row in Settings, **Cloud**, under General. Nothing else changes: no chip, no strip, no request while Settings → Cloud is closed.
+3. **The pairing form:** one form with a short how-to (address, code, this PC's name, one sentence on what pairing does).
+4. **Paired:** the state, Sync now, and **Unpair this PC**.
+5. **On the server's site:** its own **Cloud** row, between Obsidian and Account. Account is unchanged.
+6. **The sync chip** (slice 3): at the foot of the session list, above Settings, **only when something is off**. An outline ring; ring and words in amber. It reads `OFFLINE`, `SYNC PAUSED` or `NOT PAIRED`. A click opens Settings → Cloud. Never on a PC that was never paired, never after the learner's own Unpair, never on the server's site or a phone.
+7. **Names:** the form suggests **Desktop** for a PC. The server is called **the web app** ("Held by the web app").
+8. **A held session** (slice 2): a strip under the top bar with the holder and **Take over**; no message box. The session list's second line reads "Held by Desktop" in place of the time.
+9. **While an online holder hands over** (slice 2): the strip changes in place, with **Cancel**.
+10. **The take-over warning** (slice 2): a confirm box with one wording; buttons Cancel and **Take over anyway** (red).
+11. **The offline heads-up** (slice 3): the same strip under the top bar, for as long as it lasts; the message box stays.
+12. **The discard notice** (slice 3): a box over the app, once, with OK.
+13. **Controls that can't work on a held session** (slice 2) are shown greyed out, not hidden: the side tutor's bubble, Rename and Delete in the session's menu, the title's click-to-rename. Tooltip on a computer: "Take this session over first".
+14. **How a strip appears and goes:** it fades and slides open from under the top bar over 200 ms (`cubic-bezier(0.2, 0.8, 0.2, 1)`, the message box's own easing), and closes the same way, so the lesson glides and nothing jumps. The message box fades over 150 ms. When a strip's words change in place they cross-fade over 150 ms. With reduced motion, at once. The owner chose it from three live demos.
+15. **A second PC paired later** takes the server's settings (engine change 2).
+16. **A prompt text only the server has** keeps its text with the switch off (as Phase 5 built it).
+17. **After the learner's own Unpair** the PC may continue every session (engine change 4), and nothing reminds them to pair again.
+
+#### The approved words
+
+Kept in one place: `src/core/sync/screens.ts`. Change them only with the owner's approval. Quoted names take curly quotes, as in the notes drawer.
+
+- **Desktop, Settings → Cloud, not paired.** Group "Cloud sync". "Keep this PC's sessions, graph and settings in step with your LearnHarness server." / "Server address" / "Pairing code" with "On the server's site: Settings → Cloud → Add a desktop app." / "This PC's name" (filled in: Desktop) with `Your other devices show it: “Held by Desktop”.` (the name follows what is typed) / "Pairing combines this PC's sessions with the server's. Nothing is deleted, and a backup is made first." / button **Pair** ("Pairing…" while it works). A refusal shows as a red line under the button, in the server's words (the Phase 5 list under slice 1).
+- **Pairing again with the same server** replaces the "Nothing is deleted" sentence with: "This PC was paired with this server before. Where a session was continued on both sides since, the server's version is kept and what this PC added is discarded. A backup is made first."
+- **Desktop, paired.** "Up to date" / "Starting…" / "Syncing…" (during Sync now) / "Can't reach the server. Trying again." / "Update the server to continue syncing" / "Update LearnHarness to continue syncing". "Last synced just now", "… 2 minutes ago", then "… today, 14:02" or "… 9 Nov, 18:20". Rows "Server" and "This PC". Buttons **Sync now** and **Unpair this PC**; the confirm line: "Syncing stops. Nothing on this PC is deleted, and every session can be continued here." with **Unpair this PC** (red) and Cancel.
+- **Removed by the server:** "This PC is no longer paired." above the pairing form, which has the address and the name filled in.
+- **Unpaired without a connection:** `The server couldn't be told. Remove “Desktop” there too: Settings → Cloud.`
+- **Server, Settings → Cloud.** Group "Desktop apps". Each PC: its name, "Paired 12 Nov · online now" or "Paired 3 Nov · last seen 9 Nov, 18:20", **Remove**. Remove's confirm line: `“Desktop” stops syncing. Nothing on that PC is deleted.` with **Remove** (red) and Cancel. "No desktop app is paired." / **Add a desktop app** / "Pairing code" with "Works once, for 9:41" / "Server address" / "In the desktop app, open Settings → Cloud and enter both." / **New code**, **Done** / "This code has run out."
+- **Slice 2, the strip.** "Held by Desktop" (the server's site and phone add " · online" or " · offline since today, 14:02"; a desktop app knows only the name). Waiting: "Asking Desktop to hand it over…" and "Desktop is finishing a reply. This session moves here when it's done." (with "the web app" as the holder: "Asking the web app to hand it over…", "The web app is finishing a reply. …"). A failure: "Couldn't take it over. Try again." On a PC that can't reach the server, Take over is off and the strip adds "This PC can't reach the server, so it can't be taken over right now."
+- **Slice 2, the warning box.** Title `Take over “Circuits”?` / "Desktop has been offline since today, 14:02, and may have turns that never reached the server. If you take over, those turns are discarded when Desktop is back online." / Cancel, **Take over anyway**.
+- **Slice 3, the offline strip.** "This PC can't reach the server. If this session is taken over on another device before it reconnects, what you add here now is discarded." Paused: "Sync is paused. If this session is taken over on another device before sync is back, what you add here now is discarded." Removed by the server: "This PC isn't paired any more. If this session is taken over on another device before you pair again, what you add here now is discarded." (The owner changed the Settings line to "is no longer paired" and has been told this strip still reads "isn't paired any more"; they haven't asked for it to match.)
+- **Slice 3, the discard box.** Title `“Circuits” was taken over` / "It was taken over on another device while this PC was offline. 3 messages you sent here never reached the server and were discarded. The session now shows the server's version." / OK. One message: "1 message you sent here never reached the server and was discarded." None, but another change: "Changes made here that hadn't reached the server were discarded." Several sessions: one box titled "Sessions were taken over", one line each.
+
+#### Smaller rules (proposed in the plan page, approved with it)
+
+- **After the learner's own Unpair, nothing nags:** no chip, no "no longer paired" strip. Both appear only when the PC was removed from the server's side.
+- **Quiet for short blips** (slice 3): the chip and the offline strip appear once the PC has failed to reach the server for 30 seconds; at once if the app starts with no connection.
+- **The offline strip shows in every session the PC can continue** (slice 3), also one created while offline that nobody could take over. Telling those apart needs one more fact from the engine; the owner was told and hasn't asked for it.
+- **After a take-over** the strip goes, the message box and the greyed controls come back, and nothing else is announced.
+- **If the side tutor's window is open** when a session becomes held, it closes to its greyed bubble.
+- **Practice sessions** get the same strips as teaching sessions.
+- **An open question's box** goes away with the message box on a held session, and so do the model and thinking pickers.
+- **Take over** asks again every 2 seconds while it waits; Cancel stops asking and the holder keeps the session.
+- **A PC removed on the server's site** that still holds sessions: they stay "Held by Desktop", offline, and can be taken over from the phone. (To do in slice 2: the server must remember a removed PC's name; today `deviceName` reads it from the login file, where it is gone.)
+- **How the pages stay current:** the app's live channel (`/api/events`), plus one check every 10 seconds, only where the marker says sync is in use.
+
+#### Engine changes made for Phase 6 (the owner was told before each)
+
+1. **A PC can remove itself.** `POST /api/sync/unpair` (a paired desktop's key): the server removes the device and takes the sessions it held as its own (`releaseDevice` in `authority.ts`). No protocol check, so a PC can leave a server it no longer speaks to.
+2. **Only the first PC brings its settings** ("Slice 5" above; `later` in `maps-sync.ts`).
+3. **A marker that sync is in use.** The proxy sets a plain `lh_cloud=1` cookie (`SYNC_MARKER_COOKIE`) when `syncInUse()` says so, and takes it away when not:
+   - a PC: it has a pairing file and the learner didn't unpair it here;
+   - the server: a desktop is paired, or one has ever synced (a removed PC can still hold sessions).
+   - Pages read it with `components/cloud/sync-marker.ts` (`useSyncInUse`). Settings → Cloud announces a pairing or an unpairing in the page (`SYNC_MARKER_EVENT`), because the cookie itself only follows at the app's next request. Slices 2 and 3 hang every request about sync on this marker, so an app that was never paired asks nothing.
+4. **After the learner's own Unpair, the PC may continue every session** (it changes the Phase 5 rule that kept other devices' sessions read-only on an unpaired PC). `src/server/sync/unpair.ts`, `release()` and `settleFreed()` in `desktop-sync.ts`:
+   - **Unpair:** one last round (when the server can be reached), then the server is told, then every session's record on the PC is marked its own, remembering whose it was (`freed: "mine" | "held"`). The pairing file keeps the address, name and device id, with `key: null` and `unpairedHere: true`. The loop stops, and doesn't start again at the next app start. The state reads `unpaired`.
+   - **It works offline:** the PC forgets its key; `told` is false and the screen says the server couldn't be told.
+   - **Paired again as the same device** (same server address): a fresh backup is made before the first round (`rejoin()`), then each freed session is settled once:
+     - not continued on the PC since: it is whose it was, and the usual round hears of anything that happened to it;
+     - continued on the PC only (the server's copy is still what the PC last synced): the PC asks for it back, without force, and sends its version. If another desktop is busy with it, the PC keeps its turns and asks again each round;
+     - continued on both sides: the server's version stays (no copies), with a discard notice;
+     - deleted on the server meanwhile: it goes on the PC too.
+   - **A PC the server removed** (`needs-pairing`) keeps the Phase 5 behaviour: nothing is freed.
+5. **Read-only additions to the status.** `GET /api/cloud` on the server now also returns `desktops` (id, name, pairedAt, online, lastSeenAt), from `presence()` in `authority.ts`, which knows "last heard from" to the second. A new sync state, `unpaired`, beside `needs-pairing`.
+
+The sync protocol version stays at 1: nothing has been paired anywhere yet.
+
+#### Slice 1: what is built
+
+- **Desktop:** `components/settings/cloud-section.tsx`. An unpaired PC asks its own server once, when the section opens; a paired one looks again every 5 seconds while the section is open. After a pairing or an unpairing it tells the page (`announceSyncInUse`).
+- **Server:** `components/settings/cloud-server-section.tsx`. The list is read from `GET /api/cloud`; it is checked every 3 seconds while a code is on screen (so a PC that pairs appears and the code box closes by itself) and every 10 seconds otherwise. The code and Remove go to `POST /api/server-auth/desktops`.
+- **Wiring:** `components/settings/settings-dialog.tsx` (one `cloud` row; the server's site renders the server section under it, everything else the desktop's).
+- **Wording added while building, beyond the plan page, for the owner to review:** "Cloud sync couldn't be checked. Try again." with **Check again** (the app's own server didn't answer), and "Something went wrong. Try again." where a request fails with no reason (the app's usual line).
+- **Read while building:** the line under the name box follows what is typed ("Held by Laptop"), where the plan's drawing showed it with the suggested name only.
+- **Tests:** `tests/cloud-ui.test.tsx` (both screens in every state, with the approved words, and the Settings rows), `tests/sync-unpair.test.ts` (Unpair, the server's side of it, pairing again, the marker), new cases in `tests/sync-maps.test.ts` (a PC paired later), and the marker's absence in `tests/sync-inert.test.ts`.
+- **Run between two built copies** in a browser, at computer and phone size: pairing, the first sync, Sync now, Unpair, pairing again, Remove on the server, a code running out.
+
+#### Still to build
+
+- **Slice 2:** screens 5 to 7 of the plan (the list line, the strip, Take over with its waiting lines, the warning box, greyed controls), on the desktop app, the server's site and the phone. The facts: `held` in `GET /api/cloud`, and the answers of `POST /api/cloud {op:"take-over"}` ("Slice 3: take-over" above).
+- **Slice 3:** the chip, the offline strip and the discard box, desktop only. The facts: `sync.state`, `sync.lastContactAt` and `notices` in `GET /api/cloud`. It needs a signal when the sync state changes, so the chip updates at once (a new server event; nothing sends one today).
+- **Then:** a full run between two copies with nobody pressing "sync", this file's last "planned" parts updated, and Phase 7.
+
 ### Later phases: decisions still open (ask when you get there)
 
-- **Phase 5 (sync engine):** answered and built. For the owner to review when the screens exist: the wording listed under slices 1 and 2, and the two readings of "the desktop's value is kept" under slice 5.
-- **Phase 6 (sync UI, desktop and phone):**
-  - where Settings → Cloud lives, and its pairing form (server address, code);
-  - "Add a desktop app" and the paired desktops in Settings → Account on the server;
-  - the sync status chip;
-  - the held-session line, Take over, and what it shows while an online holder finishes a reply;
-  - the wording of the take-over warning, the offline heads-up and the discard notice;
-  - device names (what a desktop and the server are called in "Held by …").
+- **Phase 5 (sync engine):** answered and built. The owner confirmed the wording listed under slices 1 and 2 with the Phase 6 plan page, and settled the two readings of "the desktop's value is kept" (decisions 15 and 16 above).
+- **Phase 6 (sync screens):** answered; see "Phase 6, the sync screens". Nothing is open.
+- **Phase 7 and the merge:** not started. The merge into `side-tutor` needs the owner's approval and a guide for pairing the real PC with the real server.
 
 ### Development notes for this work
 

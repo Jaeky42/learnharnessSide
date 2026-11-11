@@ -9,6 +9,9 @@
  *                                    → its device key. Wrong codes count
  *                                    toward the login lockout.
  *   POST /api/sync/hello             a paired desktop: the protocol check.
+ *   POST /api/sync/unpair            a paired desktop removes itself (Phase 6:
+ *                                    "Unpair this PC"); the sessions it held
+ *                                    become the server's own
  *   POST /api/sync/sessions          a paired desktop: "what changed since
  *                                    I last asked?" (slice 2)
  *   GET | PUT | DELETE /api/sync/sessions/<id>
@@ -139,6 +142,21 @@ export function helloResponse(request: Request, now = Date.now()): Response {
 	const refusal = protocolRefusal(request);
 	if (refusal) return refusal;
 	return json({ protocol: SYNC_PROTOCOL_VERSION, time: now, device: { id: device.id, name: device.name } });
+}
+
+/**
+ * A paired desktop removes itself ("Unpair this PC", Phase 6). It has sent
+ * what it had; from here each side continues on its own, so the sessions
+ * that desktop held become the server's.
+ */
+export function unpairSelfResponse(request: Request): Response {
+	if (!serverModeEnabled()) return notFound();
+	const device = deviceFromRequest(request);
+	if (!device) return json(NOT_PAIRED, 401);
+	updateServerAuthState((state) => ({ state: removeDevice(state, device.id), result: undefined }));
+	let released: string[] = [];
+	try { released = syncAuthority().releaseDevice(device.id); } catch { /* the device is removed either way */ }
+	return json({ ok: true, released: released.length });
 }
 
 // ─── Sessions (slice 2) ──────────────────────────────────────────────────────

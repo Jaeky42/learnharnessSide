@@ -1,7 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { desktopAPIAuthorized } from "./src/server/desktop-access.ts";
 import { SERVER_MARKER_COOKIE, serverGate, serverModeEnabled } from "./src/server/server-auth.ts";
-import { heldElsewhereResponse, sessionWritePath } from "./src/server/sync/engine.ts";
+import { SYNC_MARKER_COOKIE } from "./src/core/sync/sessions.ts";
+import { heldElsewhereResponse, sessionWritePath, syncInUse } from "./src/server/sync/engine.ts";
 
 /** Applies to every API method, including SSE and spending/settings routes.
  * No public callback or worker bypass: internal jobs call server functions,
@@ -31,6 +32,14 @@ export function proxy(request: NextRequest) {
 	// (components/settings/server-mode.ts). Not a credential.
 	if (serverModeEnabled() && !request.cookies.has(SERVER_MARKER_COOKIE)) {
 		response.cookies.set(SERVER_MARKER_COOKIE, "1", { path: "/", sameSite: "lax", secure: true, maxAge: 365 * 24 * 60 * 60 });
+	}
+	// Cloud sync (Phase 6): the same kind of marker for "sync is in use here"
+	// (components/cloud/sync-marker.ts). An app that was never paired never
+	// gets it, so its pages ask nothing about sync.
+	const inUse = syncInUse();
+	if (inUse !== request.cookies.has(SYNC_MARKER_COOKIE)) {
+		if (inUse) response.cookies.set(SYNC_MARKER_COOKIE, "1", { path: "/", sameSite: "lax", secure: serverModeEnabled(), maxAge: 365 * 24 * 60 * 60 });
+		else response.cookies.set(SYNC_MARKER_COOKIE, "", { path: "/", sameSite: "lax", secure: serverModeEnabled(), maxAge: 0 });
 	}
 	return response;
 }

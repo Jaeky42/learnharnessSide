@@ -34,6 +34,12 @@ export interface DesktopSession {
 	digest: string | null;
 	/** Both sides had a session with this id before they ever synced. Left alone on both. */
 	conflict?: true;
+	/**
+	 * The learner unpaired this PC ("Unpair this PC", Phase 6): it is no longer
+	 * syncing, so every session is its own to continue (`mine` is true). This
+	 * remembers whose it was, for when the PC is paired again.
+	 */
+	freed?: "mine" | "held";
 }
 
 /** Told to the learner after a discard (owner's rule: no copies, but never silently). */
@@ -57,6 +63,8 @@ export interface DesktopState {
 	sessions: Record<string, DesktopSession>;
 	/** Discards the learner hasn't been told about yet. */
 	notices?: DiscardNotice[];
+	/** Paired again with the same server: a fresh backup comes before the next sync. */
+	rebackup?: true;
 }
 
 export function isDesktopState(value: unknown): value is DesktopState {
@@ -108,6 +116,13 @@ export interface DesktopSync {
 	held(): Record<string, { id: string; name: string | null }>;
 	notices(): DiscardNotice[];
 	dismissNotice(chatId: string, at: number): void;
+	/**
+	 * The learner unpaired this PC here. Every session becomes its own to
+	 * continue; what each one was is remembered for a later pairing.
+	 */
+	release(): void;
+	/** This PC was paired again with the server it synced with before. */
+	rejoin(): void;
 }
 
 const sessionPath = (id: string) => `/api/sync/sessions/${encodeURIComponent(id)}`;
@@ -185,6 +200,79 @@ export function createDesktopSync(deps: DesktopSyncDeps): DesktopSync {
 		return true;
 	}
 
+	/**
+	 * After "Unpair this PC" every session was this PC's to continue. Paired
+	 * again, each one is settled once (owner's rules):
+	 *  - not continued here since: it is whose it was, and the usual round
+	 *    hears of anything that happened to it meanwhile;
+	 *  - continued here only: this PC asks for it back and sends its version;
+	 *  - continued on both sides: the server's version stays (no copies), and
+	 *    a notice says what was discarded here.
+	 */
+	async function settleFreed(state: DesktopState, deviceId: string, lost: string[]): Promise<"ok" | "offline" | "paused" | "not-paired"> {
+		const freed = Object.entries(state.sessions).filter(([, entry]) => entry.freed);
+		if (freed.length === 0) return "ok";
+		const stamps = files.stamps();
+		for (const [id, entry] of freed) {
+			const stamp = stamps.get(id);
+			const local = stamp === undefined ? null : files.read(id);
+			const localDigest = local ? bundleDigest(local) : null;
+			if (!local || stamp === entry.stamp || localDigest === entry.digest) {
+				entry.mine = entry.freed === "mine";
+				delete entry.freed;
+				if (local && stamp !== undefined) entry.stamp = stamp;
+				continue;
+			}
+			const reply = await request<SessionChange & { bundle: unknown }>(sessionPath(id));
+			if (!reply.ok) {
+				if (reply.reason !== "refused") return reply.reason;
+				// The server has no such session any more (deleted there): step 2's send settles it.
+				entry.mine = true;
+				delete entry.freed;
+				continue;
+			}
+			const remote = checkBundle(id, reply.body.bundle);
+			if (!remote) continue;
+			const remoteDigest = bundleDigest(remote);
+			const theirs: SessionChange = { id, version: reply.body.version, holder: reply.body.holder, holderName: reply.body.holderName, deleted: false };
+			if (theirs.holder === deviceId || remoteDigest === localDigest) {
+				// Still this PC's on the server, or both sides ended up the same.
+				entry.mine = theirs.holder === deviceId;
+				entry.holder = theirs.holder;
+				entry.holderName = theirs.holderName;
+				entry.serverVersion = theirs.version;
+				if (remoteDigest === localDigest) { entry.stamp = stamp!; entry.digest = localDigest; }
+				delete entry.freed;
+				continue;
+			}
+			if (remoteDigest === entry.digest) {
+				// Only this PC continued it: ask for it back. A holder that is busy
+				// with it is asked again next round; nothing is forced.
+				const take = await request<SessionChange & { status: string }>(`${sessionPath(id)}/take`, { method: "POST", body: { force: false } });
+				if (!take.ok) {
+					if (take.reason !== "refused") return take.reason;
+					continue;
+				}
+				if (take.body.status === "moved" || take.body.status === "yours") {
+					entry.mine = true;
+					entry.holder = take.body.holder;
+					entry.holderName = take.body.holderName;
+					entry.serverVersion = take.body.version;
+					delete entry.freed;
+				}
+				continue;
+			}
+			// Continued on both sides: the server's version, and a notice.
+			deps.localWork?.stop(id, { turn: true });
+			deps.onDiscard?.(id);
+			const gone = unsentTurns(local, remote);
+			state.notices = [...(state.notices ?? []), { chatId: id, title: gone.title, turns: gone.turns, at: deps.now() }].slice(-50);
+			adopt(state, theirs, remote, false);
+			lost.push(id);
+		}
+		return "ok";
+	}
+
 	async function round(): Promise<TickResult> {
 		const identity = deps.identity();
 		if (!identity) return { ok: false, reason: "not-paired" };
@@ -194,8 +282,18 @@ export function createDesktopSync(deps: DesktopSyncDeps): DesktopSync {
 			state = { version: 1, server: identity.server, deviceId: identity.deviceId, startedAt: deps.now(), backup: deps.makeBackup(), cursor: 0, sessions: {} };
 			deps.state.write(state);
 		}
+		if (state.rebackup) {
+			// Paired again after a break: what is here is copied aside first.
+			state.backup = deps.makeBackup();
+			delete state.rebackup;
+			deps.state.write(state);
+		}
 		const result = { ok: true as const, fetched: [] as string[], sent: [] as string[], removed: [] as string[], lost: [] as string[], handed: [] as string[] };
 		const replying = (id: string): boolean => deps.localWork?.replying(id) === true;
+
+		// ── 0. Paired again: the sessions this PC freed when it was unpaired ───
+		const settled = await settleFreed(state, identity.deviceId, result.lost);
+		if (settled !== "ok") { deps.state.write(state); return { ok: false, reason: settled }; }
 
 		// ── 1. What changed on the server ─────────────────────────────────────
 		// With the question goes this desktop's word on the sessions it holds:
@@ -204,7 +302,7 @@ export function createDesktopSync(deps: DesktopSyncDeps): DesktopSync {
 		const localBefore = files.stamps();
 		const reports: Record<string, "busy" | "unsent"> = {};
 		for (const [id, entry] of Object.entries(state.sessions)) {
-			if (!entry.mine) continue;
+			if (!entry.mine || entry.freed) continue;
 			if (replying(id)) reports[id] = "busy";
 			else if (localBefore.has(id) && localBefore.get(id) !== entry.stamp) reports[id] = "unsent";
 		}
@@ -251,7 +349,7 @@ export function createDesktopSync(deps: DesktopSyncDeps): DesktopSync {
 				if (await fetchInto(state, change, mine)) result.fetched.push(change.id);
 				continue;
 			}
-			if (entry.conflict) continue;
+			if (entry.conflict || entry.freed) continue;
 			if (mine) {
 				// The echo of this desktop's own send, or the lease coming to it.
 				if (!entry.mine && change.version > entry.serverVersion) {
@@ -286,7 +384,7 @@ export function createDesktopSync(deps: DesktopSyncDeps): DesktopSync {
 		const local = files.stamps();
 		for (const [id, stamp] of local) {
 			const entry = state.sessions[id];
-			if (entry?.conflict) continue;
+			if (entry?.conflict || entry?.freed) continue;
 			if (entry && entry.stamp === stamp) continue;
 			const bundle = files.read(id);
 			if (!bundle) continue;
@@ -323,7 +421,7 @@ export function createDesktopSync(deps: DesktopSyncDeps): DesktopSync {
 
 		// ── 3. What was deleted here, and what went missing ───────────────────
 		for (const [id, entry] of Object.entries(state.sessions)) {
-			if (local.has(id) || entry.conflict) continue;
+			if (local.has(id) || entry.conflict || entry.freed) continue;
 			if (entry.mine) {
 				const reply = await request(sessionPath(id), { method: "DELETE" });
 				if (reply.ok || (reply.reason === "refused" && (reply.status === 404 || reply.code === "deleted"))) {
@@ -342,7 +440,7 @@ export function createDesktopSync(deps: DesktopSyncDeps): DesktopSync {
 		// ── 4. Sessions someone asked this desktop to hand over ───────────────
 		for (const id of news.body.handovers ?? []) {
 			const entry = state.sessions[id];
-			if (!entry?.mine) continue;
+			if (!entry?.mine || entry.freed) continue;
 			// A reply being written is finished first; the next round hands over.
 			if (replying(id)) continue;
 			// Helpers and extraction stop here; the new holder starts them again.
@@ -397,6 +495,26 @@ export function createDesktopSync(deps: DesktopSyncDeps): DesktopSync {
 			const state = current();
 			if (!state?.notices) return;
 			state.notices = state.notices.filter((n) => !(n.chatId === chatId && n.at === at));
+			deps.state.write(state);
+		},
+		release() {
+			const state = current();
+			if (!state) return;
+			const opened: string[] = [];
+			for (const [id, entry] of Object.entries(state.sessions)) {
+				if (entry.conflict || entry.freed) continue;
+				entry.freed = entry.mine ? "mine" : "held";
+				if (!entry.mine) opened.push(id);
+				entry.mine = true;
+			}
+			deps.state.write(state);
+			// Open windows learn that these can be continued here now.
+			for (const id of opened) deps.announce?.(id, "written");
+		},
+		rejoin() {
+			const state = current();
+			if (!state || state.rebackup) return;
+			state.rebackup = true;
 			deps.state.write(state);
 		},
 		active: () => current() !== null,

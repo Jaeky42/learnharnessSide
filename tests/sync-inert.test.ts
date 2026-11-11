@@ -30,6 +30,7 @@ const { writeSettings } = await import("../src/store/settings.ts");
 const { runSyncRound } = await import("../src/server/sync/round.ts");
 const { mapsDesktop } = await import("../src/server/sync/maps-engine.ts");
 const { shouldAutostart } = await import("../src/server/sync/autostart.ts");
+const { syncInUse } = await import("../src/server/sync/engine.ts");
 const { deleteChatSession } = await import("../src/server/chats.ts");
 const { deleteGraphNode } = await import("../src/server/graph.ts");
 
@@ -75,6 +76,7 @@ describe("a desktop app that was never paired", () => {
 		mapsDesktop().detect();
 		assert.equal(shouldAutostart({ NODE_ENV: "production" } as NodeJS.ProcessEnv), false);
 		assert.equal((globalThis as { __lhSyncLoop?: unknown }).__lhSyncLoop, undefined, "no loop, no timer");
+		assert.equal(syncInUse(), false, "its pages get no marker, so they ask nothing about sync");
 	});
 
 	it("uses the app as ever: no sync folder, no pairing file, no backup, no request", async () => {
@@ -107,7 +109,7 @@ describe("a server no desktop has paired with", () => {
 		process.env.LH_SERVER_MODE = "1";
 		const before = tree(DATA);
 		const status = await (server.cloudStatusResponse()).json();
-		assert.deepEqual(status, { role: "server", held: {} });
+		assert.deepEqual(status, { role: "server", held: {}, desktops: [] });
 		await useTheApp("cloud");
 		const call = (pathname: string, method = "POST") => new Request(`http://localhost${pathname}`, { method, headers: { "content-type": "application/json", authorization: `Bearer ${"k".repeat(43)}`, "x-lh-sync-protocol": "1" }, body: method === "GET" ? undefined : "{}" });
 		assert.equal((await server.sessionsExchangeResponse(call("/api/sync/sessions"))).status, 401);
@@ -117,6 +119,7 @@ describe("a server no desktop has paired with", () => {
 		assert.equal(fs.existsSync(path.join(DATA, "sync")), false);
 		assert.equal(fs.existsSync(path.join(TMP, "backups")), false);
 		assert.equal(shouldAutostart({ NODE_ENV: "production" } as NodeJS.ProcessEnv), false);
+		assert.equal(syncInUse(), false);
 		assert.deepEqual(requests, []);
 		// What the desktop part of this test wrote is still there, untouched.
 		const now = tree(DATA);

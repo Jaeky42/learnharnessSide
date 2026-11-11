@@ -138,6 +138,14 @@ export interface Authority {
 	takeOver(to: string, chatId: string, force: boolean): AuthorityReply;
 	/** Every session this server may not change, with what is known of its holder. */
 	held(): Record<string, HeldSession>;
+	/**
+	 * A desktop unpaired itself (Phase 6, owner's rule: it is no longer
+	 * syncing, so each side continues what it has). The sessions it held are
+	 * the server's own from now on. Returns their ids.
+	 */
+	releaseDevice(deviceId: string): string[];
+	/** When a desktop was last heard from (to the second), and whether that counts as online. */
+	presence(deviceId: string): { online: boolean; lastSeenAt: number | null };
 }
 
 const bad = (error: string, status = 400, extra: Record<string, unknown> = {}): AuthorityReply => ({ status, body: { error, ...extra } });
@@ -300,6 +308,33 @@ export function createAuthority(deps: AuthorityDeps): Authority {
 			}
 			move(state, chatId, entry, to);
 			return { status: 200, body: { status: "moved", previous: holder, ...changeOf(chatId, entry) } };
+		},
+
+		presence(deviceId) {
+			const state = deps.state.read();
+			const at = Math.max(heard.get(deviceId) ?? 0, state?.seen[deviceId] ?? 0);
+			return { online: at > 0 && deps.now() - at < ONLINE_WINDOW_MS, lastSeenAt: at > 0 ? at : null };
+		},
+
+		releaseDevice(deviceId) {
+			const state = deps.state.read();
+			if (!state) return [];
+			const released: string[] = [];
+			for (const [id, entry] of Object.entries(state.sessions)) {
+				// Nobody waits for a session from a desktop that has left.
+				if (entry.handover?.to === deviceId) delete entry.handover;
+				if (entry.deletedAt !== undefined || entry.holder !== deviceId) continue;
+				entry.holder = CLOUD_HOLDER;
+				delete entry.handover;
+				delete entry.report;
+				entry.seq = ++state.seq;
+				released.push(id);
+			}
+			heard.delete(deviceId);
+			delete state.seen[deviceId];
+			deps.state.write(state);
+			for (const id of released) deps.announce?.(id, "written");
+			return released;
 		},
 
 		holds(chatId) {

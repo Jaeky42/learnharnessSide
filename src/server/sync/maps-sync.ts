@@ -16,13 +16,20 @@
  * counter; the server takes each one that is newer than what it has, and
  * answers with everything that changed since that place.
  *
- * A DESKTOP'S FIRST SYNC (owner's decision: "where the two sides differ,
- * the desktop's value is kept"): the desktop sends everything it has, and
- * for that one exchange its values win whatever the times say. A synced
- * SETTING the desktop doesn't have set is its default, so the server's
- * value for it goes too. Everything else is joined: a folder, a prompt
- * text, an imported-file record or a node's place that only one side has
- * is kept.
+ * THE FIRST DESKTOP'S FIRST SYNC (owner's decision: "where the two sides
+ * differ, the desktop's value is kept"): the desktop sends everything it
+ * has, and for that one exchange its values win whatever the times say. A
+ * synced SETTING the desktop doesn't have set is its default, so the
+ * server's value for it goes too. Everything else is joined: a folder, a
+ * prompt text, an imported-file record or a node's place that only one
+ * side has is kept.
+ *
+ * A DESKTOP PAIRED LATER (owner's decision, Phase 6: "only the first PC
+ * brings its settings", so a fresh install can't reset every device): at
+ * its first sync the server's values stand. Its synced settings become
+ * the server's, "not set" included; where both have the same folder,
+ * prompt text, record or node place, the server's is kept; and anything
+ * of those kinds that only the new PC has is added, as above.
  */
 
 import { ABSENT, checkMapChange, isVaultFolderName, itemHash, kindOf, MAX_VAULT_FOLDERS, type MapChange } from "../../core/sync/maps.ts";
@@ -111,6 +118,8 @@ export function createMapsAuthority(deps: {
 			noteOwnChanges(state, snapshot, now);
 
 			const first = !state.devices.includes(deviceId);
+			// Only the first desktop this server ever synced with brings its values.
+			const later = first && state.devices.length > 0;
 			// A desktop the server doesn't know yet must say everything it has.
 			if (first && raw.all !== true) {
 				deps.state.write(state);
@@ -127,9 +136,20 @@ export function createMapsAuthority(deps: {
 				const known = state.items[change.key];
 				if ((known?.h ?? ABSENT) === h) continue;
 				const t = Math.min(Math.round(change.t), now);
+				if (later) {
+					const here = known !== undefined && known.h !== ABSENT;
+					if (kindOf(change.key) === "s") {
+						// The server's setting stands. One it doesn't have set is noted as
+						// such, so the answer below puts the new PC back to the default too.
+						if (!known) state.items[change.key] = { h: ABSENT, t: now, seq: ++state.seq };
+					} else if (!here) {
+						taken.set(change.key, { value: change.value, t: known ? Math.max(t, known.t + 1) : t });
+					}
+					continue;
+				}
 				if (first || !known || t > known.t) taken.set(change.key, { value: change.value, t: first && known ? Math.max(t, known.t + 1) : t });
 			}
-			if (first) {
+			if (first && !later) {
 				// A setting the desktop hasn't set is at its default there: that wins too.
 				for (const [key, known] of Object.entries(state.items)) {
 					if (kindOf(key) === "s" && known.h !== ABSENT && !sent.has(key) && usable(snapshot, key)) taken.set(key, { value: null, t: Math.max(now, known.t + 1) });

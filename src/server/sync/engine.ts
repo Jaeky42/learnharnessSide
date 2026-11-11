@@ -107,6 +107,22 @@ export function desktopSync(): DesktopSync {
 	}));
 }
 
+/**
+ * Should this copy's pages ask about sync at all (the SYNC_MARKER_COOKIE)?
+ * A PC: it has a pairing file and the learner didn't unpair it here. The
+ * server: a desktop is paired, or one has ever synced (a removed PC can
+ * still hold sessions). Two small reads; nothing is written.
+ */
+export function syncInUse(): boolean {
+	try {
+		if (serverModeEnabled()) return readServerAuthState().devices.length > 0 || syncAuthority().active();
+		const pairing = readCloudPairing();
+		return pairing !== null && !pairing.unpairedHere;
+	} catch {
+		return false;
+	}
+}
+
 /** Who holds a session this copy may not change; null when it may. */
 export function sessionHolder(chatId: string): { id: string; name: string | null } | null {
 	try {

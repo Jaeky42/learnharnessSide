@@ -54,6 +54,8 @@ import { ChatGPTUIProvider } from "./chatgpt-connection.tsx";
 import { NativeSubscriptionUIProvider } from "./subscription-connections.tsx";
 import { AccountSection, useServerAccount } from "./account-section.tsx";
 import { ObsidianSection } from "./obsidian-section.tsx";
+import { CloudSection } from "./cloud-section.tsx";
+import { CloudServerSection } from "./cloud-server-section.tsx";
 import { isPhoneNow, useIsPhone } from "@/components/phone/use-phone";
 import { isServerMode } from "./server-mode";
 
@@ -67,9 +69,13 @@ const SECTIONS = [
 	{ id: "graph", label: "Graph" },
 	{ id: "keyboard", label: "Keyboard", hint: "Stored on this device" },
 	{ id: "general", label: "General" },
-	// Side-tutor fork: both shown only on a server-mode LearnHarness
-	// (obsidian-section.tsx, account-section.tsx).
+	// Side-tutor fork: Obsidian and Account are shown only on a server-mode
+	// LearnHarness (obsidian-section.tsx, account-section.tsx). Cloud (cloud
+	// sync Phase 6) is shown everywhere: the desktop app's pairing and sync
+	// state (cloud-section.tsx), the server's paired desktop apps
+	// (cloud-server-section.tsx).
 	{ id: "obsidian", label: "Obsidian" },
+	{ id: "cloud", label: "Cloud" },
 	{ id: "account", label: "Account" },
 ] as const;
 type SectionId = (typeof SECTIONS)[number]["id"];
@@ -449,6 +455,11 @@ export function SettingsDialogBody({
 							{active === "obsidian" && isServerMode() && (
 								<SettingsSection title="Obsidian" testid="section-obsidian">
 									<ObsidianSection />
+								</SettingsSection>
+							)}
+							{active === "cloud" && (
+								<SettingsSection title="Cloud" testid="section-cloud">
+									{isServerMode() ? <CloudServerSection /> : <CloudSection />}
 								</SettingsSection>
 							)}
 							{active === "account" && account.devices && (
