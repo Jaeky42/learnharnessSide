@@ -68,21 +68,32 @@ function dockAt(top: number, right: number) {
 	document.body.appendChild(dock);
 }
 
-type FakeDictation = import("../components/dictation.tsx").Dictation & { calls: string[] };
-/** The page's dictation run, scripted: no microphone, no Deepgram. */
+type DictationDestination = import("../components/dictation.tsx").DictationDestination;
+type FakeDictation = import("../components/dictation.tsx").Dictation & { calls: string[]; destinations: DictationDestination[] };
+/** The page's shared recorder, scripted: no microphone, no Deepgram. A run
+ *  started for a destination is recorded in `destinations`, so a test can
+ *  deliver the transcript the way dictation.tsx does when the run ends. */
 function fakeDictation(over: Partial<FakeDictation> = {}): FakeDictation {
 	const calls: string[] = [];
+	const destinations: DictationDestination[] = [];
 	return {
 		phase: "idle",
+		destinationId: "main",
 		error: null,
 		levelRef: { current: 0.2 },
 		active: false,
 		toggle: () => void calls.push("toggle"),
+		toggleFor: (destination) => {
+			calls.push(`toggleFor:${destination.id}`);
+			destinations.push(destination);
+		},
+		finishFor: async (id) => void calls.push(`finishFor:${id}`),
 		stop: () => void calls.push("stop"),
 		finish: async () => void calls.push("finish"),
 		cancel: () => void calls.push("cancel"),
 		clearError: () => void calls.push("clearError"),
 		calls,
+		destinations,
 		...over,
 	};
 }
@@ -168,9 +179,9 @@ describe("the open window", () => {
 });
 
 describe("speaking to the tutor", () => {
-	const state = () => import("../components/side-tutor-dictation-state.ts");
 	const button = (host: HTMLElement) => host.querySelector("[data-testid='side-tutor-dictate']") as HTMLElement;
-	afterEach(async () => (await state()).releaseSideDictation());
+	/** The tutor's destination in the shared recorder (components/side-tutor-dictation.tsx). */
+	const TUTOR = "side-tutor";
 
 	it("has a Dictate button between the typing box and Send", async () => {
 		const host = await mountTutor(fakeDictation());
@@ -184,17 +195,18 @@ describe("speaking to the tutor", () => {
 	it("starts the page's run for itself: the words will go to the tutor's box, not the lesson's", async () => {
 		const dictation = fakeDictation();
 		const host = await mountTutor(dictation);
-		assert.equal((await state()).sideDictationTarget(), null);
 		await act(async () => button(host).click());
-		assert.deepEqual(dictation.calls, ["toggle"]);
-		assert.equal(typeof (await state()).sideDictationTarget(), "function");
+		// Its own destination, never the lesson's plain toggle.
+		assert.deepEqual(dictation.calls, [`toggleFor:${TUTOR}`]);
+		assert.equal(dictation.destinations[0]?.id, TUTOR);
+		assert.equal(typeof dictation.destinations[0]?.append, "function");
 	});
 
 	it("while it listens: a small live waveform and a red Stop; the words land in the box when it ends", async () => {
 		const dictation = fakeDictation();
 		const host = await mountTutor(dictation);
 		await act(async () => button(host).click());
-		const live = fakeDictation({ phase: "recording", active: true });
+		const live = fakeDictation({ phase: "recording", active: true, destinationId: TUTOR });
 		await host.rerender(live);
 		assert.equal(host.querySelectorAll("[data-testid='side-tutor-meter'] span").length, 14);
 		assert.equal(button(host).getAttribute("aria-label"), "Stop dictation");
@@ -203,45 +215,46 @@ describe("speaking to the tutor", () => {
 		assert.ok(button(host).className.split(/\s+/).includes("size-(--lh-tutor-row)"));
 		assert.ok((host.querySelector("[data-testid='side-tutor-meter']") as HTMLElement).className.split(/\s+/).includes("h-(--lh-tutor-row)"));
 		await act(async () => button(host).click());
-		assert.deepEqual(live.calls, ["toggle"]);
-		// The run ends: dictation.tsx hands the transcript to whoever claimed it.
-		await act(async () => { (await state()).sideDictationTarget()?.("what is a mole"); });
+		assert.deepEqual(live.calls, ["stop"]);
+		// The run ends: dictation.tsx hands the transcript to the run's destination.
+		const append = dictation.destinations[0]!.append;
+		await act(async () => { await append("what is a mole"); });
 		assert.equal((host.querySelector("textarea") as HTMLTextAreaElement).value, "what is a mole");
 		// More words join what is there.
-		await act(async () => { (await state()).sideDictationTarget()?.("exactly"); });
+		await act(async () => { await append("exactly"); });
 		assert.equal((host.querySelector("textarea") as HTMLTextAreaElement).value, "what is a mole exactly");
 	});
 
 	it("Send while still listening ends the run first, then asks with the spoken words", async () => {
-		const host = await mountTutor(fakeDictation());
+		const dictation = fakeDictation();
+		const host = await mountTutor(dictation);
 		await act(async () => button(host).click());
-		const s = await state();
-		const live = fakeDictation({ phase: "recording", active: true });
-		live.finish = async () => {
-			live.calls.push("finish");
-			s.sideDictationTarget()?.("why does it fold");
+		const live = fakeDictation({ phase: "recording", active: true, destinationId: TUTOR });
+		live.finishFor = async (id) => {
+			live.calls.push(`finishFor:${id}`);
+			await dictation.destinations[0]!.append("why does it fold");
 		};
 		await host.rerender(live);
 		const send = host.querySelector("[aria-label='Ask']") as HTMLButtonElement;
 		assert.equal(send.hasAttribute("disabled"), false, "sendable with an empty box while it listens");
 		await act(async () => send.click());
 		await act(async () => new Promise((r) => setTimeout(r, 20)));
-		assert.deepEqual(live.calls, ["finish"]);
+		assert.deepEqual(live.calls, [`finishFor:${TUTOR}`]);
 		assert.deepEqual(posted, ["why does it fold"]);
 	});
 
 	it("is off while the lesson itself is dictating, and leads to the key when there is none", async () => {
-		// The lesson's run: not the tutor's (nothing claimed).
-		const host = await mountTutor(fakeDictation({ phase: "recording", active: true }));
+		// The lesson's run: the recorder is busy for the main input, not the tutor.
+		const host = await mountTutor(fakeDictation({ phase: "recording", active: true, destinationId: "main" }));
 		assert.equal(button(host).hasAttribute("disabled"), true);
 		assert.equal(host.querySelector("[data-testid='side-tutor-meter']"), null);
 		// No Deepgram key: the button says so, and a click doesn't start a run.
-		const keyless = fakeDictation({ error: "Dictation needs a Deepgram key" });
+		const keyless = fakeDictation({ error: "Dictation needs a Deepgram key", destinationId: TUTOR });
 		const other = await mountTutor(keyless);
 		assert.equal(button(other).getAttribute("title"), "Dictation needs a Deepgram key");
 		await act(async () => button(other).click());
 		assert.deepEqual(keyless.calls, ["clearError"]);
-		assert.equal((await state()).sideDictationTarget(), null);
+		assert.deepEqual(keyless.destinations, []);
 	});
 });
 

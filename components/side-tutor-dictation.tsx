@@ -12,9 +12,12 @@
  * Both are as tall as the one-line typing box: --lh-tutor-row, which the
  * typing row in side-tutor.tsx sets.
  *
- * It borrows the page's one dictation run (components/dictation.tsx): the
+ * It uses the page's one shared recorder (components/dictation.tsx): the
  * same microphone, Deepgram key, language and shortcuts as the lesson's
- * Dictate. See side-tutor-dictation-state.ts for how the words are routed.
+ * Dictate. A run started here records to the tutor's own destination
+ * (toggleFor with SIDE_TUTOR_DICTATION_ID), so its words land in the tutor's
+ * typing box, and the lesson's view of the recorder (destinationId "main")
+ * shows no run while it lasts.
  */
 
 import { useEffect, useState } from "react";
@@ -22,7 +25,14 @@ import { Loader2Icon, MicIcon } from "lucide-react";
 import { DEEPGRAM_KEY_ID, DICTATION_KEYLESS, METER_TICK_MS, rmsToMeter, type Dictation } from "@/components/dictation";
 import { blurAfterPointerClick } from "@/components/focus-hygiene";
 import { useSettingsDialog } from "@/components/settings/settings-dialog";
-import { claimSideDictation, useSideDictationOwned } from "@/components/side-tutor-dictation-state";
+
+/** The tutor's destination id in the shared recorder. */
+export const SIDE_TUTOR_DICTATION_ID = "side-tutor";
+
+/** Is the shared recorder running for the tutor's typing box? */
+export function tutorOwnsDictation(dictation: Dictation | undefined): boolean {
+	return dictation?.active === true && dictation.destinationId === SIDE_TUTOR_DICTATION_ID;
+}
 
 /** Bars in the small waveform (4 px each: the lesson meter's pitch). */
 const METER_BARS = 14;
@@ -46,12 +56,13 @@ function Waveform({ levelRef }: { levelRef: { current: number } }) {
 }
 
 export function SideTutorDictate({ dictation, append }: { dictation: Dictation; append: (text: string) => void }) {
-	const owned = useSideDictationOwned();
 	const { open: openSettings } = useSettingsDialog();
-	const mine = owned && dictation.active;
-	/** The lesson is dictating: one microphone, one run. */
-	const busyElsewhere = dictation.active && !owned;
-	const keyless = dictation.error === DICTATION_KEYLESS;
+	const mine = tutorOwnsDictation(dictation);
+	/** The lesson (or another input) is dictating: one microphone, one run. */
+	const busyElsewhere = dictation.active && !mine;
+	/** Only a failure of the tutor's own run shows here. */
+	const error = dictation.destinationId === SIDE_TUTOR_DICTATION_ID ? dictation.error : null;
+	const keyless = error === DICTATION_KEYLESS;
 
 	if (mine) {
 		return (
@@ -61,7 +72,7 @@ export function SideTutorDictate({ dictation, append }: { dictation: Dictation; 
 					type="button"
 					onClick={(e) => {
 						blurAfterPointerClick(e);
-						dictation.toggle();
+						dictation.stop();
 					}}
 					disabled={dictation.phase === "stopping"}
 					className="flex size-(--lh-tutor-row) shrink-0 items-center justify-center rounded-md bg-destructive/10 text-destructive transition-colors hover:bg-destructive/20"
@@ -87,13 +98,12 @@ export function SideTutorDictate({ dictation, append }: { dictation: Dictation; 
 					openSettings("keys", DEEPGRAM_KEY_ID);
 					return;
 				}
-				claimSideDictation(append);
-				dictation.toggle();
+				dictation.toggleFor({ id: SIDE_TUTOR_DICTATION_ID, append });
 			}}
 			disabled={busyElsewhere}
 			className="flex size-(--lh-tutor-row) shrink-0 items-center justify-center rounded-md border border-input text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40"
-			aria-label={dictation.error ? `Dictation failed: ${dictation.error}` : "Start dictation"}
-			title={dictation.error ?? "Dictate"}
+			aria-label={error ? `Dictation failed: ${error}` : "Start dictation"}
+			title={error ?? "Dictate"}
 			data-testid="side-tutor-dictate"
 		>
 			<MicIcon className="size-4.5" />

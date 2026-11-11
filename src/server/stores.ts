@@ -12,8 +12,10 @@ import { sourceOrganizationStore } from "../store/source-organization.ts";
 import { jobStore } from "../store/jobs.ts";
 import { settingsStore } from "../store/settings.ts";
 import { sideTutorStore } from "../store/side-tutor.ts";
+import { themeStore } from "../store/themes.ts";
 import { resolveSettings, type EffectiveSettings } from "../core/settings-resolution.ts";
 import { syncCustomProvider } from "./custom-provider.ts";
+import { configureWorkerRequestAdmission } from "../agent/worker-request-admission.ts";
 import { holdsSession } from "./sync/engine.ts";
 import { loggedGraph } from "./sync/graph-engine.ts";
 import { guardChatStore, guardJobStore, guardSideTutorStore } from "./sync/guarded-stores.ts";
@@ -31,6 +33,7 @@ export const stores = {
 	jobStore: guardJobStore(jobStore, holdsSession),
 	settingsStore,
 	sideTutorStore: guardSideTutorStore(sideTutorStore, holdsSession),
+	themeStore,
 };
 
 export type Stores = typeof stores;
@@ -46,6 +49,9 @@ export type Stores = typeof stores;
 export function effectiveSettings(): EffectiveSettings {
 	return resolveSettings(settingsStore.readSettings());
 }
+
+// Runtime policy is supplied at the composition root, never imported by agents.
+configureWorkerRequestAdmission(() => effectiveSettings().agent.workerRequestConcurrency);
 
 // Boot: register the custom endpoint (when configured) into piModels(); the
 // POST /api/custom-provider route re-syncs after every connect.

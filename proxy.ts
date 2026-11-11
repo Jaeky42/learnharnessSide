@@ -1,24 +1,33 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { desktopAPIAuthorized } from "./src/server/desktop-access.ts";
+import { apiRequestRefusal } from "./src/server/desktop-access.ts";
 import { SERVER_MARKER_COOKIE, serverGate, serverModeEnabled } from "./src/server/server-auth.ts";
 import { SYNC_MARKER_COOKIE } from "./src/core/sync/sessions.ts";
 import { heldElsewhereResponse, sessionWritePath, syncInUse } from "./src/server/sync/engine.ts";
 
-/** Applies to every API method, including SSE and spending/settings routes.
- * No public callback or worker bypass: internal jobs call server functions,
- * and any legitimate self-HTTP request must carry the private capability.
+/** Protects API methods, including SSE and spending/settings routes. The one
+ * streamed document route enforces the identical all-method request policy
+ * inside its handler, avoiding Next's silently truncated Proxy body clone.
+ * No public callback or worker bypass: legitimate self-HTTP still needs the capability.
  *
  * Side-tutor fork (cloud sync Phase 1): with LH_SERVER_MODE=1 the login
- * gate (src/server/server-auth.ts) also covers every page, so the matcher
+ * gate (src/server/server-auth.ts) covers every page and API, so the matcher
  * includes pages; static build files stay outside it. Without server mode
- * pages pass straight through, exactly as before. */
+ * pages pass straight through.
+ *
+ * Which gate guards the API (owner's decision at the 0.6.0 merge): the
+ * fork's login gate on the cloud server, upstream's request policy
+ * (apiRequestRefusal) everywhere else. Upstream's browser-mode Host
+ * allow-list would refuse the server's own domain, and the login gate
+ * already refuses cross-site writes. `apiGate` in src/server/api-gate.ts is
+ * the same rule for the one route that skips this proxy. */
 export function proxy(request: NextRequest) {
 	const gated = serverGate({ method: request.method, pathname: request.nextUrl.pathname, headers: request.headers, url: request.url });
 	if (gated) return gated;
 	const { pathname } = request.nextUrl;
-	if ((pathname === "/api" || pathname.startsWith("/api/")) && !desktopAPIAuthorized(request.headers)) {
+	const refusal = (pathname === "/api" || pathname.startsWith("/api/")) && !serverModeEnabled() ? apiRequestRefusal(request) : undefined;
+	if (refusal) {
 		return NextResponse.json(
-			{ error: "Desktop API access requires the trusted LearnHarness window." },
+			{ error: refusal },
 			{ status: 403, headers: { "Cache-Control": "no-store" } },
 		);
 	}
@@ -44,4 +53,10 @@ export function proxy(request: NextRequest) {
 	return response;
 }
 
-export const config = { matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"] };
+export const config = {
+	// Pages and every API route, except static build files and the one
+	// streamed plugin document endpoint (exactly that path, not the documents
+	// subtree or other plugin routes), which runs the same gates inside its
+	// handler. Must remain static literals.
+	matcher: ["/((?!_next/static|_next/image|favicon.ico|api/plugins/[^/]+/documents/markdown/?$).*)"],
+};

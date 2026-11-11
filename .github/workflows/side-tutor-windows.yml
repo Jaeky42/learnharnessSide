@@ -41,6 +41,9 @@ jobs:
           node-version: "26"
           cache: npm
       - run: npm ci
+      # Upstream 0.6.0: the core plugins' own dependencies. `npm run build`
+      # builds them into core-plugins/, which build-server.mjs requires.
+      - run: npm run plugins:setup
       - name: Stamp the build version
         run: |
           version=$(node -p "const [a,b]=require('./package.json').version.split('.'); a+'.'+b+'.'+process.env.GITHUB_RUN_NUMBER")

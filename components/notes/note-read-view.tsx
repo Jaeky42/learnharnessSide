@@ -69,12 +69,16 @@ function NoteAnchor({ href, children, ...rest }: AnchorHTMLAttributes<HTMLAnchor
 	);
 }
 
-const readComponents = { ...mdComponents, a: NoteAnchor };
+// Built on first use, not at module load: since upstream 0.6.0, md-blocks
+// reaches this file through a loop of imports (plugin renderers → the chat
+// view → the notes drawer), so `mdComponents` may not exist yet up here.
+let readComponentsCache: (typeof mdComponents & { a: typeof NoteAnchor }) | null = null;
+const readComponents = () => (readComponentsCache ??= { ...mdComponents, a: NoteAnchor });
 
 function Rendered({ text }: { text: string }) {
 	if (!text.trim()) return null;
 	return (
-		<MessageResponse className="text-(length:--lh-prose-size)" components={readComponents}>
+		<MessageResponse className="text-(length:--lh-prose-size)" components={readComponents()}>
 			{text}
 		</MessageResponse>
 	);

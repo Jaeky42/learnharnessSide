@@ -52,7 +52,7 @@ const change = (key: string, value: unknown, t = NOW) => ({ key, value, t });
 writeSettings({
 	version: 1,
 	general: { autoUpdate: false },
-	appearance: { mode: "light", fontFamily: "Georgia", proseFontSize: 20 },
+	appearance: { theme: "light", fontFamily: "Georgia", proseFontSize: 20 },
 	models: { strong: { provider: "anthropic", model: "server-model" } },
 	agent: { tools: { web_search: false }, fileAccess: { restricted: true, folders: ["/data/home/files"] } },
 });
@@ -65,14 +65,14 @@ describe("the real files", () => {
 		assert.equal(fs.existsSync(SYNC), false);
 		const { items, unreadable } = mapFiles.read();
 		assert.deepEqual([...unreadable], []);
-		assert.deepEqual([...items.keys()].sort(), ["n|src_server", "p|system-prompt.md", "s|agent.tools|web_search", "s|appearance.mode", "s|appearance.proseFontSize", "x|n_server"]);
+		assert.deepEqual([...items.keys()].sort(), ["n|src_server", "p|system-prompt.md", "s|agent.tools|web_search", "s|appearance.proseFontSize", "s|appearance.theme", "x|n_server"]);
 	});
 
 	it("a desktop's first sync lands in the right files, and per-device settings stay exactly as they were", () => {
 		const reply = exchange(DESK, {
 			cursor: 0, all: true,
 			changes: [
-				change("s|appearance.mode", "dark"),
+				change("s|appearance.theme", "default"),
 				change("s|dictation.language", "sv"),
 				change("s|agent.tools|run_code", false),
 				change("s|agent.prompts|teacher/20-teaching.md", true),
@@ -87,7 +87,7 @@ describe("the real files", () => {
 		});
 		assert.equal(reply.status, 200);
 		const settings = readSettings()!;
-		assert.equal(settings.appearance?.mode, "dark", "differs: the desktop's value is kept");
+		assert.equal(settings.appearance?.theme, "default", "differs: the desktop's value is kept");
 		assert.equal(settings.appearance?.proseFontSize, undefined, "not set on the desktop: back to its default");
 		assert.deepEqual(settings.agent?.tools, { run_code: false }, "the server-only switch went, the desktop's came");
 		assert.deepEqual(settings.agent?.prompts, { "teacher/20-teaching.md": true });
@@ -119,13 +119,13 @@ describe("the real files", () => {
 	it("later, the newer change wins and the older one is answered with what the server has", () => {
 		const first = exchange(DESK, { cursor: 0, all: false, changes: [] });
 		const cursor = first.body.cursor;
-		// The phone changes the mode now; the desktop's change is from an hour ago.
+		// The phone changes the theme now; the desktop's change is from an hour ago.
 		const record = readSettings()!;
-		writeSettings({ ...record, appearance: { ...record.appearance, mode: "light" } });
-		const reply = exchange(DESK, { cursor, all: false, changes: [change("s|appearance.mode", "dark", Date.now() - 3_600_000), change("x|n_desk", { x: 0, y: 0 }, Date.now())] });
-		assert.equal(readSettings()!.appearance?.mode, "light");
+		writeSettings({ ...record, appearance: { ...record.appearance, theme: "light" } });
+		const reply = exchange(DESK, { cursor, all: false, changes: [change("s|appearance.theme", "default", Date.now() - 3_600_000), change("x|n_desk", { x: 0, y: 0 }, Date.now())] });
+		assert.equal(readSettings()!.appearance?.theme, "light");
 		assert.deepEqual(stores.graphStore.readPositions().n_desk, { x: 0, y: 0 });
-		assert.deepEqual(reply.body.items.map((i) => [i.key, i.same ?? i.value]), [["s|appearance.mode", "light"], ["x|n_desk", true]]);
+		assert.deepEqual(reply.body.items.map((i) => [i.key, i.same ?? i.value]), [["s|appearance.theme", "light"], ["x|n_desk", true]]);
 	});
 
 	it("a value the settings file adjusts is stored adjusted and sent back", () => {
@@ -138,7 +138,7 @@ describe("the real files", () => {
 
 	it("a request for a per-device setting is refused whole", async () => {
 		const before = fs.readFileSync(path.join(DATA, "settings.json"), "utf8");
-		assert.equal(exchange(DESK, { cursor: 0, all: false, changes: [change("s|appearance.mode", "dark", Date.now()), change("s|models.strong", { provider: "x", model: "y" })] }).status, 400);
+		assert.equal(exchange(DESK, { cursor: 0, all: false, changes: [change("s|appearance.theme", "default", Date.now()), change("s|models.strong", { provider: "x", model: "y" })] }).status, 400);
 		assert.equal(fs.readFileSync(path.join(DATA, "settings.json"), "utf8"), before);
 		// And the route itself is closed without a device key.
 		const response = await mapsExchangeResponse(new Request("http://localhost/api/sync/maps", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }));
@@ -149,7 +149,7 @@ describe("the real files", () => {
 		const cursor = exchange(DESK, { cursor: 0, all: false, changes: [] }).body.cursor;
 		const good = fs.readFileSync(path.join(DATA, "settings.json"), "utf8");
 		fs.writeFileSync(path.join(DATA, "settings.json"), "{ this is not json");
-		const reply = exchange(DESK, { cursor, all: false, changes: [change("s|appearance.mode", "dark", Date.now()), change("x|n_desk", { x: 7, y: 7 }, Date.now())] });
+		const reply = exchange(DESK, { cursor, all: false, changes: [change("s|appearance.theme", "default", Date.now()), change("x|n_desk", { x: 7, y: 7 }, Date.now())] });
 		assert.equal(reply.status, 200);
 		assert.equal(fs.readFileSync(path.join(DATA, "settings.json"), "utf8"), "{ this is not json");
 		assert.deepEqual(reply.body.items.map((i) => i.key), ["x|n_desk"], "no settings are sent, so the desktop keeps its own");

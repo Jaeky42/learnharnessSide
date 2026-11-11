@@ -390,17 +390,6 @@ export function NotesDrawer({ chatId, onClose }: { chatId: string; onClose: () =
 		[flush],
 	);
 
-	// ─── Keyboard: Ctrl+Shift+E jumps into the editor ───────────────────────
-	useEffect(() => {
-		const onFocus = () => {
-			setMode("edit");
-			setTimeout(() => editorRef.current?.focus(), 0);
-		};
-		const ev = kbdEventForAction("focus-notes");
-		window.addEventListener(ev, onFocus);
-		return () => window.removeEventListener(ev, onFocus);
-	}, []);
-
 	// ─── Actions ────────────────────────────────────────────────────────────
 	const showToast = (text: string, opId?: string, reopen?: string) => setToast({ text, opId, reopen });
 	useEffect(() => {

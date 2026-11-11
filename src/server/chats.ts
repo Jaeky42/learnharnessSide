@@ -13,6 +13,7 @@ import { discardChatDeliveries } from "./jobs.ts";
 import { holdsSession } from "./sync/engine.ts";
 import { recordGraphAction } from "./sync/graph-engine.ts";
 import { HELD_ELSEWHERE_CODE, HELD_ELSEWHERE_MESSAGE } from "../core/sync/sessions.ts";
+import { sideChats } from "./side-chat.ts";
 
 /**
  * Server-side chat entries for the transport layer (app/api/chats*,
@@ -164,6 +165,7 @@ function finishChatRecordDeletion(chatId: string): number {
 		clearTurnFailure(chatId);
 		discardSideTutor(chatId);
 		discardSessionNotes(chatId);
+		sideChats.stopAll(chatId); // a running side answer has nowhere left to land
 	}
 	return jobsRemoved;
 }

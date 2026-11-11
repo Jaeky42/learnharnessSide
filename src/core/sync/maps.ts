@@ -57,7 +57,13 @@ export function itemHash(value: unknown): string {
 
 /** The single settings that sync. */
 export const SYNCED_SETTINGS: ReadonlyArray<readonly string[]> = [
+	// Upstream 0.6.0 replaced `mode` with `theme`, and the settings store no
+	// longer keeps it. The key stays on this list so a record that still names
+	// it (a state file from before, a settings file not yet rewritten) is
+	// taken and then drops out by itself; a key that isn't listed is refused
+	// with the whole request, which would stall the sync of every setting.
 	["appearance", "mode"],
+	["appearance", "theme"],
 	["appearance", "background"],
 	["appearance", "proseFontSize"],
 	["appearance", "sessionNameSerif"],

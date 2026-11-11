@@ -16,7 +16,9 @@ COPY . .
 ARG LH_BUILD_VERSION=""
 ARG LH_BUILD_HOMEPAGE=""
 ENV LH_BUILD_VERSION=${LH_BUILD_VERSION} LH_BUILD_HOMEPAGE=${LH_BUILD_HOMEPAGE}
-RUN npx next build && node scripts/smoke-provider-runtime.mjs && node scripts/build-server.mjs
+# Upstream 0.6.0: the core plugins are built from plugins/ into core-plugins/
+# (their own dependencies first), and build-server.mjs refuses without them.
+RUN npm run plugins:setup && npm run build && node scripts/smoke-provider-runtime.mjs && node scripts/build-server.mjs
 
 # ── run ──────────────────────────────────────────────────────────────────
 FROM node:26-bookworm-slim

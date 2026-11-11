@@ -38,6 +38,9 @@ jobs:
           node-version: "26"
           cache: npm
       - run: npm ci
+      # Upstream 0.6.0: the core plugins' own dependencies (their tests and
+      # the typecheck read them).
+      - run: npm run plugins:setup
       - run: npm run typecheck
       # tests/obsidian-sync.test.ts drives the real Obsidian sync program
       # (obsidian-headless) against a stand-in for Obsidian's servers. It is

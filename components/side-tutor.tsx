@@ -25,8 +25,7 @@ import { isPhoneNow, useIsPhone } from "@/components/phone/use-phone";
 import { useDockAnchor } from "@/components/phone/use-dock-anchor";
 import { plainEnterSends } from "@/components/phone/enter-key";
 import { joinDictation, type Dictation } from "@/components/dictation";
-import { SideTutorDictate } from "@/components/side-tutor-dictation";
-import { useSideDictationOwned } from "@/components/side-tutor-dictation-state";
+import { SIDE_TUTOR_DICTATION_ID, SideTutorDictate, tutorOwnsDictation } from "@/components/side-tutor-dictation";
 import { resizeTutorRect, storedTutorSize, TUTOR_EDGE, TUTOR_RESIZE_EDGES, type TutorRect, type TutorResizeEdge, type TutorSize } from "@/components/side-tutor-window";
 import {
 	HELD_TEXT,
@@ -148,7 +147,8 @@ function clampPos(pos: Pos, width: number, height = 64): Pos {
 
 export function SideTutor({ chatId, dictation, held = false }: {
 	chatId: string;
-	/** The page's dictation run, for the tutor's Dictate button. */
+	/** The page's shared recorder (useDictation's own result, not the lesson's
+	 *  main-input view), for the tutor's Dictate button. */
 	dictation?: Dictation;
 	/** Cloud sync (Phase 6): another device holds this session. The tutor can't
 	 *  be asked until it is taken over: its window closes to a greyed bubble. */
@@ -173,7 +173,7 @@ export function SideTutor({ chatId, dictation, held = false }: {
 	}, []);
 	/** Spoken words join what is already typed (the lesson's separator rule). */
 	const appendDictated = useCallback((text: string) => setInput(joinDictation(inputTextRef.current, text).slice(0, SIDE_TUTOR_MAX_QUESTION_CHARS)), [setInput]);
-	const tutorDictating = useSideDictationOwned() && dictation?.active === true;
+	const tutorDictating = tutorOwnsDictation(dictation);
 	const [notice, setNotice] = useState<string | null>(null);
 
 	const panelRef = useRef<HTMLDivElement>(null);
@@ -261,7 +261,7 @@ export function SideTutor({ chatId, dictation, held = false }: {
 	const ask = async () => {
 		// Still dictating to the tutor: end the run first, so the last words
 		// are in the box before it is read (the lesson's "nothing gets lost").
-		if (tutorDictating && dictation) await dictation.finish();
+		if (tutorDictating && dictation) await dictation.finishFor(SIDE_TUTOR_DICTATION_ID);
 		const question = inputTextRef.current.trim();
 		if (!question || busy) return;
 		setNotice(null);

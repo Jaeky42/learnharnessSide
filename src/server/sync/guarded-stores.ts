@@ -49,6 +49,12 @@ export function guardChatStore(inner: ChatStore, holds: (chatId: string) => bool
 		deleteChat(id) {
 			return held("a deletion", id) ? false : inner.deleteChat(id);
 		},
+		// A Tutor (side question) answer that lands after the session moved:
+		// the threads stay as they are, and `update` is never run.
+		updateSideChats(id, update) {
+			if (!held("a side question", id)) return inner.updateSideChats(id, update);
+			return inner.getChat(id)?.sideChats ?? null;
+		},
 	};
 }
 

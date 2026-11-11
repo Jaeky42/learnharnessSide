@@ -501,15 +501,16 @@ describe("the Cloud row in Settings", () => {
 	it("the desktop app: one new row, Cloud, under General", async () => {
 		const { SettingsDialogBody } = await import("../components/settings/settings-dialog.tsx");
 		const html = renderToStaticMarkup(<SettingsDialogBody onClose={() => {}} />);
-		assert.deepEqual(navIds(html), ["keys", "agent", "appearance", "graph", "keyboard", "general", "cloud"]);
-		assert.match(html, />Cloud<\/button>/);
+		// Since upstream 0.6.0 the plugin rows follow, under a divider.
+		assert.deepEqual(navIds(html), ["keys", "agent", "appearance", "graph", "keyboard", "general", "cloud", "core-plugins", "plugins"]);
+		assert.match(html, />Cloud<\/span><\/button>/);
 	});
 
 	it("the server's site: Cloud sits between Obsidian and Account", async () => {
 		cookie = "lh_server=1";
 		const { SettingsDialogBody } = await import("../components/settings/settings-dialog.tsx");
 		const ids = navIds(renderToStaticMarkup(<SettingsDialogBody onClose={() => {}} />));
-		assert.deepEqual(ids.slice(ids.indexOf("general")), ["general", "obsidian", "cloud"], "Account joins the list once the device list has loaded");
+		assert.deepEqual(ids.slice(ids.indexOf("general")), ["general", "obsidian", "cloud", "core-plugins", "plugins"], "Account joins the list, after Cloud, once the device list has loaded");
 	});
 
 	it("the desktop app opens its own Cloud section, the server's site the list of desktop apps", async () => {
