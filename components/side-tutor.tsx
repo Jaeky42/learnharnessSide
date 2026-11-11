@@ -22,6 +22,9 @@ import { cn } from "@/lib/utils";
 import { isPhoneNow, useIsPhone } from "@/components/phone/use-phone";
 import { useDockAnchor } from "@/components/phone/use-dock-anchor";
 import { plainEnterSends } from "@/components/phone/enter-key";
+import { joinDictation, type Dictation } from "@/components/dictation";
+import { SideTutorDictate } from "@/components/side-tutor-dictation";
+import { useSideDictationOwned } from "@/components/side-tutor-dictation-state";
 import {
 	SIDE_TUTOR_MAX_QUESTION_CHARS,
 	type SideTutorEntry,
@@ -77,14 +80,24 @@ function clampPos(pos: Pos, width: number, height = 64): Pos {
 	};
 }
 
-export function SideTutor({ chatId }: { chatId: string }) {
+export function SideTutor({ chatId, dictation }: { chatId: string; /** The page's dictation run, for the tutor's Dictate button. */ dictation?: Dictation }) {
 	const [mounted, setMounted] = useState(false);
 	const [open, setOpen] = useState(true);
 	const [pos, setPos] = useState<Pos>({ left: 0, top: DEFAULT_TOP });
 	const [entries, setEntries] = useState<SideTutorEntry[]>([]);
 	const [live, setLive] = useState<{ question: string; text: string } | null>(null);
 	const [remoteRunning, setRemoteRunning] = useState(false);
-	const [input, setInput] = useState("");
+	const [input, setInputState] = useState("");
+	/** The typing box's text, readable at once: a send that first ends a
+	 *  dictation run must see the words that run just delivered. */
+	const inputTextRef = useRef("");
+	const setInput = useCallback((next: string) => {
+		inputTextRef.current = next;
+		setInputState(next);
+	}, []);
+	/** Spoken words join what is already typed (the lesson's separator rule). */
+	const appendDictated = useCallback((text: string) => setInput(joinDictation(inputTextRef.current, text).slice(0, SIDE_TUTOR_MAX_QUESTION_CHARS)), [setInput]);
+	const tutorDictating = useSideDictationOwned() && dictation?.active === true;
 	const [notice, setNotice] = useState<string | null>(null);
 
 	const panelRef = useRef<HTMLDivElement>(null);
@@ -155,6 +168,8 @@ export function SideTutor({ chatId }: { chatId: string }) {
 	}, [mounted, open]);
 
 	const setOpenPersist = (next: boolean) => {
+		// Minimizing ends a dictation to the tutor; its words stay in the box.
+		if (!next && tutorDictating) dictation?.stop();
 		if (!next && panelRef.current) widthRef.current = panelRef.current.offsetWidth;
 		setOpen(next);
 		if (isPhoneNow()) return; // no auto-focus either: it would pop the keyboard up
@@ -165,7 +180,10 @@ export function SideTutor({ chatId }: { chatId: string }) {
 	const busy = live !== null || remoteRunning;
 
 	const ask = async () => {
-		const question = input.trim();
+		// Still dictating to the tutor: end the run first, so the last words
+		// are in the box before it is read (the lesson's "nothing gets lost").
+		if (tutorDictating && dictation) await dictation.finish();
+		const question = inputTextRef.current.trim();
 		if (!question || busy) return;
 		setNotice(null);
 		setInput("");
@@ -273,6 +291,11 @@ export function SideTutor({ chatId }: { chatId: string }) {
 		e.stopPropagation();
 		if (e.key === "Escape") {
 			e.preventDefault();
+			// Esc cancels a dictation to the tutor first, as it does in the lesson.
+			if (tutorDictating) {
+				dictation?.cancel();
+				return;
+			}
 			(document.activeElement as HTMLElement | null)?.blur?.();
 			setOpenPersist(false);
 		}
@@ -335,8 +358,8 @@ export function SideTutor({ chatId }: { chatId: string }) {
 				onPointerCancel={onDragEnd}
 			>
 				<GripHorizontalIcon data-phone="hide" className="size-3.5 text-muted-foreground/60" />
-				{/* No title and no tagline (owner's ask): the bar is the handle and its buttons. */}
-				<div className="min-w-0 flex-1" />
+				{/* The title is one word and there is no tagline (owner's wording). */}
+				<div className="min-w-0 flex-1 text-sm font-medium leading-tight">Tutor</div>
 				<button
 					type="button"
 					onClick={(e) => {
@@ -366,7 +389,7 @@ export function SideTutor({ chatId }: { chatId: string }) {
 
 			<div ref={scrollRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-3 text-sm">
 				{entries.length === 0 && !live && (
-					// The only words in the empty window (owner's ask).
+					// The empty window's one sentence (owner's ask).
 					<p className="text-xs leading-relaxed text-muted-foreground">Stuck on a term or a step? Ask here.</p>
 				)}
 				{entries.map((entry) => (
@@ -401,9 +424,13 @@ export function SideTutor({ chatId }: { chatId: string }) {
 						}
 					}}
 					rows={1}
+					placeholder="Ask a follow-up…"
 					className="lh-prose field-sizing-content max-h-28 min-h-9 flex-1 resize-none rounded-md border border-input bg-transparent px-2.5 py-2 text-sm outline-none placeholder:text-muted-foreground focus-visible:border-ring"
 					aria-label="Ask the side tutor"
 				/>
+				{/* Speak instead of typing (owner's ask): a microphone, and while it
+				    listens a small live waveform with Stop. */}
+				{dictation && <SideTutorDictate dictation={dictation} append={appendDictated} />}
 				{live ? (
 					<button
 						type="button"
@@ -424,7 +451,7 @@ export function SideTutor({ chatId }: { chatId: string }) {
 							blurAfterPointerClick(e);
 							void ask();
 						}}
-						disabled={busy || input.trim().length === 0}
+						disabled={busy || (input.trim().length === 0 && !tutorDictating)}
 						className="flex size-9 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40"
 						aria-label="Ask"
 						title="Ask (Enter)"

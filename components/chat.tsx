@@ -33,6 +33,7 @@ import { forwardDockWheel, useDockHeight } from "@/components/dock-height";
 import { useDockTouchScroll } from "@/components/phone/use-dock-touch-scroll";
 import { QueuedSteersBody, type QueuedSteerLine } from "@/components/queued-steers";
 import { DictationBar, finishDictation, joinDictation, useDictation } from "@/components/dictation";
+import { useSideDictationOwned } from "@/components/side-tutor-dictation-state";
 import { useFieldCycle } from "@/components/field-cycle";
 import { JobsContext } from "@/components/jobs-context";
 import { StatsBar } from "@/components/stats-bar";
@@ -722,14 +723,19 @@ export function Chat({
 	 * is null, and the thinking field is left alone by design. */
 	const dictationWasActiveRef = useRef(false);
 	const composerInputRef = useRef<HTMLDivElement>(null);
+	// FORK (side tutor): the tutor's own Dictate button borrows this run. Its
+	// words go to the tutor's box, so the lesson's controls show no run then
+	// (components/side-tutor-dictation-state.ts).
+	const tutorDictating = useSideDictationOwned();
+	const lessonDictating = dictation.active && !tutorDictating;
 	useEffect(() => {
-		if (dictation.active) {
+		if (lessonDictating) {
 			dictationWasActiveRef.current = true;
 		} else if (dictationWasActiveRef.current) {
 			dictationWasActiveRef.current = false;
 			composerInputRef.current?.focus();
 		}
-	}, [dictation.active]);
+	}, [lessonDictating]);
 
 	// Jobs never gate the composer (contracts.ts "THE ASYNC PROTOCOL" §4): job
 	// tools resolve with an ack mid-turn, so the learner can interject while
@@ -1223,7 +1229,7 @@ export function Chat({
 		 * talking right through Enter must not lose the tail — stop the run,
 		 * let the last finals land in the composer, then send the REF value
 		 * (the flush lands via setState, invisible to this closure). */
-		if (!dictation.active) {
+		if (!lessonDictating) {
 			doSteerOrSend();
 			return;
 		}
@@ -1298,7 +1304,7 @@ export function Chat({
 		<div className="flex h-dvh">
 			{/* The side-tutor window (fixed overlay): quick questions answered by a
 			    second agent that reads the lesson but never writes into it. */}
-			{kind !== "practice" && <SideTutor chatId={chatId} />}
+			{kind !== "practice" && <SideTutor chatId={chatId} dictation={dictation} />}
 			<div className="flex min-w-0 flex-1 flex-col">
 				{/* The top bar is its own block (owner, top-fade round 4): in flow
 				    above the scroller on the plain page background — no gradient. Its
@@ -1749,7 +1755,7 @@ export function Chat({
 					cliContextWindow={cliContextWindowOf(nativeMessages)}
 					pricing={pricing}
 					onReserve={setDockReserve}
-					dictationSlot={<DictationBar dictation={dictation} />}
+					dictationSlot={<DictationBar dictation={tutorDictating ? { ...dictation, phase: "idle", active: false } : dictation} />}
 					dictationCancel={dictation.cancel}
 					queuedSteers={visibleQueuedSteers(steerQueue, nativeMessages)}
 					setupCta={
@@ -1784,8 +1790,8 @@ export function Chat({
 							onSend={onSend}
 							onStop={abortInFlightTurn}
 							sendAllowed={sendAllowed}
-							dictationActive={dictation.active}
-							onEscape={dictation.active ? dictation.cancel : undefined}
+							dictationActive={lessonDictating}
+							onEscape={lessonDictating ? dictation.cancel : undefined}
 							// The pause affordance (owner round 16): the placeholder
 							// IS the hint — empty state, exactly where Enter-on-empty
 							// applies.

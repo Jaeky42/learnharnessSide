@@ -31,7 +31,12 @@ Branch `side-tutor`, based on upstream amosblomqvist/learnharness @ da08cb5 (v0.
 - **Minimized, it is a round bubble with no words** (owner's ask; it was a pill reading "Ask on the side" at the window's place). It sits at the lesson's bottom right, just above the message box or the open question, the same bubble as on a phone. While an opened question leaves no room above it, the bubble sits under the top bar at the right.
   - The open window can still be dragged anywhere and opens again where it was left; only the bubble has a fixed place.
   - Its place comes from `components/phone/use-dock-anchor.ts` (the dock's top, and the lesson's right edge, which isn't the window's while the notes drawer is open).
-- **The window says one sentence** while it is empty: "Stuck on a term or a step? Ask here." It has no title, no tagline and no hint in the typing box (owner's asks). The top bar is the drag handle and the two buttons (clear, minimize).
+- **The window's words** (owner's wording): "Tutor" in the top bar, "Stuck on a term or a step? Ask here." while it is empty, and "Ask a follow-up…" as the typing box's hint. Nothing else: no tagline, and no explanation of what the tutor can see.
+- **Speaking to the tutor** (owner's ask): a Dictate button (a microphone) sits right of the typing box, before Send. While it listens, a small live waveform and a red Stop take its place. The words land in the tutor's typing box when the run ends.
+  - It borrows the page's one dictation run (`components/dictation.tsx`): the same microphone, Deepgram key, language and waveform as the lesson's Dictate. The button claims the run's transcript, then starts the run (`components/side-tutor-dictation-state.ts`); `dictation.tsx` sends the transcript to the claimant and drops the claim whenever a run ends, so a claim never outlives its run.
+  - While the tutor's run is live, the lesson's own Dictate shows no run, and the lesson's message box doesn't take the words or the focus.
+  - Send while still listening ends the run first, then asks with the spoken words. Esc cancels the run (the words are dropped), as in the lesson; a second Esc minimizes. Minimizing ends the run and keeps the words.
+  - The button is off while the lesson itself is dictating. Without a Deepgram key it says so, and a click opens Settings → Keys, as the lesson's Dictate does.
 - A second agent answers, using the session's model and credentials at **medium** thinking (`SIDE_TUTOR_THINKING` in `src/server/side-tutor.ts`).
 - It sees a fresh lesson snapshot on every question: transcript, plan, phase, answers already revealed, and the open question **without** its answer key. It's told not to reveal open-question answers.
 - **Isolation:** the thread is stored in `<data>/side-tutor/<chatId>.json`, never in the chat record. The main teacher's context, compaction and graph extraction never see it. Its cost isn't added to the session meter. Deleting a session deletes its thread.
@@ -42,7 +47,8 @@ Branch `side-tutor`, based on upstream amosblomqvist/learnharness @ da08cb5 (v0.
   - `src/server/side-tutor.ts`
   - `app/api/chats/[id]/side-tutor/route.ts`
   - `components/side-tutor.tsx`
-- **Tests:** `tests/side-tutor.test.ts`; the window's words and the bubble's place: `tests/side-tutor-ui.test.tsx`.
+  - `components/side-tutor-dictation.tsx` and `side-tutor-dictation-state.ts` (the Dictate button; three small hooks in `components/dictation.tsx` and the lesson-side checks in `components/chat.tsx`)
+- **Tests:** `tests/side-tutor.test.ts`; the window's words, its Dictate button and the bubble's place: `tests/side-tutor-ui.test.tsx`.
 - **Known limit:** a teacher reply that's still streaming isn't visible until it finishes.
 - **On a phone** (browser narrower than 640 px): a bubble above the message box opens the tutor as a bottom sheet. See "Phone layouts" in `docs/cloud-sync.md`.
 

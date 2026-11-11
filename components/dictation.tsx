@@ -7,6 +7,7 @@ import { Hint } from "@/components/ui/hint";
 import { deepgramListenUrl, type DictationLanguage } from "@/src/core";
 import { useDictationLanguage } from "@/components/dictation-preference";
 import { setDictationActive } from "@/components/dictation-state";
+import { releaseSideDictation, sideDictationTarget } from "@/components/side-tutor-dictation-state";
 export { isDictationActive } from "@/components/dictation-state";
 
 /**
@@ -328,7 +329,9 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		if (bufferRef.current.length === 0) return;
 		const text = bufferRef.current.join(" ");
 		bufferRef.current = [];
-		(questionTarget ?? appendRef.current)(text);
+		// FORK: a run the side tutor borrowed lands in the tutor's box
+		// (components/side-tutor-dictation-state.ts).
+		(sideDictationTarget() ?? questionTarget ?? appendRef.current)(text);
 	}, []);
 
 	/** Full teardown of one run's machinery. Idempotent; generation-guarded by callers. */
@@ -336,6 +339,7 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		genRef.current++;
 		setDictationActive(false);
 		flush(); // the deferred transcript appears when the run ends (owner round 2)
+		releaseSideDictation(); // FORK: the side tutor's claim never outlives its run
 		if (safetyRef.current) {
 			clearTimeout(safetyRef.current);
 			safetyRef.current = null;

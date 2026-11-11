@@ -1,8 +1,8 @@
 /**
- * SIDE TUTOR WINDOW PINS (owner's asks): the open window says one sentence
- * and nothing else, and minimized it is a round bubble with no words, at
+ * SIDE TUTOR WINDOW PINS (owner's asks): the open window's few words, its
+ * Dictate button, and the minimized tutor, a round bubble with no words at
  * the lesson's bottom right just above the question, on a computer as on a
- * phone. fetch is scripted; no server.
+ * phone. fetch is scripted; no server, no microphone.
  */
 
 import React, { act } from "react";
@@ -60,16 +60,44 @@ function dockAt(top: number, right: number) {
 	document.body.appendChild(dock);
 }
 
-async function mountTutor() {
-	globalThis.fetch = (async () => new Response(JSON.stringify({ entries: [], running: false }), { status: 200, headers: { "Content-Type": "application/json" } })) as typeof fetch;
+type FakeDictation = import("../components/dictation.tsx").Dictation & { calls: string[] };
+/** The page's dictation run, scripted: no microphone, no Deepgram. */
+function fakeDictation(over: Partial<FakeDictation> = {}): FakeDictation {
+	const calls: string[] = [];
+	return {
+		phase: "idle",
+		error: null,
+		levelRef: { current: 0.2 },
+		active: false,
+		toggle: () => void calls.push("toggle"),
+		stop: () => void calls.push("stop"),
+		finish: async () => void calls.push("finish"),
+		cancel: () => void calls.push("cancel"),
+		clearError: () => void calls.push("clearError"),
+		calls,
+		...over,
+	};
+}
+
+const posted: string[] = [];
+async function mountTutor(dictation?: FakeDictation) {
+	posted.length = 0;
+	globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+		if (init?.method === "POST") {
+			posted.push(String((JSON.parse(String(init.body)) as { question?: string }).question));
+			return new Response("", { status: 200 });
+		}
+		return new Response(JSON.stringify({ entries: [], running: false }), { status: 200, headers: { "Content-Type": "application/json" } });
+	}) as typeof fetch;
 	const { SideTutor } = await import("../components/side-tutor.tsx");
 	const host = document.createElement("div");
 	document.body.appendChild(host);
 	const root = createRoot(host);
 	roots.push({ root, host });
-	await act(async () => root.render(<SideTutor chatId="chat_1" />));
+	const render = (d?: FakeDictation) => act(async () => root.render(<SideTutor chatId="chat_1" dictation={d} />));
+	await render(dictation);
 	await act(async () => new Promise((r) => setTimeout(r, 20)));
-	return host;
+	return Object.assign(host, { rerender: render });
 }
 const minimize = async (host: HTMLElement) => {
 	await act(async () => (host.querySelector("[aria-label='Minimize the side tutor']") as HTMLElement).click());
@@ -79,18 +107,93 @@ const minimize = async (host: HTMLElement) => {
 const styleOf = (el: HTMLElement) => el.getAttribute("style") ?? "";
 
 describe("the open window", () => {
-	it("says one sentence and nothing else: no title, no tagline, no hint in the typing box", async () => {
+	it("says Tutor at the top, one sentence in the middle, and Ask a follow-up… in the typing box; nothing else", async () => {
 		const host = await mountTutor();
 		const panel = host.querySelector("[data-testid='side-tutor']") as HTMLElement;
 		assert.ok(panel);
-		assert.equal((panel.textContent ?? "").trim(), "Stuck on a term or a step? Ask here.");
+		// Every word shown: the title, then the sentence. No tagline, no
+		// explanation of what the tutor can see.
+		assert.deepEqual([...panel.querySelectorAll("div, p")].map((el) => [...el.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent?.trim()).join("")).filter(Boolean), ["Tutor", "Stuck on a term or a step? Ask here."]);
+		assert.equal((panel.textContent ?? "").trim(), "TutorStuck on a term or a step? Ask here.");
 		const box = panel.querySelector("textarea") as HTMLElement;
-		assert.equal(box.getAttribute("placeholder"), null);
-		// Still named for screen readers, and still with its two buttons.
-		assert.equal(box.getAttribute("aria-label"), "Ask the side tutor");
-		assert.equal(panel.getAttribute("aria-label"), "Side tutor");
+		assert.equal(box.getAttribute("placeholder"), "Ask a follow-up…");
 		assert.ok(panel.querySelector("[aria-label='Clear side questions']"));
 		assert.ok(panel.querySelector("[aria-label='Minimize the side tutor']"));
+	});
+});
+
+describe("speaking to the tutor", () => {
+	const state = () => import("../components/side-tutor-dictation-state.ts");
+	const button = (host: HTMLElement) => host.querySelector("[data-testid='side-tutor-dictate']") as HTMLElement;
+	afterEach(async () => (await state()).releaseSideDictation());
+
+	it("has a Dictate button between the typing box and Send", async () => {
+		const host = await mountTutor(fakeDictation());
+		const row = (host.querySelector("textarea") as HTMLElement).parentElement as HTMLElement;
+		assert.deepEqual([...row.children].map((el) => el.getAttribute("aria-label")), ["Ask the side tutor", "Start dictation", "Ask"]);
+		assert.equal(host.querySelector("[data-testid='side-tutor-meter']"), null);
+		// Without the page's dictation (a practice page has no tutor at all) there is no button.
+		assert.equal(button(await mountTutor()), null);
+	});
+
+	it("starts the page's run for itself: the words will go to the tutor's box, not the lesson's", async () => {
+		const dictation = fakeDictation();
+		const host = await mountTutor(dictation);
+		assert.equal((await state()).sideDictationTarget(), null);
+		await act(async () => button(host).click());
+		assert.deepEqual(dictation.calls, ["toggle"]);
+		assert.equal(typeof (await state()).sideDictationTarget(), "function");
+	});
+
+	it("while it listens: a small live waveform and a red Stop; the words land in the box when it ends", async () => {
+		const dictation = fakeDictation();
+		const host = await mountTutor(dictation);
+		await act(async () => button(host).click());
+		const live = fakeDictation({ phase: "recording", active: true });
+		await host.rerender(live);
+		assert.equal(host.querySelectorAll("[data-testid='side-tutor-meter'] span").length, 14);
+		assert.equal(button(host).getAttribute("aria-label"), "Stop dictation");
+		assert.match(button(host).className, /text-destructive/);
+		await act(async () => button(host).click());
+		assert.deepEqual(live.calls, ["toggle"]);
+		// The run ends: dictation.tsx hands the transcript to whoever claimed it.
+		await act(async () => { (await state()).sideDictationTarget()?.("what is a mole"); });
+		assert.equal((host.querySelector("textarea") as HTMLTextAreaElement).value, "what is a mole");
+		// More words join what is there.
+		await act(async () => { (await state()).sideDictationTarget()?.("exactly"); });
+		assert.equal((host.querySelector("textarea") as HTMLTextAreaElement).value, "what is a mole exactly");
+	});
+
+	it("Send while still listening ends the run first, then asks with the spoken words", async () => {
+		const host = await mountTutor(fakeDictation());
+		await act(async () => button(host).click());
+		const s = await state();
+		const live = fakeDictation({ phase: "recording", active: true });
+		live.finish = async () => {
+			live.calls.push("finish");
+			s.sideDictationTarget()?.("why does it fold");
+		};
+		await host.rerender(live);
+		const send = host.querySelector("[aria-label='Ask']") as HTMLButtonElement;
+		assert.equal(send.hasAttribute("disabled"), false, "sendable with an empty box while it listens");
+		await act(async () => send.click());
+		await act(async () => new Promise((r) => setTimeout(r, 20)));
+		assert.deepEqual(live.calls, ["finish"]);
+		assert.deepEqual(posted, ["why does it fold"]);
+	});
+
+	it("is off while the lesson itself is dictating, and leads to the key when there is none", async () => {
+		// The lesson's run: not the tutor's (nothing claimed).
+		const host = await mountTutor(fakeDictation({ phase: "recording", active: true }));
+		assert.equal(button(host).hasAttribute("disabled"), true);
+		assert.equal(host.querySelector("[data-testid='side-tutor-meter']"), null);
+		// No Deepgram key: the button says so, and a click doesn't start a run.
+		const keyless = fakeDictation({ error: "Dictation needs a Deepgram key" });
+		const other = await mountTutor(keyless);
+		assert.equal(button(other).getAttribute("title"), "Dictation needs a Deepgram key");
+		await act(async () => button(other).click());
+		assert.deepEqual(keyless.calls, ["clearError"]);
+		assert.equal((await state()).sideDictationTarget(), null);
 	});
 });
 
