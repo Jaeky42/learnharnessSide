@@ -776,12 +776,23 @@ export function createObsidianSync(deps: ObsidianSyncDeps = defaultDeps()) {
 		stopScan();
 	}
 
+	/** The learner changed the notes here on purpose (a delete in the notes
+	 *  drawer): the safety check's baseline follows, whether ob is running or
+	 *  not, so a deliberate clear-out is never taken for the notes going missing. */
+	function notesChangedHere(): void {
+		if (!ready || !vault || !recordLoaded) return;
+		const notes = deps.files.countNotes(deps.vaultDir);
+		if (notes === record.notesSeen) return;
+		record = { ...record, notesSeen: notes };
+		saveRecord();
+	}
+
 	/** The connected vault's name in Obsidian (what obsidian:// links address). */
 	function vaultName(): string | null {
 		return ready && vault?.name ? vault.name : null;
 	}
 
-	return { boot, view, notesSync, vaultName, signIn, signOut, vaults, connect, disconnect, retry, shutdown, settled: () => chain.then(() => undefined) };
+	return { boot, view, notesSync, vaultName, notesChangedHere, signIn, signOut, vaults, connect, disconnect, retry, shutdown, settled: () => chain.then(() => undefined) };
 }
 
 export type ObsidianSync = ReturnType<typeof createObsidianSync>;

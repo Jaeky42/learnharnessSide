@@ -629,6 +629,31 @@ export interface NotesTree {
 	backlinks: Record<string, string[]>;
 }
 
+/** What a folder holds, however deep (the delete confirm's numbers). */
+export interface FolderContents {
+	notes: number;
+	folders: number;
+	/** Pictures and anything else that isn't a note. */
+	files: number;
+}
+
+function counted(n: number, one: string): string {
+	return `${n} ${one}${n === 1 ? "" : "s"}`;
+}
+
+/** The delete confirm's wording (owner-approved). `contents` is null for a
+ *  note and the folder's contents for a folder. */
+export function deleteConfirmText(name: string, contents: FolderContents | null): { title: string; body: string } {
+	if (!contents) return { title: `Delete “${name}”?`, body: "This removes it from your Obsidian vault for good." };
+	const parts: string[] = [];
+	if (contents.notes) parts.push(counted(contents.notes, "note"));
+	if (contents.folders) parts.push(counted(contents.folders, "folder"));
+	if (contents.files) parts.push(counted(contents.files, parts.length ? "other file" : "file"));
+	if (!parts.length) return { title: `Delete “${name}”?`, body: "This removes the folder from your Obsidian vault for good." };
+	const list = parts.length === 1 ? parts[0]! : `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]!}`;
+	return { title: `Delete “${name}” and everything in it?`, body: `This removes ${list} from your Obsidian vault for good.` };
+}
+
 /** obsidian://open for a vault-relative target (a note outside LearnHarness/). */
 export function obsidianUrl(vaultName: string, vaultRelTarget: string): string {
 	return `obsidian://open?vault=${encodeURIComponent(vaultName)}&file=${encodeURIComponent(vaultRelTarget)}`;

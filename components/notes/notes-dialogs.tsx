@@ -12,7 +12,7 @@ import { createPortal } from "react-dom";
 import { FileTextIcon, FolderIcon, InboxIcon, LockIcon } from "lucide-react";
 import { useBackdropDismiss } from "@/components/backdrop-dismiss";
 import { cn } from "@/lib/utils";
-import { folderOf, INBOX_FOLDER, isWithinFolder, joinPath, nameProblem, noteName, parseSections } from "@/src/core";
+import { deleteConfirmText, folderOf, INBOX_FOLDER, isWithinFolder, joinPath, nameProblem, noteName, parseSections, type FolderContents } from "@/src/core";
 
 function Frame({ label, onClose, children, wide }: { label: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
 	const backdrop = useBackdropDismiss(onClose);
@@ -43,7 +43,7 @@ function Frame({ label, onClose, children, wide }: { label: string; onClose: () 
 	);
 }
 
-function Actions({ onClose, onConfirm, label, busy, disabled }: { onClose: () => void; onConfirm: () => void; label: string; busy?: boolean; disabled?: boolean }) {
+function Actions({ onClose, onConfirm, label, busy, disabled, danger }: { onClose: () => void; onConfirm: () => void; label: string; busy?: boolean; disabled?: boolean; danger?: boolean }) {
 	return (
 		<div className="mt-5 flex justify-end gap-2">
 			<button type="button" onClick={onClose} className="rounded-md px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
@@ -53,7 +53,10 @@ function Actions({ onClose, onConfirm, label, busy, disabled }: { onClose: () =>
 				type="button"
 				onClick={onConfirm}
 				disabled={busy || disabled}
-				className="rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-40"
+				className={cn(
+					"rounded-md px-3 py-1.5 text-sm transition-colors disabled:opacity-40",
+					danger ? "bg-destructive text-white hover:bg-destructive/90" : "bg-primary text-primary-foreground hover:bg-primary/90",
+				)}
 			>
 				{busy ? "Working…" : label}
 			</button>
@@ -205,6 +208,45 @@ export function NameDialog({
 			</label>
 			<ErrorLine text={error} />
 			<Actions onClose={onClose} onConfirm={() => void run()} label={confirmLabel} busy={busy} />
+		</Frame>
+	);
+}
+
+// ─── Delete ──────────────────────────────────────────────────────────────────
+
+/** "Delete … ?" for a note, or for a folder with everything in it (owner's
+ *  choice: for good, no Undo). `contents` is null for a note. */
+export function DeleteDialog({
+	name,
+	contents,
+	onClose,
+	onDelete,
+}: {
+	name: string;
+	contents: FolderContents | null;
+	onClose: () => void;
+	onDelete: () => Promise<void>;
+}) {
+	const [busy, setBusy] = useState(false);
+	const [error, setError] = useState<string | null>(null);
+	const { title, body } = deleteConfirmText(name, contents);
+	const run = async () => {
+		setBusy(true);
+		setError(null);
+		try {
+			await onDelete();
+			onClose();
+		} catch (e) {
+			setError(e instanceof Error ? e.message : String(e));
+			setBusy(false);
+		}
+	};
+	return (
+		<Frame label={title} onClose={onClose}>
+			<h2 className="text-sm font-semibold" data-testid="notes-delete-title">{title}</h2>
+			<p className="mt-1 text-xs text-muted-foreground" data-testid="notes-delete-body">{body}</p>
+			<ErrorLine text={error} />
+			<Actions onClose={onClose} onConfirm={() => void run()} label="Delete" busy={busy} danger />
 		</Frame>
 	);
 }

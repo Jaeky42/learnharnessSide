@@ -43,6 +43,7 @@ import {
 	obsidianUrl,
 	parseSections,
 	resolveLink,
+	type FolderContents,
 	type NoteLink,
 	type NotesTree,
 	kbdEventForAction,
@@ -51,8 +52,10 @@ import {
 	chooseVault,
 	createFolder,
 	createNote,
+	deleteItem,
 	extractSelection,
 	fetchTree,
+	folderContents,
 	getHomeFolder,
 	mergeNote,
 	moveItem,
@@ -66,7 +69,7 @@ import {
 } from "./notes-api";
 import { NoteEditor, type NoteEditorHandle } from "./note-editor";
 import { NoteReadView } from "./note-read-view";
-import { MoveDialog, NameDialog, SplitDialog } from "./notes-dialogs";
+import { DeleteDialog, MoveDialog, NameDialog, SplitDialog } from "./notes-dialogs";
 import { buildTree, filterTree, itemName, NotesTreeView, type RowTarget, type TreeMenuItem } from "./notes-tree";
 import { isPhoneNow, useIsPhone } from "@/components/phone/use-phone";
 import { useSettingsDialog } from "@/components/settings/settings-dialog";
@@ -110,6 +113,7 @@ type Dialog =
 	| { kind: "move"; item: string }
 	| { kind: "split"; checked: number[] }
 	| { kind: "folder"; parent: string }
+	| { kind: "delete"; item: string; contents: FolderContents | null }
 	| { kind: "extract"; start: number; end: number };
 
 /** The open/closed state lives with the chat (Notes chip + Ctrl+Shift+N);
@@ -135,6 +139,7 @@ export function NotesDrawer({ chatId, onClose }: { chatId: string; onClose: () =
 	const [tree, setTree] = useState<NotesTree | null>(null);
 	const [treeError, setTreeError] = useState<string | null>(null);
 	const [setupOpen, setSetupOpen] = useState(false);
+	const [dragSlot, setDragSlot] = useState<HTMLElement | null>(null);
 	const [view, setView] = useState<"session" | "all">(() => load("lh:notes-view", "all"));
 	const [query, setQuery] = useState("");
 	const [expanded, setExpanded] = useState<Set<string>>(() => new Set(load<string[]>("lh:notes-expanded", [])));
@@ -423,6 +428,37 @@ export function NotesDrawer({ chatId, onClose }: { chatId: string; onClose: () =
 		[flush, openPath, chatId, refreshTree],
 	);
 
+	/** Delete for good (owner's choice: a confirm, no Undo). The open note goes
+	 *  with it when it is the note or sits inside the folder; its unsaved
+	 *  typing is dropped, never saved back into a new file. */
+	const doDelete = async (item: string) => {
+		const isNote = item.endsWith(".md");
+		const gone = (p: string | null | undefined) => !!p && (isNote ? p === item : isWithinFolder(p, item));
+		if (gone(docRef.current?.path) || gone(openPath)) {
+			if (saveTimer.current) {
+				clearTimeout(saveTimer.current);
+				saveTimer.current = null;
+			}
+			dirtyRef.current = false;
+			if (inFlight.current) await inFlight.current.catch(() => undefined);
+			setConflict(null);
+			setDoc(null);
+			setOpenPath(null);
+		}
+		await deleteItem(item);
+		if (!isNote) {
+			setSelectedFolder((s) => (s && isWithinFolder(s, item) ? null : s));
+			setExpanded((prev) => new Set([...prev].filter((e) => !isWithinFolder(e, item))));
+			void getHomeFolder(chatId).then(setHomeState);
+		}
+		await refreshTree();
+		showToast(`Deleted “${itemName(item)}”.`);
+	};
+	const askDelete = (item: string) => {
+		if (item.endsWith(".md")) return setDialog({ kind: "delete", item, contents: null });
+		void folderContents(item).then((contents) => setDialog({ kind: "delete", item, contents })).catch((e) => showToast(message(e)));
+	};
+
 	const onDragMove = (from: string, to: string) => {
 		void doMove(from, to).catch((e) => showToast(message(e)));
 	};
@@ -552,12 +588,14 @@ export function NotesDrawer({ chatId, onClose }: { chatId: string; onClose: () =
 			if (n.sections > 0) items.push({ label: "Split note…", onSelect: () => void openNote(n.path).then(() => setDialog({ kind: "split", checked: [] })) });
 			if (n.parent) items.push({ label: "Merge into parent", onSelect: () => void doMerge(n.path) });
 			items.push({ label: "Open in Obsidian", onSelect: () => openInObsidian(`${NOTES_FOLDER}/${n.path}`) });
+			items.push({ label: "Delete", danger: true, onSelect: () => askDelete(n.path) });
 			return items;
 		}
 		const f = t.folder;
 		return [
-			{ label: "New note here", onSelect: () => setNewBox({ title: "", folder: f.path, error: null }) },
-			{ label: "New folder here", onSelect: () => setDialog({ kind: "folder", parent: f.path }) },
+			// Owner's wording: no "here"; the folder you held says where.
+			{ label: "New note", onSelect: () => setNewBox({ title: "", folder: f.path, error: null }) },
+			{ label: "New folder", onSelect: () => setDialog({ kind: "folder", parent: f.path }) },
 			{ label: "Move to…", onSelect: () => setDialog({ kind: "move", item: f.path }) },
 			{
 				label: homeFolder === f.path ? "This session's home folder" : "Make this the session's home folder",
@@ -565,6 +603,7 @@ export function NotesDrawer({ chatId, onClose }: { chatId: string; onClose: () =
 					void setHomeFolder(chatId, f.path).then(() => setHomeState(f.path)).catch((e) => showToast(message(e)));
 				},
 			},
+			{ label: "Delete", danger: true, onSelect: () => askDelete(f.path) },
 		];
 	};
 
@@ -785,7 +824,10 @@ export function NotesDrawer({ chatId, onClose }: { chatId: string; onClose: () =
 						/>
 					</label>
 
-					<div data-phone="notes-tree-head" className="mx-3 mt-2 flex shrink-0 items-center gap-1">
+					<div data-phone="notes-tree-head" className="relative mx-3 mt-2 flex shrink-0 items-center gap-1">
+						{/* PHONE drag: the tree lays its top-level drop box over this
+						    heading. Out of the flow, so nothing here moves. */}
+						<div ref={setDragSlot} className="pointer-events-none absolute inset-0" />
 							<button
 								type="button"
 								aria-expanded={treeShown}
@@ -815,6 +857,7 @@ export function NotesDrawer({ chatId, onClose }: { chatId: string; onClose: () =
 								<NotesTreeView
 									root={shownTree}
 									flat={results}
+									dragSlot={dragSlot}
 									openPath={openPath}
 									selectedFolder={selectedFolder}
 									expanded={expanded}
@@ -978,6 +1021,9 @@ export function NotesDrawer({ chatId, onClose }: { chatId: string; onClose: () =
 					onClose={() => setDialog(null)}
 					onSplit={doSplit}
 				/>
+			)}
+			{dialog?.kind === "delete" && (
+				<DeleteDialog name={itemName(dialog.item)} contents={dialog.contents} onClose={() => setDialog(null)} onDelete={() => doDelete(dialog.item)} />
 			)}
 			{dialog?.kind === "folder" && (
 				<NameDialog

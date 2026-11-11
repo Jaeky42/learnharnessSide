@@ -384,6 +384,62 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
   - a commit and push to the branch;
   - a "what to try on your server" list.
 
+### In progress: notes drawer additions (asked by the owner after Phase 4)
+
+The owner asked for these once Phase 4 worked on the server. The plan was approved; **the code is written and committed, but not finished** (see "Still to do").
+
+**Decisions (owner-approved; wording included)**
+
+- **New folder already existed** (the folder-with-a-plus icon in the drawer's top bar, and the folder row menu). The owner hadn't seen it. Nothing to build, except the wording below.
+- **Folder row menu wording:** "New note" and "New folder", without "here". The menu is the same one for press and hold (phone) and right-click or ⋯ (computer).
+- **Delete** in the row menu of notes and folders, last and in red.
+  - **For good:** no Undo and no trash folder (owner's choice over both). With Obsidian Sync the way back is Obsidian → Settings → Sync → Deleted files.
+  - A confirm box first. A folder is deleted **with everything in it**; the box says how much.
+  - Wording (`deleteConfirmText` in `src/core/notes.ts`; the drawer's curly quotes):
+    - note: `Delete “Electricity”?` / "This removes it from your Obsidian vault for good."
+    - folder with contents: `Delete “Physics” and everything in it?` / "This removes 3 notes and 1 folder from your Obsidian vault for good." Other files are counted too ("…, 1 folder and 2 other files"; just "2 files" when there is nothing else).
+    - empty folder: `Delete “Physics”?` / "This removes the folder from your Obsidian vault for good."
+    - Buttons: Cancel, Delete (red).
+  - **No line about links** to the deleted note (the owner declined it). Links to a deleted note are left as written.
+  - The open note closes when it is deleted (or sits in the deleted folder); its unsaved typing is dropped, never saved back.
+  - A session whose home folder is deleted has no home folder again.
+  - On the server, a delete made in the drawer updates the safety check's note count at once (`notesChangedHere`), so clearing out many notes never pauses sync.
+- **Dragging on the phone: hold, then move** (owner's choice over a grip on each row). This replaces Phase 3's "dragging is off on phones".
+  - Press and hold opens the menu, as before. Keep the finger down and move: the menu closes, a label with the name follows the finger, and the dragged row dims.
+  - Folders light up under the finger; letting go on one moves the item there (the same move as "Move to…", links fixed up). Letting go anywhere else cancels.
+  - An **empty box** is laid over the "Topics" heading while dragging: dropping on it moves the item out of every folder. **No words on it** (the owner first approved a "Top level" label, then asked for the box without text).
+  - The list scrolls when the finger nears its top or bottom edge.
+  - Search results can't be dragged. Mouse dragging on a computer is unchanged.
+
+**What is built**
+
+- `src/store/notes.ts`: `remove` (a note, or a folder with everything in it; drops waiting edits and home-folder records) and `contents` (what a folder holds).
+- `src/server/notes.ts`: actions `contents` and `delete`; `src/server/obsidian-sync.ts`: `notesChangedHere`.
+- `components/notes/notes-api.ts` (`deleteItem`, `folderContents`), `notes-dialogs.tsx` (`DeleteDialog`), `notes-drawer.tsx` (`askDelete`, `doDelete`, the menu items, the drop-box slot in the heading).
+- `components/phone/long-press.ts`: after a hold on a row with `data-phone-drag`, moving the finger sends `HOLD_DRAG_EVENT` (start, move, end, cancel) and keeps the page from scrolling; `edgeScrollStep`.
+- `components/notes/notes-tree.tsx`: `canDropInto`, the phone drag (label, target under the finger via `data-drop-folder`, edge scrolling, the drop box).
+
+**Checked so far**
+
+- Type check and lint pass. The existing notes and phone tests still pass.
+- A Playwright run at phone size with real touch events (CDP `Input.dispatchTouchEvent`: touchStart, wait 750 ms, touchMove in steps, touchEnd) passed: the menu closes on the move, the label follows, a drop on a folder moves the note, a drop on the box moves it to the top level, the folder menu wording, the folder confirm wording, Cancel, and a folder delete.
+- **Not yet seen passing:** deleting a single note through the page, and the deletion reaching Obsidian. The run stopped there because the long-running dev server held a manager object from before `notesChangedHere` existed (restart the dev server after editing `src/server/obsidian-sync.ts`). The route now ignores a failure of that step.
+
+**Still to do**
+
+1. Tests:
+   - `tests/notes-store.test.ts`: `remove` (note; folder with notes, subfolders and other files; the top folder itself refused; a missing item; a path outside the notes folder; waiting edits and home-folder records dropped) and `contents`.
+   - `tests/notes-core.test.ts`: every form of `deleteConfirmText`.
+   - `tests/phone-layout.test.ts`: `edgeScrollStep`; `canDropInto` (from `notes-tree.tsx`).
+   - `tests/notes-ui.test.tsx`: the folder menu reads "New note", "New folder", …, "Delete"; the note menu ends with "Delete"; `DeleteDialog` shows the wording.
+   - `tests/obsidian-sync.test.ts`: with sync stopped, removing most notes and calling `notesChangedHere()` doesn't pause sync at the next start.
+2. A fresh browser run in server mode at phone size (the stand-in Obsidian, see "Development notes"): the whole drag and delete flow, a note delete, and the deletion arriving in the stand-in remote. Then desktop width: right-click menu, delete, mouse drag unchanged.
+3. `npm test`, typecheck, lint.
+4. Send the owner screenshots (the drag with the empty drop box, the confirm boxes).
+5. Docs: `docs/side-tutor.md` notes drawer section (Delete and its rules; the menu wording; dragging on a phone) and the "Notes drawer" bullet under "Phone layouts" here, which still says dragging is off.
+6. Commit, push, confirm the image build, and tell the owner to update the server (`cd ~/learnharnessSide/deploy && ./update.sh`), reopen the home-screen app and try the drag on the iPhone. iOS touch handling is the risky part: expect a round of fixes, as in Phase 3.
+7. Wording added without being asked, for the owner to review: the toast "Deleted “Electricity”." after a delete.
+
 ### Next: Phase 5, the sync engine
 
 - Phase 5's open questions are listed below. Ask them one at a time, with pictures.
@@ -423,6 +479,7 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
   - Its add-on is built for the Node that ran the install, so use the same Node for both.
   - Without `LH_TEST_OB_CLI` the end-to-end tests are skipped; CI always runs them.
 - **Obsidian's servers (`api.obsidian.md`) are blocked in the sandbox.** To see Settings → Obsidian work in a browser, run server mode with the stand-in: a wrapper script `exec node --require tests/fixtures/obsidian-fake/preload.cjs <cli.js> "$@"` as `LH_OB_BINARY`, `LH_FAKE_OBSIDIAN=<remote.json>` (its shape is described at the top of the preload file), plus `LH_VAULT_DIR` and `XDG_CONFIG_HOME` in scratch folders.
+- **The dev server keeps server objects across code reloads.** After editing `src/server/obsidian-sync.ts`, restart `next dev`; otherwise routes call methods the old manager object doesn't have.
 - **`pkill -f` in a cloud session matches the shell that runs it** when the pattern is on its own command line. Put such commands in a script file.
 - **Colouring a border:** `app/globals.css` sets `* { border-color }` outside any layer, which beats Tailwind's `border-<colour>` utilities. Use a separate element with a background colour (see `Notice` in `obsidian-section.tsx`).
 - **The local dev server** (`next dev` on port 3100) doesn't survive between turns in a cloud session; start it with `setsid nohup … &` and check it answers before each browser run.

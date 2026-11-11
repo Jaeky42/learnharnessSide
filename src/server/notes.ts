@@ -6,6 +6,8 @@
  *   POST /api/notes {action:"create", folder, title, chatId}
  *   POST /api/notes {action:"folder", parent, name}
  *   POST /api/notes {action:"move", from, to}
+ *   POST /api/notes {action:"contents", path}   → what a folder holds
+ *   POST /api/notes {action:"delete", path}     → a note, or a folder with everything in it
  *   POST /api/notes {action:"split", path, choices, chatId}
  *   POST /api/notes {action:"merge", path}
  *   POST /api/notes {action:"extract", path, start, end, title, chatId}
@@ -85,6 +87,18 @@ export async function notesActionResponse(req: Request): Promise<Response> {
 				return Response.json(notesStore.create(str(b.folder) ?? "", str(b.title) ?? "", knownChat(b.chatId)));
 			case "folder":
 				return Response.json(notesStore.createFolder(str(b.parent) ?? "", str(b.name) ?? ""));
+			case "contents":
+				return Response.json(notesStore.contents(str(b.path) ?? ""));
+			case "delete": {
+				const result = notesStore.remove(str(b.path) ?? "");
+				// Cloud server: a deletion made here is meant. The safety check's
+				// note count follows it, so sync never pauses over it.
+				// The note is already gone: nothing here may turn that into an error.
+				if (serverModeEnabled()) {
+					try { obsidianSync().notesChangedHere(); } catch { /* the count catches up on the next scan */ }
+				}
+				return Response.json(result);
+			}
 			case "move":
 				return Response.json(notesStore.move(str(b.from) ?? "", str(b.to) ?? ""));
 			case "split": {

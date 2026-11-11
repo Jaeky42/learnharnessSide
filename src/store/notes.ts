@@ -18,6 +18,7 @@ import { PATHS } from "../../config.ts";
 import {
 	addSession,
 	attachmentFolderFor,
+	type FolderContents,
 	computeBacklinks,
 	folderOf,
 	INBOX_FOLDER,
@@ -597,6 +598,56 @@ function move(from: string, toFolder: string): { path: string } {
 	return { path: to };
 }
 
+// ─── Delete ──────────────────────────────────────────────────────────────────
+
+/** What a folder holds, however deep: what deleting it would remove. Hidden
+ *  (dot) entries aren't counted; they go with the folder all the same. */
+function contents(rel: string): FolderContents {
+	const { root } = requireRoot();
+	if (!rel) throw new NotesError(400, "Invalid folder path.");
+	const abs = absFolder(root, rel);
+	if (!isDir(abs)) throw new NotesError(404, "That folder no longer exists.");
+	const out: FolderContents = { notes: 0, folders: 0, files: 0 };
+	const walk = (dir: string, depth: number) => {
+		if (depth > MAX_DEPTH) return;
+		let entries: fs.Dirent[];
+		try { entries = fs.readdirSync(/* turbopackIgnore: true */ dir, { withFileTypes: true }); } catch { return; }
+		for (const e of entries) {
+			if (e.name.startsWith(".")) continue;
+			if (e.isDirectory()) {
+				out.folders += 1;
+				walk(path.join(/* turbopackIgnore: true */ dir, e.name), depth + 1);
+			} else if (e.name.toLowerCase().endsWith(".md")) out.notes += 1;
+			else out.files += 1;
+		}
+	};
+	walk(abs, 0);
+	return out;
+}
+
+/** Deletes a note, or a folder with everything in it, for good (owner's
+ *  choice: no Undo, no trash; with Obsidian Sync the vault's own "Deleted
+ *  files" list is the way back). Adds and changes no links: links to a
+ *  deleted note are left as the learner wrote them. */
+function remove(rel: string): { path: string } {
+	const { root } = requireRoot();
+	const isNote = rel.endsWith(".md");
+	if (!rel) throw new NotesError(400, "The notes folder itself can't be deleted.");
+	const abs = isNote ? absNote(root, rel) : absFolder(root, rel);
+	let stat: fs.Stats;
+	// lstat: a link is removed as a link, never followed.
+	try { stat = fs.lstatSync(/* turbopackIgnore: true */ abs); } catch { throw new NotesError(404, "That item no longer exists."); }
+	if (isNote ? !stat.isFile() : !stat.isDirectory()) throw new NotesError(404, "That item no longer exists.");
+	const gone = allNotePaths(root).filter((p) => (isNote ? p === rel : isWithinFolder(p, rel)));
+	fs.rmSync(/* turbopackIgnore: true */ abs, { recursive: !isNote, force: false });
+	// Edits that were waiting for the vault must not bring a deleted note back.
+	for (const p of gone) fs.rmSync(/* turbopackIgnore: true */ pendingFile(p), { force: true });
+	// A session whose home folder is gone has no home folder again.
+	if (!isNote) forgetHomes(rel);
+	cache().clear();
+	return { path: rel };
+}
+
 // ─── Split / merge / extract ─────────────────────────────────────────────────
 
 export interface SplitResult {
@@ -869,6 +920,17 @@ function retargetHomes(from: string, to: string): void {
 	}
 }
 
+function forgetHomes(folder: string): void {
+	let names: string[];
+	try { names = fs.readdirSync(/* turbopackIgnore: true */ dirs.sessions()); } catch { return; }
+	for (const n of names) {
+		if (!n.endsWith(".json")) continue;
+		const chatId = n.slice(0, -5);
+		const home = getHome(chatId);
+		if (home !== null && isWithinFolder(home, folder)) setHome(chatId, null);
+	}
+}
+
 /** Session deletion: the notes stay (they belong to topics, not sessions);
  *  only the session's home-folder bookkeeping goes. */
 function discardSession(chatId: string): void {
@@ -908,6 +970,8 @@ export const notesStore = {
 	create,
 	createFolder,
 	move,
+	contents,
+	remove,
 	split,
 	merge,
 	extract,

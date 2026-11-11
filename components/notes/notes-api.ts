@@ -5,7 +5,7 @@
  * learner's own action; nothing here talks to an agent.
  */
 
-import type { NotesStatus, NotesTree, SplitChoice } from "@/src/core";
+import type { FolderContents, NotesStatus, NotesTree, SplitChoice } from "@/src/core";
 
 export interface NoteFile {
 	path: string;
@@ -72,6 +72,16 @@ export async function saveNote(path: string, body: string, baseHash: string | nu
 		}
 		throw e;
 	}
+}
+
+/** What a folder holds, however deep (for the delete confirm). */
+export function folderContents(path: string): Promise<FolderContents> {
+	return notesAction("contents", { path });
+}
+
+/** Deletes a note, or a folder with everything in it, for good. */
+export function deleteItem(path: string): Promise<{ path: string }> {
+	return notesAction("delete", { path });
 }
 
 export function createNote(folder: string, title: string, chatId: string | null): Promise<{ path: string }> {

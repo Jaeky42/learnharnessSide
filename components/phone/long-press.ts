@@ -14,6 +14,13 @@
  *     opened and menus that close on an outside press stay open;
  *   - Android fires its own contextmenu on a long press. Whichever comes
  *     first wins and the other is swallowed, so the menu opens once.
+ *
+ * HOLD, THEN MOVE (owner's choice for dragging notes into folders): rows
+ * that also carry data-phone-drag can be dragged with the same touch. Once
+ * the hold has opened the menu, moving the finger past the slop announces
+ * a drag (HOLD_DRAG_EVENT on the document: start, move, end or cancel), and
+ * the page is kept from scrolling under it. Lifting without moving leaves
+ * the menu open, as before. The row's owner does the rest (notes-tree.tsx).
  */
 
 import { isPhoneNow } from "@/components/phone/use-phone";
@@ -21,6 +28,25 @@ import { isPhoneNow } from "@/components/phone/use-phone";
 export const HOLD_MS = 500;
 /** How far (px) the finger may drift before the hold counts as a scroll. */
 export const HOLD_SLOP = 10;
+
+export const HOLD_DRAG_EVENT = "lh-hold-drag";
+export interface HoldDragDetail {
+	phase: "start" | "move" | "end" | "cancel";
+	x: number;
+	y: number;
+	/** The row that was held. */
+	row: Element;
+}
+
+/** How fast (px per frame) a list scrolls while a dragged row is held near
+ *  its top or bottom edge: nothing in the middle, faster towards the edge.
+ *  Pure, exported for tests. */
+export function edgeScrollStep(y: number, top: number, bottom: number, zone = 56, max = 14): number {
+	if (bottom - top < zone * 2) return 0;
+	if (y < top + zone) return -Math.ceil(max * Math.min(1, (top + zone - y) / zone));
+	if (y > bottom - zone) return Math.ceil(max * Math.min(1, (y - (bottom - zone)) / zone));
+	return 0;
+}
 
 /** Pure rule, exported for tests: is this still a hold, not a scroll? */
 export function stillHolding(start: { x: number; y: number }, now: { x: number; y: number }): boolean {
@@ -34,6 +60,19 @@ export function installLongPress(doc: Document = document): () => void {
 	/** This touch already opened a menu: what the finger does next belongs to
 	 *  the hold, not to the page. Cleared when the next touch starts. */
 	let held = false;
+	/** Where a hold fired on a draggable row; moving away from it is a drag. */
+	let heldAt: { x: number; y: number; id: number; row: Element } | null = null;
+	let dragging = false;
+
+	const emit = (phase: HoldDragDetail["phase"], at: { x: number; y: number }) => {
+		if (!heldAt) return;
+		doc.dispatchEvent(new CustomEvent<HoldDragDetail>(HOLD_DRAG_EVENT, { detail: { phase, x: at.x, y: at.y, row: heldAt.row } }));
+	};
+	const endDrag = (phase: "end" | "cancel", at: { x: number; y: number }) => {
+		if (dragging) emit(phase, at);
+		heldAt = null;
+		dragging = false;
+	};
 
 	const cancelTimer = () => {
 		if (timer) clearTimeout(timer);
@@ -48,6 +87,7 @@ export function installLongPress(doc: Document = document): () => void {
 		cancelTimer();
 		if (!target || !at) return;
 		held = true;
+		heldAt = target.hasAttribute("data-phone-drag") ? { x: at.x, y: at.y, id: at.id, row: target } : null;
 		target.dispatchEvent(
 			new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: at.x, clientY: at.y, button: 2 }),
 		);
@@ -55,6 +95,7 @@ export function installLongPress(doc: Document = document): () => void {
 
 	const onDown = (e: PointerEvent) => {
 		cancelTimer();
+		endDrag("cancel", { x: e.clientX, y: e.clientY });
 		held = false;
 		if (e.pointerType !== "touch" || !e.isPrimary || !isPhoneNow()) return;
 		const hit = (e.target as Element | null)?.closest?.("[data-phone-press]") ?? null;
@@ -64,9 +105,25 @@ export function installLongPress(doc: Document = document): () => void {
 		timer = setTimeout(fire, HOLD_MS);
 	};
 	const onMove = (e: PointerEvent) => {
-		if (start && e.pointerId === start.id && !stillHolding(start, { x: e.clientX, y: e.clientY })) cancelTimer();
+		const now = { x: e.clientX, y: e.clientY };
+		if (start && e.pointerId === start.id && !stillHolding(start, now)) cancelTimer();
+		if (heldAt && e.pointerId === heldAt.id) {
+			if (!dragging && !stillHolding(heldAt, now)) {
+				dragging = true;
+				emit("start", now);
+			} else if (dragging) emit("move", now);
+		}
 	};
-	const onUp = () => cancelTimer();
+	const onUp = (e: PointerEvent) => {
+		cancelTimer();
+		if (heldAt && e.pointerId === heldAt.id) endDrag(e.type === "pointercancel" ? "cancel" : "end", { x: e.clientX, y: e.clientY });
+	};
+	// After a hold on a draggable row the finger belongs to the drag: the page
+	// must not scroll under it. Decided on the first movement, before the
+	// browser starts a scroll of its own (it can't be stopped once started).
+	const onTouchMove = (e: TouchEvent) => {
+		if (heldAt && e.cancelable) e.preventDefault();
+	};
 	// Lifting the finger after a hold: cancel the simulated mouse press and
 	// tap the browser would send next. Without this the tap opens the row
 	// and the mouse press closes menus that close on any outside press.
@@ -88,8 +145,9 @@ export function installLongPress(doc: Document = document): () => void {
 			e.stopPropagation();
 			return;
 		}
-		if (timer && row && e.target instanceof Node && row.contains(e.target)) {
+		if (timer && row && start && e.target instanceof Node && row.contains(e.target)) {
 			// Android's came first: let it open the menu and drop our timer.
+			heldAt = row.hasAttribute("data-phone-drag") ? { x: start.x, y: start.y, id: start.id, row } : null;
 			cancelTimer();
 			held = true;
 		}
@@ -102,10 +160,12 @@ export function installLongPress(doc: Document = document): () => void {
 	doc.addEventListener("pointerup", onUp, opts);
 	doc.addEventListener("pointercancel", onUp, opts);
 	doc.addEventListener("touchend", onTouchEnd, active);
+	doc.addEventListener("touchmove", onTouchMove, active);
 	doc.addEventListener("click", onClick, opts);
 	doc.addEventListener("contextmenu", onContextMenu, opts);
 	return () => {
 		cancelTimer();
+		doc.removeEventListener("touchmove", onTouchMove, active);
 		doc.removeEventListener("pointerdown", onDown, opts);
 		doc.removeEventListener("pointermove", onMove, opts);
 		doc.removeEventListener("pointerup", onUp, opts);
