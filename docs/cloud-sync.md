@@ -411,9 +411,18 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
   - The same at desktop width with the mouse: a click still opens a note, press-and-move drags, Esc puts it back, and the menus are untouched. Earlier runs covered Delete: the confirm boxes, the open note with unsaved typing (it closes and isn't written back), a deleted home folder, and the deletions reaching the stand-in Obsidian with sync never paused.
 - **The redone drag is confirmed on the owner's iPhone** ("the dragging looks great").
   - The numbers to tune, should that change, are at the top of `row-drag.ts` (`EDGE_BAND`, `INTO_DWELL_MS`, `LEVEL_STICK`) and `row-drag-dom.ts` (`PART_MS`, `SETTLE_MS`, `SLIDE_MS`, `INTO_TUCK`).
-- **A third round, asked for with that confirmation** (see `docs/side-tutor.md`): the bottom row can be pulled down out of the bottom folder; on a computer the minimized side tutor is the phone's round bubble at the lesson's bottom right; the tutor window's words are "Tutor", "Stuck on a term or a step? Ask here." and "Ask a follow-up…" (the owner first asked for less text, then gave these three); and the tutor has its own Dictate button.
-  - Checked in a browser at phone size (touch) and at computer width (mouse). The tutor's dictation was run with Chromium's made-up microphone and a stand-in for Deepgram's socket in the page; a real microphone and Deepgram have not been tried. The owner has seen screenshots only.
-  - **The owner asked for these not to be pushed yet**: more features are coming for one bigger push. Until then the commits exist only in the session that made them.
+- **A third round, asked for with that confirmation** (decisions in `docs/side-tutor.md`):
+  - the bottom row can be pulled down out of the bottom folder;
+  - on a computer the minimized side tutor is the phone's round bubble, at the lesson's bottom right (16 px in from the lesson's right edge, 20 px above the question bar; the owner's placing after "too far" and "too close");
+  - the tutor window's words are "Tutor", "Stuck on a term or a step? Ask here." and "Ask a follow-up…" (the owner first asked for less text, then gave these three);
+  - the tutor has its own Dictate button with a small live waveform;
+  - the site has a browser-tab icon (the logo).
+- **State of that round:** pushed (the owner first asked to hold it for a bigger batch, then said to push). The owner has seen screenshots of each piece but **has not yet tried any of it on the server**.
+  - Checked in a browser at phone size (touch) and at computer width (mouse).
+  - **The tutor's dictation has never met a real microphone or Deepgram**: it was run with Chromium's made-up microphone and a stand-in for Deepgram's socket in the page. It reuses the lesson's dictation run unchanged, so the likeliest surprises are in the hand-over (who gets the words, the lesson's bar staying idle), not in the audio.
+  - The 20 px above the bar is a reading of "a little higher up"; the owner may want it tuned (`BUBBLE_BAR_GAP` and `BUBBLE_EDGE_GAP` in `components/side-tutor.tsx`).
+  - The "what to try" page was last updated for the redone drag; it doesn't cover this round.
+- **The owner said more features are coming.** Ask what they are; nothing is queued.
 - **Wording and behaviour added without being asked, for the owner to review:** the message `Deleted “Electricity”.` after a delete, and the message line showing on the phone's list screen.
 
 ### Next: Phase 5, the sync engine
