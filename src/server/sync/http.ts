@@ -185,6 +185,17 @@ export async function sessionTakeResponse(request: Request, chatId: string): Pro
 	return json(reply.body, reply.status);
 }
 
+/** GET: one picture of a session. PUT {data, part, of}: a picture sent ahead of its session. */
+export async function sessionPictureResponse(request: Request, chatId: string, pictureId: string): Promise<Response> {
+	const caller = syncCaller(request);
+	if (caller instanceof Response) return caller;
+	const authority = syncAuthority();
+	const reply = request.method === "GET" ? authority.picture(caller.id, chatId, pictureId)
+		: request.method === "PUT" ? authority.storePicture(caller.id, chatId, pictureId, await syncBody(request))
+		: { status: 405, body: { error: "Method not allowed." } };
+	return json(reply.body, reply.status);
+}
+
 // ─── The graph log (slice 4) ─────────────────────────────────────────────────
 
 /** GET ?after=<seq>: the log entries a desktop hasn't seen. POST {after, entries}: its own. */

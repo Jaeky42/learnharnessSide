@@ -1,6 +1,6 @@
 # Cloud sync: approved plan
 
-Status: **Phases 1–4 done (server mode, sign-in on the server, phone layouts, the Obsidian vault on the server). Phase 5 (the sync engine) is approved and being built in slices; slices 1 to 5 of 6 are done.** Work happens on a separate branch. It merges into `side-tutor` only once the whole feature works and the owner approves the merge, because every push to `side-tutor` publishes a release. Change these decisions only with the owner's approval.
+Status: **Phases 1–4 done (server mode, sign-in on the server, phone layouts, the Obsidian vault on the server). Phase 5 (the sync engine) is built, all six slices: a paired desktop and the server keep sessions, the graph, settings and folders in step. It has no screens yet; those are Phase 6, and until then nothing can be paired from the app.** Work happens on a separate branch. It merges into `side-tutor` only once the whole feature works and the owner approves the merge, because every push to `side-tutor` publishes a release. Change these decisions only with the owner's approval.
 
 Goal: keep learning progress on several devices. The Windows desktop app stays fully usable, works offline, and keeps the Obsidian connection. A phone uses LearnHarness from the browser.
 
@@ -353,14 +353,14 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 2. ✅ **Sign-in on the server.** The ChatGPT paste box, plus the Claude sign-in button and Disconnect. Verified on the VPS: Claude Code installed itself onto the volume, and both ChatGPT and Claude connected from Settings.
 3. ✅ **Phone layouts.** Every view, the side tutor bubble and sheet, the full-screen notes drawer, Settings, press and hold, and the home-screen app. Two real-phone rounds; the owner declared Phase 3 complete.
 4. ✅ **Vault on the server.** Settings → Obsidian, the sync manager around `ob`, folders left out automatically, the safety check and Disconnect. Verified by the owner on the server with their real Obsidian account.
-5. **Sync engine.** Pairing and device keys, the lease API, session sync with take-over (no copies: unsent turns are discarded), graph line and operation sync, per-key settings merges, and the sync protocol version check.
+5. ✅ **Sync engine.** Pairing and device keys, the lease API, session sync with take-over (no copies: unsent turns are discarded), graph line and operation sync, per-key settings merges, and the sync protocol version check. Run between two built copies; not yet between the owner's real PC and server, which needs Phase 6's screens.
    - Built as wrapper stores at the composition root (`src/server/stores.ts`) over the `core/ports.ts` interfaces, so upstream store code stays untouched and rebasing onto upstream stays cheap.
 6. **Desktop sync UI.** Settings → Cloud (server URL, sign-in, device name, Sync now); a sync status chip; lease state on each session.
 7. **Tests and docs.** Lease, take-over and graph operation tests; an end-to-end test with two servers and one cloud; and an update of this file from "planned" to built.
 
 ## Handoff: where things stand and how to continue
 
-### State (Phases 0–4 done; notes drawer additions built)
+### State (Phases 0–5 done; notes drawer additions built)
 
 - **Branch:** `claude/pensive-goldberg-7dty2m`. All cloud sync work lives here.
   - Pushes build only the server image (`:dev`), never a desktop release.
@@ -380,7 +380,7 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
   - the nightly update timer is installed;
   - Claude Code installed itself onto the volume;
   - ChatGPT and Claude are both connected from Settings.
-- **The cloud copy and the desktop app are separate libraries** until Phase 5.
+- **The cloud copy and the desktop app are still separate libraries** for the owner: the engine is built, but pairing needs Phase 6's screens and the desktop app only gets any of this with the final merge.
 - **The owner's server follows `LH_CHANNEL=dev`.** To update it right away instead of waiting for the nightly run: `cd ~/learnharnessSide && git pull && cd deploy && ./update.sh`. The `git pull` is needed only when files in `deploy/` changed. After an update, a home-screen app has to be swiped away and reopened to load it.
 
 ### How the owner works
@@ -437,9 +437,16 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 - **The drawer's message line** now goes after 5 seconds, or 20 with an Undo button (the owner's ask and choice; "The message line" under "Notes drawer" in `docs/side-tutor.md`). Timed in a browser. Pushed as the last change before Phase 5; the owner hasn't said yet whether they tried it.
 - **Wording and behaviour added without being asked:** the message `Deleted “Electricity”.` after a delete, and the message line showing on the phone's list screen. The owner has used both and asked only for the messages to go sooner, so they stand unless the owner says otherwise.
 
-### Next: Phase 5, the sync engine
+### Phase 5, the sync engine (built), and what comes next
 
-**The owner approved the Phase 5 plan page.** It is being built in six slices ("Build order" below). Built so far: slices 1 to 5 (pairing and the version check; sessions and leases; take-over; the graph log; settings and the other small files); see "Phase 5: what is built".
+**The owner approved the Phase 5 plan page, and all six slices are built** ("Phase 5: what is built"). **Next is Phase 6, the screens** ("Later phases" lists its open questions; ask them one at a time before building).
+
+**What the owner can and can't see now**
+
+- **Can't see:** anything new. There is no Settings → Cloud, no pairing form, no "Held by …" line, no Take over button. Nothing in the app can pair a desktop yet, so on the owner's server and phone the engine stays switched off.
+- **What an update to the server should look like:** exactly as before. That is the thing to check.
+- **Can see:** the page of screenshots and timings from two copies syncing (shown to the owner at the end of Phase 5).
+- **Only the API exists:** `GET | POST /api/cloud` on the app, `POST /api/server-auth/desktops` on the server's site. Phase 6 puts screens on them.
 
 #### Phase 5 decisions (owner, asked one at a time)
 
@@ -596,6 +603,40 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 - **Tests:** `tests/sync-maps.test.ts` (the rules; each side's files in memory, real state files, PCs with wrong clocks), `tests/sync-maps-wiring.test.ts` (the real stores and files), and one more case in `tests/obsidian-sync.test.ts` (the real `ob`: announced folders are left out before any of their files arrive).
 - **Real run:** two built copies: a first sync (the desktop's settings on both, the server's model and font untouched, 371 node places and the sliders equal), a setting changed on each side, and a chains-view folder made on the server showing on the desktop.
 
+**Slice 6: timing, pictures sent once, and the whole thing running by itself**
+
+- **When a paired desktop syncs** (decision 11; `src/server/sync/loop.ts`):
+  - a full round when the app starts (at its first API request, a moment after the window opens);
+  - about 2 seconds after a change here (`turn-settled`, `record-changed`, `chats-changed`, `jobs-changed`, `sources-changed`, `activity-changed`);
+  - at once when a reply starts (`turn-started`), so the server knows this desktop is busy;
+  - every 10 seconds otherwise;
+  - while the server can't be reached: 10 s, 20 s, 40 s, 80 s, 160 s, then every 5 minutes. A change here doesn't hurry a retry;
+  - paused (the versions differ) or unpaired by the server: a look every 5 minutes;
+  - a change that happens while a round is under way gets one more round 2 seconds after it;
+  - one round at a time: "Sync now" (`POST /api/cloud {op:"sync"}`) waits for a round under way, then runs (`round.ts`).
+- **A round** is: sessions (leases first), then the graph log, then the small files.
+- **The loop exists only in a paired desktop app.** `src/server/sync/autostart.ts` (loaded with the server barrel) starts it when a pairing file is there; pairing starts it too. No pairing file: no loop, no timer. It never runs on the cloud server, during a build, or in tests. `LH_SYNC_LOOP=off` turns it off (for runs that drive rounds by hand).
+- **An idle pair writes nothing.** A round in which nothing changed rewrites no state file on either side (`stateFile.write` skips equal content). The server keeps "last heard from" in memory to the second and saves it about once a minute.
+- **Pictures are sent once** (`src/core/sync/pictures.ts`). A session's pictures live in its chat file (`imageSnapshots`, each named by the SHA-256 of its bytes).
+  - On the wire the chat travels without them, with a list of which picture sits where. The receiver puts the file back together from the pictures it already has, **byte for byte**.
+  - Sending: the server answers `409 pictures_needed` with the ids it lacks; the desktop sends those (`PUT /api/sync/sessions/<id>/pictures/<picture>`, a big one in pieces of 8 MB of text, because one request holds at most 26 MB), then sends the session again. They wait in `<data>/sync/pictures/<chatId>/` until the session arrives.
+  - Fetching: the desktop fetches the pictures it doesn't have, one request each.
+  - A picture's bytes must match its name, on both sides. Only the session's holder (or the sender of a new session) may send one.
+  - A chat file that isn't in the app's own formatting travels whole, as before.
+  - On the desktop this is one wrapper around the request function (`pictures-transport.ts`); the rest of the sync code still sees whole files.
+- **A server that lost its sync records** (its `sync/` folder deleted, or the data restored from a backup):
+  - the graph and the small files notice (the log's name; `send_all`) and are combined afresh;
+  - sessions: the server takes every session it has as its own again. A desktop that held one is refused at its next send, takes the server's version, and shows the discard notice if its own differed. Nothing is lost silently, and Take over gets the session back.
+- **Tests:** `tests/sync-loop.test.ts` (the rhythm, with a simulated clock), `tests/sync-pictures.test.ts` (each picture travels once, in both directions, through a take-over, and a 17 MB one in pieces), `tests/sync-inert.test.ts` (an unpaired app and a server nobody paired with: no request, no timer, no file), and "a round in which nothing changed" in `tests/sync-sessions.test.ts`.
+- **The full run** (two built copies, nobody pressing "sync"; a desktop copy with the test library, a session with two pictures and a vault folder; a server copy with one session, two concepts and its own settings):
+  - before pairing: two libraries, no `sync/` folder on either side, the desktop's state `off`;
+  - 0.6 s after pairing: all four sessions on both, every chat file identical (the 1.7 MB one with pictures too), 300 concepts on both, a backup made on each side, the vault's folder names on the server;
+  - a rename on the desktop reached the server in 2.2 s; a setting changed on the server reached the desktop in 10 s, as did a concept deleted there;
+  - the server asked for a session the online desktop held: handed over in 2 s; the server's rename reached the desktop in 2 s; the desktop's own rename was refused (409);
+  - the server was stopped: the desktop showed `offline` within 2 s and kept working; 16 s after the server was back it had the rename made meanwhile;
+  - at the end: chat files, ledgers, node places and sliders identical on both, and 30 idle seconds without a single file written.
+- **Not verified here:** the real Windows app talking to the real server over the internet (the owner's choice was two copies only; that first happens after Phase 6 and the merge), and a reply being written while a round runs with a real model (the turn registry and the hand-over rule are tested with the real modules, without a model).
+
 #### What the investigation found (for whoever builds it)
 
 - **The approved table misses four things:**
@@ -619,7 +660,7 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
   - `src/core/graph.ts` and `src/core/graph-deletion.ts` (`rewriteLedgers`): the destructive graph changes that must sync as replayed operations;
   - `src/store/side-tutor.ts` and the notes home-folder records (`src/store/notes.ts`): the two fork files that follow a chat's lease;
   - `src/server/server-auth.ts` and `proxy.ts`: the login gate every new `/api/sync` route sits behind.
-- **Build order in the plan page** (six slices, each with its tests, a browser run in server mode, and a commit and push):
+- **Build order in the plan page, all six built** (each with its tests, a run between two copies, and a commit and push):
   1. pairing codes, device keys, the sync API behind the login gate, and the protocol version check;
   2. sessions and leases: whole sessions with their side-tutor thread, notes home folder and job files, the read-only rule, new and deleted sessions, and the first sync (backup, then combine);
   3. take-over: the evidence rule, hand-over from an online holder, take-over from an offline one, the discard at reconnect, and the facts for the heads-up and the notice;
@@ -627,12 +668,12 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
   5. settings and the other maps: the approved split, prompt overrides, render settings, chains-view folders, source records, positions, and the vault folder names;
   6. timing (2 s and 10 s, retries while offline), pictures sent once, a full two-copy run in browsers, and the docs.
 - **The engine must do nothing where no desktop is paired.** Every push to this branch reaches the owner's real server at the nightly update, so a server with no paired device, and an app that isn't paired, must leave the data folder byte for byte as it is. A test pins this.
-- **Phase 5 has no screens.** The owner sees nothing new until Phase 6; the thing to check after each update is that the server and phone work as before. The phase ends with a page of screenshots from two copies syncing.
+- **Phase 5 has no screens.** The owner sees nothing new until Phase 6; the thing to check after each update is that the server and phone work as before. The phase ended with a page of screenshots and timings from two copies syncing.
 - **Sample data for UI screenshots:** copy `tests/fixtures/golden-data` to a scratch `LH_DATA_DIR`. Truncating a copy of the teaching chat right after a `quiz` tool call gives a session with an open question. Phone screenshots: Playwright `devices["iPhone 13"]`; real touch (press and hold, pinch) through CDP `Input.dispatchTouchEvent`.
 
 ### Later phases: decisions still open (ask when you get there)
 
-- **Phase 5 (sync engine):** answered; see "Phase 5 decisions".
+- **Phase 5 (sync engine):** answered and built. For the owner to review when the screens exist: the wording listed under slices 1 and 2, and the two readings of "the desktop's value is kept" under slice 5.
 - **Phase 6 (sync UI, desktop and phone):**
   - where Settings → Cloud lives, and its pairing form (server address, code);
   - "Add a desktop app" and the paired desktops in Settings → Account on the server;
@@ -677,4 +718,8 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
   - `build-server.mjs` refuses when `.next/standalone/data` exists. That happens when the repo has a local `data/` folder (tests that don't set `LH_DATA_DIR` leave one): the tracer sweeps it in. Delete `.next/standalone/data` and run the script again. A clean checkout (CI, the image) has no `data/`.
   - The server process is titled `next-server`; `pkill -f "node server.js"` doesn't find it.
   - Plain `http` works between the two because the desktop accepts it for `127.0.0.1`.
+- **A full two-copy run with the loop on:** start both copies as above (`NODE_ENV=production`), pair through `POST /api/cloud {op:"pair", …}` from a page of the desktop copy (the code comes from `POST /api/server-auth/desktops {op:"code"}` in a signed-in page of the server copy), and then only watch: compare the two data folders' files. `LH_SYNC_LOOP=off` on the desktop copy turns the timed rounds off for a run that calls `{op:"sync"}` itself.
+  - To play "the server is away", stop only the copy on the server's port (find it by `PORT=` in `/proc/<pid>/environ`) and start it again with the same folders.
+  - With a page of the desktop copy open on the home screen, the graph view settles new concepts and saves their places a few seconds after a sync; the places are equal on both sides one round later, not at once.
+  - A local `next build` rewrites `next-env.d.ts` and `AGENTS.md`; put both back before committing (`git checkout -- AGENTS.md next-env.d.ts`).
 - **Desktop must not change:** server-only UI keys off `isServerMode()` (the `lh_server` cookie) with no extra requests. `tests/claude-code-status-ui.test.tsx` pins the desktop's exact request list.

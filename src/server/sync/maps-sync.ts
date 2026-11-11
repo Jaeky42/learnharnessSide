@@ -222,7 +222,8 @@ export function createMapsDesktop(deps: {
 	function note(state: DesktopMapsState, snapshot: MapSnapshot): boolean {
 		const measured = deps.clockOffset();
 		let changed = false;
-		if (measured !== null && measured !== state.offset) { state.offset = measured; changed = true; }
+		// To the second is plenty, and keeps a quiet round from rewriting the record.
+		if (measured !== null && Math.abs(measured - state.offset) >= 1000) { state.offset = measured; changed = true; }
 		const now = deps.now();
 		for (const key of new Set([...snapshot.items.keys(), ...Object.keys(state.known), ...Object.keys(state.pending)])) {
 			if (!usable(snapshot, key)) continue;

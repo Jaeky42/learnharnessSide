@@ -18,7 +18,7 @@ export interface StateFile<T> {
 }
 
 export function stateFile<T>(file: string, isValid: (value: unknown) => value is T): StateFile<T> {
-	let cached: { stamp: string; value: T | null } | null = null;
+	let cached: { stamp: string; value: T | null; text: string | null } | null = null;
 	const stampNow = (): string => {
 		try {
 			const st = fs.statSync(/* turbopackIgnore: true */ file);
@@ -32,18 +32,24 @@ export function stateFile<T>(file: string, isValid: (value: unknown) => value is
 			const stamp = stampNow();
 			if (cached && cached.stamp === stamp) return cached.value;
 			let value: T | null = null;
+			let text: string | null = null;
 			if (stamp !== "-") {
-				const parsed: unknown = JSON.parse(fs.readFileSync(/* turbopackIgnore: true */ file, "utf-8"));
+				text = fs.readFileSync(/* turbopackIgnore: true */ file, "utf-8");
+				const parsed: unknown = JSON.parse(text);
 				if (!isValid(parsed)) throw new Error(`The sync state file ${path.basename(file)} can't be read.`);
 				value = parsed;
 			}
-			cached = { stamp, value };
+			cached = { stamp, value, text };
 			return value;
 		},
 		write(next) {
+			const text = `${JSON.stringify(next)}\n`;
+			// A round in which nothing changed writes nothing: an idle pair of
+			// devices doesn't touch the disk every ten seconds.
+			if (cached && cached.text === text && cached.stamp === stampNow()) { cached.value = next; return; }
 			fs.mkdirSync(/* turbopackIgnore: true */ path.dirname(file), { recursive: true });
-			writeFileAtomicSync(file, `${JSON.stringify(next)}\n`, { allowInPlaceFallback: true });
-			cached = { stamp: stampNow(), value: next };
+			writeFileAtomicSync(file, text, { allowInPlaceFallback: true });
+			cached = { stamp: stampNow(), value: next, text };
 		},
 		exists() {
 			return stampNow() !== "-";

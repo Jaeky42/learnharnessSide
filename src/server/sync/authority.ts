@@ -16,6 +16,8 @@
  * inside it (the same argument as the stores' read-modify-write).
  */
 
+import { checkPictureList, PICTURE_ID, picturesIn, withoutPictures, withPictures } from "../../core/sync/pictures.ts";
+import type { PictureStaging } from "../../store/sync/picture-staging.ts";
 import {
 	bundleDigest,
 	checkBundle,
@@ -47,6 +49,8 @@ export interface AuthoritySession {
 /** A desktop counts as online while the server heard from it this recently (three missed checks). */
 export const ONLINE_WINDOW_MS = 30_000;
 /** A hand-over request nobody repeats is forgotten: the asker went away. */
+/** How often "last heard from" is written to the record. */
+const SEEN_SAVE_MS = 60_000;
 export const HANDOVER_REQUEST_MS = 60_000;
 
 /** What a device is doing for a session, and how to stop it (wired in engine.ts). */
@@ -86,6 +90,8 @@ export interface AuthorityDeps {
 	announce?: (chatId: string, what: "written" | "removed") => void;
 	/** The server's own work on its sessions (a desktop may ask for one of them). */
 	localWork?: LocalWork;
+	/** Where pictures sent ahead of their session wait. */
+	staging?: PictureStaging;
 }
 
 /** A session this server may not change, for "Held by …". */
@@ -115,6 +121,10 @@ export interface Authority {
 	exchange(deviceId: string, body: unknown): AuthorityReply;
 	fetch(deviceId: string, chatId: string): AuthorityReply;
 	store(deviceId: string, chatId: string, body: unknown): AuthorityReply;
+	/** One picture of a session, for a desktop that doesn't have it yet. */
+	picture(deviceId: string, chatId: string, pictureId: string): AuthorityReply;
+	/** A picture (or one piece of a big one) sent ahead of the session it belongs to. */
+	storePicture(deviceId: string, chatId: string, pictureId: string, body: unknown): AuthorityReply;
 	remove(deviceId: string, chatId: string): AuthorityReply;
 	/** Notice the server's own changes now (tests; exchange does it itself). */
 	scan(): void;
@@ -134,6 +144,31 @@ const bad = (error: string, status = 400, extra: Record<string, unknown> = {}): 
 
 export function createAuthority(deps: AuthorityDeps): Authority {
 	const { files } = deps;
+
+	/**
+	 * When each desktop was last heard from, to the second. The record on
+	 * disk follows only once a minute (SEEN_SAVE_MS), so a desktop asking for
+	 * news every ten seconds doesn't rewrite the file each time.
+	 */
+	const heard = new Map<string, number>();
+	function hear(state: AuthorityState, deviceId: string, now: number): void {
+		heard.set(deviceId, now);
+		if (now - (state.seen[deviceId] ?? 0) >= SEEN_SAVE_MS) state.seen[deviceId] = now;
+	}
+	const lastHeard = (state: AuthorityState, deviceId: string): number | null => {
+		const at = Math.max(heard.get(deviceId) ?? 0, state.seen[deviceId] ?? 0);
+		return at > 0 ? at : null;
+	};
+
+	/** The pictures in a session's chat file here; the last one asked about is kept at hand. */
+	let lastPictures: { chatId: string; stamp: string | null; data: Map<string, string> } | null = null;
+	function picturesHere(chatId: string): Map<string, string> {
+		const stamp = files.stamp(chatId);
+		if (!lastPictures || lastPictures.chatId !== chatId || lastPictures.stamp !== stamp) {
+			lastPictures = { chatId, stamp, data: picturesIn(files.read(chatId)?.chat) };
+		}
+		return lastPictures.data;
+	}
 
 	function started(): AuthorityState {
 		const existing = deps.state.read();
@@ -197,7 +232,7 @@ export function createAuthority(deps: AuthorityDeps): Authority {
 	}
 
 	function heldInfo(state: AuthorityState, entry: AuthoritySession): HeldSession {
-		const seenAt = state.seen[entry.holder] ?? null;
+		const seenAt = lastHeard(state, entry.holder);
 		return {
 			id: entry.holder,
 			name: deps.deviceName(entry.holder),
@@ -237,7 +272,7 @@ export function createAuthority(deps: AuthorityDeps): Authority {
 			const entry = state?.sessions[chatId];
 			if (!state || !entry || entry.deletedAt !== undefined) return bad("No such session.", 404);
 			const now = deps.now();
-			if (to !== CLOUD_HOLDER) state.seen[to] = now;
+			if (to !== CLOUD_HOLDER) { state.seen[to] = now; heard.set(to, now); }
 			if (entry.holder === to) return { status: 200, body: { status: "yours", ...changeOf(chatId, entry) } };
 
 			if (entry.holder === CLOUD_HOLDER) {
@@ -290,7 +325,7 @@ export function createAuthority(deps: AuthorityDeps): Authority {
 			const state = started();
 			scanInto(state);
 			const now = deps.now();
-			state.seen[deviceId] = now;
+			hear(state, deviceId, now);
 			if (raw.reports && typeof raw.reports === "object" && !Array.isArray(raw.reports)) {
 				for (const [id, word] of Object.entries(raw.reports as Record<string, unknown>)) {
 					const entry = state.sessions[id];
@@ -320,14 +355,39 @@ export function createAuthority(deps: AuthorityDeps): Authority {
 			if (entry.deletedAt !== undefined) return bad("That session was deleted.", 410, { code: "deleted" });
 			const bundle = files.read(chatId);
 			if (!bundle) return bad("No such session.", 404);
-			return { status: 200, body: { ...changeOf(chatId, entry), bundle } };
+			// The pictures travel on their own, once (core/sync/pictures.ts).
+			const slim = withoutPictures(bundle.chat);
+			return { status: 200, body: { ...changeOf(chatId, entry), bundle: slim ? { ...bundle, chat: slim.chat, pictures: slim.pictures } : bundle } };
+		},
+
+		picture(_deviceId, chatId, pictureId) {
+			const state = deps.state.read();
+			const entry = state && isSessionId(chatId) ? state.sessions[chatId] : undefined;
+			if (!entry || entry.deletedAt !== undefined || !PICTURE_ID.test(pictureId)) return bad("No such picture.", 404);
+			const data = picturesHere(chatId).get(pictureId);
+			return data === undefined ? bad("No such picture.", 404) : { status: 200, body: { data } };
+		},
+
+		storePicture(deviceId, chatId, pictureId, body) {
+			if (!isSessionId(chatId) || !deps.staging) return bad("No such session.", 404);
+			const sent = (body ?? {}) as { data?: unknown; part?: unknown; of?: unknown };
+			if (typeof sent.data !== "string" || typeof sent.part !== "number" || typeof sent.of !== "number") return bad("The picture didn't arrive whole.");
+			const state = started();
+			const entry = state.sessions[chatId];
+			if (entry?.deletedAt !== undefined) return bad("That session was deleted.", 410, { code: "deleted" });
+			if (entry && entry.holder !== deviceId) return bad("Another device holds this session now.", 409, { code: "lease_lost", ...changeOf(chatId, entry) });
+			const result = deps.staging.add(chatId, pictureId, sent.part, sent.of, sent.data);
+			if (result === "full") return bad("Too many pictures are waiting for this session.", 413);
+			if (result === "bad") return bad("The picture didn't arrive whole.");
+			return { status: 200, body: { status: result } };
 		},
 
 		store(deviceId, chatId, body) {
 			if (!isSessionId(chatId)) return bad("No such session.", 404);
 			const sent = (body ?? {}) as { bundle?: unknown; word?: unknown; release?: unknown };
-			const bundle: SessionBundle | null = checkBundle(chatId, sent.bundle);
-			if (!bundle) return bad("The session's files didn't arrive whole.");
+			const arrived = sent.bundle as { chat?: unknown; pictures?: unknown } | null | undefined;
+			const slim = !!arrived && typeof arrived === "object" && arrived.pictures !== undefined;
+			if (!slim && !checkBundle(chatId, sent.bundle)) return bad("The session's files didn't arrive whole.");
 			const state = started();
 			scanInto(state);
 			const entry = state.sessions[chatId];
@@ -338,7 +398,27 @@ export function createAuthority(deps: AuthorityDeps): Authority {
 				deps.state.write(state);
 				return bad("Another device holds this session now.", 409, { code: "lease_lost", ...changeOf(chatId, entry) });
 			}
+			let whole: unknown = sent.bundle;
+			if (slim) {
+				// The chat came without its pictures: put it back together from the
+				// ones already here and the ones sent ahead; ask for the rest.
+				const pictures = checkPictureList(arrived.pictures);
+				if (!pictures || typeof arrived.chat !== "string") return bad("The session's files didn't arrive whole.");
+				const here = picturesHere(chatId);
+				let joined: ReturnType<typeof withPictures>;
+				try { joined = withPictures(arrived.chat, pictures, (id) => here.get(id) ?? deps.staging?.get(chatId, id) ?? null); }
+				catch { return bad("The session's files didn't arrive whole."); }
+				if ("missing" in joined) {
+					deps.state.write(state);
+					return bad("Some of this session's pictures haven't been sent yet.", 409, { code: "pictures_needed", ids: joined.missing });
+				}
+				const { pictures: _list, ...rest } = arrived;
+				whole = { ...rest, chat: joined.text };
+			}
+			const bundle: SessionBundle | null = checkBundle(chatId, whole);
+			if (!bundle) return bad("The session's files didn't arrive whole.");
 			files.write(chatId, bundle);
+			deps.staging?.clear(chatId);
 			const next: AuthoritySession = {
 				holder: deviceId,
 				version: (entry?.version ?? 0) + 1,
@@ -350,7 +430,7 @@ export function createAuthority(deps: AuthorityDeps): Authority {
 				...(entry?.handover ? { handover: entry.handover } : {}),
 			};
 			state.sessions[chatId] = next;
-			state.seen[deviceId] = deps.now();
+			hear(state, deviceId, deps.now());
 			if (sent.release === true && next.handover) {
 				// The holder hands the session to whoever asked for it.
 				move(state, chatId, next, next.handover.to);

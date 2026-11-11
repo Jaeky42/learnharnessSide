@@ -21,6 +21,7 @@ import { makeFirstSyncBackup } from "../../store/sync/backup.ts";
 import { readCloudPairing } from "../../store/sync/pairing.ts";
 import { sessionFiles } from "../../store/sync/session-files.ts";
 import { stateFile } from "../../store/sync/state-file.ts";
+import { pictureStaging } from "../../store/sync/picture-staging.ts";
 import { serverModeEnabled } from "../server-auth.ts";
 import { createAuthority, isAuthorityState, type Authority, type LocalWork } from "./authority.ts";
 import { syncRequest } from "./client.ts";
@@ -83,6 +84,7 @@ export function syncAuthority(): Authority {
 		makeBackup: backup,
 		announce,
 		localWork,
+		staging: pictureStaging(syncStateDir()),
 	}));
 }
 

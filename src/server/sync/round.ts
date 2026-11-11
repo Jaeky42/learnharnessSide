@@ -20,7 +20,20 @@ export interface SyncRound {
 	maps: MapsRound | null;
 }
 
-export async function runSyncRound(): Promise<SyncRound> {
+const globals = globalThis as typeof globalThis & { __lhSyncRound?: Promise<SyncRound> };
+
+/**
+ * One round at a time: a round asked for while another is under way (the
+ * timed loop and "Sync now" together) waits for it, then runs.
+ */
+export function runSyncRound(): Promise<SyncRound> {
+	const previous: Promise<unknown> = globals.__lhSyncRound ?? Promise.resolve();
+	const mine = previous.catch(() => undefined).then(oneRound);
+	globals.__lhSyncRound = mine;
+	return mine.finally(() => { if (globals.__lhSyncRound === mine) delete globals.__lhSyncRound; });
+}
+
+async function oneRound(): Promise<SyncRound> {
 	if (serverModeEnabled()) return { sessions: { ok: false, reason: "not-paired" }, graph: null, maps: null };
 	const sessions = await desktopSync().tick();
 	// Without the server there is no point asking again for the rest. What

@@ -19,6 +19,7 @@ import { json, readBody, serverModeEnabled } from "../server-auth.ts";
 import { cloudStatus, contactServer, pairWithServer } from "./client.ts";
 import { desktopSync, syncAuthority } from "./engine.ts";
 import { runSyncRound } from "./round.ts";
+import { kickSyncLoop } from "./loop.ts";
 
 export function cloudStatusResponse(): Response {
 	if (serverModeEnabled()) return json({ role: "server", held: syncAuthority().held() });
@@ -41,10 +42,12 @@ export async function cloudActionResponse(request: Request): Promise<Response> {
 	if (serverModeEnabled()) return json({ error: "Not found." }, 404);
 	if (body.op === "pair") {
 		const result = await pairWithServer({ server: body.server, code: body.code, name: body.name });
+		// Paired: from now on this app syncs by itself (loop.ts). Not in tests, which drive rounds by hand.
+		if (result.ok && process.env.NODE_ENV !== "test" && process.env.LH_SYNC_LOOP !== "off") kickSyncLoop();
 		return result.ok ? json(result.status) : json({ error: result.error }, result.status);
 	}
 	if (body.op === "check") return json(await contactServer());
-	// One round with the server, now. (Phase 6's "Sync now"; the timed rounds come with slice 6.)
+	// One round with the server, now (Phase 6's "Sync now"). The timed rounds are loop.ts.
 	if (body.op === "sync") return json({ round: await runSyncRound(), status: cloudStatus() });
 	if (body.op === "dismiss-notice") {
 		if (isSessionId(body.chatId) && typeof body.at === "number") desktopSync().dismissNotice(body.chatId, body.at);

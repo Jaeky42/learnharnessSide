@@ -519,3 +519,29 @@ describe("a held session is read-only here", () => {
 		assert.equal(engine.sessionWritePath("POST", "/api/chat"), null, "the turn route checks inside, where it knows the session");
 	});
 });
+
+describe("a round in which nothing changed", () => {
+	it("writes no file on either side, and the server still knows the desktop is there", async () => {
+		const w = world();
+		const desk = w.desktop("dev_aaaaaaaaaaaaaaaa", "Office PC");
+		makeSession(desk.dataDir, "chat_d1", ["hello"]);
+		makeSession(w.serverDir, "chat_c1", ["from the phone"]);
+		await desk.sync.tick();
+		await desk.sync.tick();
+		// Files are replaced whole when written, so an untouched file keeps its identity.
+		const identity = () => [path.join(desk.dataDir, "sync", "desktop.json"), path.join(w.serverDir, "sync", "authority.json")].map((file) => fs.statSync(file).ino);
+		const before = identity();
+		for (let i = 0; i < 5; i++) {
+			w.tick(10_000);
+			assert.deepEqual(await desk.sync.tick(), { ok: true, fetched: [], sent: [], removed: [], lost: [], handed: [] });
+		}
+		assert.deepEqual(identity(), before, "fifty idle seconds: nothing rewritten");
+		assert.equal(w.authority.held().chat_d1!.online, true);
+		// The record on disk follows about once a minute, for "offline since …" after a restart.
+		w.tick(60_000);
+		await desk.sync.tick();
+		assert.notEqual(identity()[1], before[1]);
+		w.tick(45_000);
+		assert.equal(w.authority.held().chat_d1!.online, false, "45 silent seconds later it counts as offline");
+	});
+});

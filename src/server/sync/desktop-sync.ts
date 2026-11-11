@@ -16,6 +16,7 @@
  */
 
 import { bundleDigest, checkBundle, type SessionBundle, type SessionChange } from "../../core/sync/sessions.ts";
+import { picturesOnce } from "./pictures-transport.ts";
 import type { SessionFiles } from "../../store/sync/session-files.ts";
 import type { StateFile } from "../../store/sync/state-file.ts";
 import type { LocalWork } from "./authority.ts";
@@ -113,6 +114,8 @@ const sessionPath = (id: string) => `/api/sync/sessions/${encodeURIComponent(id)
 
 export function createDesktopSync(deps: DesktopSyncDeps): DesktopSync {
 	const { files } = deps;
+	// A session's pictures travel on their own, once (pictures-transport.ts).
+	const request = picturesOnce(deps.request, files);
 	let running: Promise<TickResult> | null = null;
 
 	/** The state for the server this desktop is paired with, or null. */
@@ -159,7 +162,7 @@ export function createDesktopSync(deps: DesktopSyncDeps): DesktopSync {
 		const entry = state.sessions[change.id];
 		// A reply, helpers and extraction still running here for it stop now.
 		deps.localWork?.stop(change.id, { turn: true });
-		const reply = await deps.request<SessionChange & { bundle: unknown }>(sessionPath(change.id));
+		const reply = await request<SessionChange & { bundle: unknown }>(sessionPath(change.id));
 		if (!reply.ok) return false;
 		const remote = checkBundle(change.id, reply.body.bundle);
 		if (!remote) return false;
@@ -174,7 +177,7 @@ export function createDesktopSync(deps: DesktopSyncDeps): DesktopSync {
 	}
 
 	async function fetchInto(state: DesktopState, change: SessionChange, mine: boolean): Promise<boolean> {
-		const reply = await deps.request<SessionChange & { bundle: unknown }>(sessionPath(change.id));
+		const reply = await request<SessionChange & { bundle: unknown }>(sessionPath(change.id));
 		if (!reply.ok) return false;
 		const bundle = checkBundle(change.id, reply.body.bundle);
 		if (!bundle) return false;
@@ -205,7 +208,7 @@ export function createDesktopSync(deps: DesktopSyncDeps): DesktopSync {
 			if (replying(id)) reports[id] = "busy";
 			else if (localBefore.has(id) && localBefore.get(id) !== entry.stamp) reports[id] = "unsent";
 		}
-		const news = await deps.request<{ seq: number; changes: SessionChange[]; handovers?: string[] }>("/api/sync/sessions", { method: "POST", body: { cursor: state.cursor, reports } });
+		const news = await request<{ seq: number; changes: SessionChange[]; handovers?: string[] }>("/api/sync/sessions", { method: "POST", body: { cursor: state.cursor, reports } });
 		if (!news.ok) return { ok: false, reason: news.reason };
 		for (const change of news.body.changes) {
 			const entry = state.sessions[change.id];
@@ -234,7 +237,7 @@ export function createDesktopSync(deps: DesktopSyncDeps): DesktopSync {
 					// are left alone on both sides, never overwritten.
 					const local = files.read(change.id);
 					if (local && !mine) {
-						const reply = await deps.request<SessionChange & { bundle: unknown }>(sessionPath(change.id));
+						const reply = await request<SessionChange & { bundle: unknown }>(sessionPath(change.id));
 						const remote = reply.ok ? checkBundle(change.id, reply.body.bundle) : null;
 						if (!remote) continue;
 						const same = bundleDigest(local) === bundleDigest(remote);
@@ -295,7 +298,7 @@ export function createDesktopSync(deps: DesktopSyncDeps): DesktopSync {
 				await fetchInto(state, { id, version: entry.serverVersion, holder: entry.holder, holderName: entry.holderName, deleted: false }, false);
 				continue;
 			}
-			const reply = await deps.request<SessionChange>(sessionPath(id), { method: "PUT", body: { baseVersion: entry?.serverVersion ?? 0, bundle, word: replying(id) ? "busy" : "all-sent" } });
+			const reply = await request<SessionChange>(sessionPath(id), { method: "PUT", body: { baseVersion: entry?.serverVersion ?? 0, bundle, word: replying(id) ? "busy" : "all-sent" } });
 			if (reply.ok) {
 				state.sessions[id] = { mine: true, holder: reply.body.holder, holderName: reply.body.holderName, serverVersion: reply.body.version, stamp, digest };
 				result.sent.push(id);
@@ -322,7 +325,7 @@ export function createDesktopSync(deps: DesktopSyncDeps): DesktopSync {
 		for (const [id, entry] of Object.entries(state.sessions)) {
 			if (local.has(id) || entry.conflict) continue;
 			if (entry.mine) {
-				const reply = await deps.request(sessionPath(id), { method: "DELETE" });
+				const reply = await request(sessionPath(id), { method: "DELETE" });
 				if (reply.ok || (reply.reason === "refused" && (reply.status === 404 || reply.code === "deleted"))) {
 					delete state.sessions[id];
 					result.removed.push(id);
@@ -347,7 +350,7 @@ export function createDesktopSync(deps: DesktopSyncDeps): DesktopSync {
 			const stamp = files.stamp(id);
 			const bundle = files.read(id);
 			if (!bundle) continue;
-			const reply = await deps.request<SessionChange>(sessionPath(id), { method: "PUT", body: { baseVersion: entry.serverVersion, bundle, word: "all-sent", release: true } });
+			const reply = await request<SessionChange>(sessionPath(id), { method: "PUT", body: { baseVersion: entry.serverVersion, bundle, word: "all-sent", release: true } });
 			if (!reply.ok) continue;
 			state.sessions[id] = {
 				mine: reply.body.holder === identity.deviceId, holder: reply.body.holder, holderName: reply.body.holderName,
@@ -366,7 +369,7 @@ export function createDesktopSync(deps: DesktopSyncDeps): DesktopSync {
 		const identity = deps.identity();
 		const state = current();
 		if (!identity || !state) return { status: "not-paired" };
-		const reply = await deps.request<SessionChange & { status: string }>(`${sessionPath(chatId)}/take`, { method: "POST", body: { force } });
+		const reply = await request<SessionChange & { status: string }>(`${sessionPath(chatId)}/take`, { method: "POST", body: { force } });
 		if (!reply.ok) return { status: reply.reason === "refused" ? "refused" : reply.reason, ...(reply.reason === "refused" ? { error: reply.error } : {}) };
 		if (reply.body.status === "moved" || reply.body.status === "yours") {
 			// The session is this desktop's: bring the server's version here.
