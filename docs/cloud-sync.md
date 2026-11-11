@@ -422,6 +422,10 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
   - **The tutor's dictation has never met a real microphone or Deepgram**: it was run with Chromium's made-up microphone and a stand-in for Deepgram's socket in the page. It reuses the lesson's dictation run unchanged, so the likeliest surprises are in the hand-over (who gets the words, the lesson's bar staying idle), not in the audio.
   - The 20 px above the bar is a reading of "a little higher up"; the owner may want it tuned (`BUBBLE_BAR_GAP` and `BUBBLE_EDGE_GAP` in `components/side-tutor.tsx`).
   - The "what to try" page was last updated for the redone drag; it doesn't cover this round.
+- **A fourth round, the tutor window's look** (decisions in `docs/side-tutor.md`, "The window's look"): the middle of the window is closer to black and more see-through, Dictate and Send are as tall as the typing box, and the hint "Ask a follow-up…" is a little smaller.
+  - The owner asked for it with "do not push yet", to batch it with more features. **It is committed here but not pushed; push only when the owner says so.**
+  - The owner has seen before-and-after screenshots (computer and phone). The exact shade (black at 70%) and the hint's size (14 px) are readings of "a little darker, more translucent" and "slightly smaller".
+  - Checked in a browser at both sizes: the box and the buttons measure the same at reading sizes from 14 to 22 px, the box keeps its height when typing starts, and dictation still lands its words in the tutor's box.
 - **The owner said more features are coming.** Ask what they are; nothing is queued.
 - **Wording and behaviour added without being asked, for the owner to review:** the message `Deleted “Electricity”.` after a delete, and the message line showing on the phone's list screen.
 
@@ -467,6 +471,7 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 - **The dev server keeps server objects across code reloads.** After editing `src/server/obsidian-sync.ts`, restart `next dev`; otherwise routes call methods the old manager object doesn't have.
 - **`pkill -f` in a cloud session matches the shell that runs it** when the pattern is on its own command line. Put such commands in a script file.
 - **Colouring a border:** `app/globals.css` sets `* { border-color }` outside any layer, which beats Tailwind's `border-<colour>` utilities. Use a separate element with a background colour (see `Notice` in `obsidian-section.tsx`).
+- **A side tutor thread for screenshots:** write `<data>/side-tutor/<chatId>.json` (`{ "version": 1, "chatId": …, "entries": [{ "id", "question", "answer", "status": "done", "askedAt" }] }`) before loading the page. On a computer, `localStorage["lh:side-tutor:pos"]` (`{ left, top }`) puts the window over the lesson's text, which is what shows through its middle.
 - **Dictation in a browser run:** launch Chromium with `--use-fake-device-for-media-stream --use-fake-ui-for-media-stream`, grant the `microphone` permission, answer `/api/stt/token` with `{ "token": "…" }` through `context.route`, and replace `window.WebSocket` for Deepgram's address in an init script (it opens; on the `CloseStream` message it sends one `Results` message with `is_final` and closes).
 - **Browser runs of the notes drawer:**
   - A drag starts only after the pointer has moved a little (10 px after the hold on a phone, 5 px with the mouse), so the dragged row's centre isn't under the pointer. To rest the line on something, measure the row's centre and move the pointer by the difference.

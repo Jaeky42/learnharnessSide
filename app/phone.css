@@ -365,7 +365,17 @@
 		z-index: 46;
 		border-width: 1px 0 0;
 		border-radius: 1.125rem 1.125rem 0 0;
-		background: var(--background);
+		/* The window's parts paint themselves (components/side-tutor.tsx): the
+		   middle is darker and see-through. The sheet itself fills only what
+		   no part covers, in the bars' colour: the strip around the handle at
+		   the top (0.5rem above it plus its 0.25rem) and the home-bar strip. */
+		--lh-tutor-bar: color-mix(in oklab, var(--background) 95%, transparent);
+		background:
+			linear-gradient(var(--lh-tutor-bar), var(--lh-tutor-bar)) top / 100% 0.75rem no-repeat,
+			linear-gradient(var(--lh-tutor-bar), var(--lh-tutor-bar)) bottom / 100% env(safe-area-inset-bottom, 0px) no-repeat;
+		/* Text boxes are 16px on a phone (see "Text boxes" above), whatever the
+		   reading size is; the typing row's sizes follow this. */
+		--lh-tutor-text: 16px;
 		padding-bottom: env(safe-area-inset-bottom, 0px);
 		padding-left: env(safe-area-inset-left, 0px);
 		padding-right: env(safe-area-inset-right, 0px);

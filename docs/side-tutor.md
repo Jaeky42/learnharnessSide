@@ -34,6 +34,14 @@ Branch `side-tutor`, based on upstream amosblomqvist/learnharness @ da08cb5 (v0.
   - While an opened question fills the window and leaves no room above it, the bubble waits under the top bar at the lesson's right, as on a phone (`use-dock-anchor.ts` decides; on a wide lesson that is beside the question, on a narrow one over its top corner).
   - The open window can still be dragged anywhere and opens again where it was left; only the bubble has a fixed place.
 - **The window's words** (owner's wording): "Tutor" in the top bar, "Stuck on a term or a step? Ask here." while it is empty, and "Ask a follow-up…" as the typing box's hint. Nothing else: no tagline, and no explanation of what the tutor can see.
+- **The window's look** (owner's asks, tuned from screenshots):
+  - **The middle**, where the conversation is, is closer to black and more see-through than the rest: black at 70%, over the window's blur of the lesson behind it (`BODY_BG` in `components/side-tutor.tsx`). The bars (the top bar, the message line, the typing row) keep the app's background at 95% (`BAR_BG`). The window has no background of its own; one behind the middle would close it up.
+    - On a phone the sheet paints only what no part covers, in the bars' colour: the strip around its handle and the home-bar strip (`app/phone.css`).
+    - 70% is a reading of "a little darker and more translucent"; the owner may want it tuned.
+  - **Dictate and Send are squares as tall as the one-line typing box** (they were 36 px beside a 42 px box). So are Stop and the waveform while it listens, and the button that stops an answer.
+    - The height is worked out, not written as a number: one line of the box's text plus its padding and border (`--lh-tutor-row`, set on the typing row). The box's text is the lesson's reading size, a setting, so the buttons follow it: 42 px at the default 16 px.
+    - On a phone every text box is 16 px whatever the reading size (`app/phone.css`), so the sheet sets `--lh-tutor-text: 16px` and the row is worked out from that.
+  - **The hint "Ask a follow-up…" is a little smaller than typed text**: seven eighths of it (14 px at the default). It keeps the typed text's line height, so it sits where the typed words will and the box doesn't change height at the first letter. Typed text is unchanged (and must stay 16 px on a phone, or iPhone Safari zooms in).
 - **Speaking to the tutor** (owner's ask): a Dictate button (a microphone) sits right of the typing box, before Send. While it listens, a small live waveform and a red Stop take its place. The words land in the tutor's typing box when the run ends.
   - It borrows the page's one dictation run (`components/dictation.tsx`): the same microphone, Deepgram key, language and waveform as the lesson's Dictate. The button claims the run's transcript, then starts the run (`components/side-tutor-dictation-state.ts`); `dictation.tsx` sends the transcript to the claimant and drops the claim whenever a run ends, so a claim never outlives its run.
   - While the tutor's run is live, the lesson's own Dictate shows no run, and the lesson's message box doesn't take the words or the focus.
@@ -50,7 +58,7 @@ Branch `side-tutor`, based on upstream amosblomqvist/learnharness @ da08cb5 (v0.
   - `app/api/chats/[id]/side-tutor/route.ts`
   - `components/side-tutor.tsx`
   - `components/side-tutor-dictation.tsx` and `side-tutor-dictation-state.ts` (the Dictate button; three small hooks in `components/dictation.tsx` and the lesson-side checks in `components/chat.tsx`)
-- **Tests:** `tests/side-tutor.test.ts`; the window's words, its Dictate button and the bubble's place: `tests/side-tutor-ui.test.tsx`.
+- **Tests:** `tests/side-tutor.test.ts`; the window's words and look, its Dictate button and the bubble's place: `tests/side-tutor-ui.test.tsx`; the phone sheet's background and text size: `tests/phone-layout.test.ts`.
 - **Known limit:** a teacher reply that's still streaming isn't visible until it finishes.
 - **On a phone** (browser narrower than 640 px): a bubble above the message box opens the tutor as a bottom sheet. See "Phone layouts" in `docs/cloud-sync.md`.
 

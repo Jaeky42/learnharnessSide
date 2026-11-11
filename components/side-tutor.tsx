@@ -44,6 +44,30 @@ const BUBBLE_BAR_GAP = 20;
  *  bar, the same distance in from the lesson's right edge. */
 const BUBBLE_TOP = 72;
 
+/**
+ * The window's colours (owner's ask). Its bars (the top bar, the message line
+ * and the typing row) keep the app's background, nearly solid. The middle,
+ * where the conversation is, is closer to black and more see-through, so the
+ * lesson behind it shows through, blurred.
+ */
+const BAR_BG = "bg-background/95";
+const BODY_BG = "bg-black/70";
+
+/**
+ * The typing row's sizes. The Dictate and Send buttons are squares as tall as
+ * the one-line typing box (owner's ask): one line of the box's text plus its
+ * padding and border. The text is the lesson's reading size (a setting), or
+ * 16 px on a phone (app/phone.css sets --lh-tutor-text there), so the sizes
+ * are worked out from that instead of written as numbers. The hint is a
+ * little smaller than typed text (owner's ask) on the same line height, so it
+ * sits where the typed words will.
+ */
+const TYPING_ROW_VARS = {
+	"--lh-tutor-line": "calc(var(--lh-tutor-text, var(--lh-prose-size)) * var(--lh-prose-leading))",
+	"--lh-tutor-row": "calc(var(--lh-tutor-line) + 1rem + 2px)",
+	"--lh-tutor-hint": "calc(var(--lh-tutor-text, var(--lh-prose-size)) * 0.875)",
+} as React.CSSProperties;
+
 const OPEN_KEY = "lh:side-tutor:open";
 const POS_KEY = "lh:side-tutor:pos";
 /** Default size/anchor: under the 60px top bar, against the right edge. */
@@ -367,10 +391,10 @@ export function SideTutor({ chatId, dictation }: { chatId: string; /** The page'
 			aria-label="Side tutor"
 			onKeyDown={onPanelKeyDown}
 			style={(phone ? {} : { left: pos.left, top: pos.top, WebkitAppRegion: "no-drag" }) as React.CSSProperties}
-			className="fixed z-30 flex h-[min(30rem,calc(100dvh-6rem))] min-h-56 w-[22rem] min-w-72 max-w-[calc(100vw-1rem)] resize flex-col overflow-hidden rounded-xl border border-border bg-background/95 shadow-xl backdrop-blur"
+			className="fixed z-30 flex h-[min(30rem,calc(100dvh-6rem))] min-h-56 w-[22rem] min-w-72 max-w-[calc(100vw-1rem)] resize flex-col overflow-hidden rounded-xl border border-border shadow-xl backdrop-blur"
 		>
 			<div
-				className="flex cursor-grab touch-none items-center gap-2 border-b border-border px-3 py-2 select-none active:cursor-grabbing"
+				className={cn("flex cursor-grab touch-none items-center gap-2 border-b border-border px-3 py-2 select-none active:cursor-grabbing", BAR_BG)}
 				onPointerDown={onDragStart}
 				onPointerMove={onDragMove}
 				onPointerUp={onDragEnd}
@@ -406,7 +430,7 @@ export function SideTutor({ chatId, dictation }: { chatId: string; /** The page'
 				</button>
 			</div>
 
-			<div ref={scrollRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-3 text-sm">
+			<div ref={scrollRef} data-testid="side-tutor-body" className={cn("min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-3 text-sm", BODY_BG)}>
 				{entries.length === 0 && !live && (
 					// The empty window's one sentence (owner's ask).
 					<p className="text-xs leading-relaxed text-muted-foreground">Stuck on a term or a step? Ask here.</p>
@@ -428,9 +452,9 @@ export function SideTutor({ chatId, dictation }: { chatId: string; /** The page'
 				)}
 			</div>
 
-			{notice && <div className="border-t border-border px-3 py-1.5 text-xs text-destructive">{notice}</div>}
+			{notice && <div className={cn("border-t border-border px-3 py-1.5 text-xs text-destructive", BAR_BG)}>{notice}</div>}
 
-			<div className="flex items-end gap-2 border-t border-border p-2">
+			<div className={cn("flex items-end gap-2 border-t border-border p-2", BAR_BG)} style={TYPING_ROW_VARS}>
 				<textarea
 					ref={inputRef}
 					value={input}
@@ -444,7 +468,7 @@ export function SideTutor({ chatId, dictation }: { chatId: string; /** The page'
 					}}
 					rows={1}
 					placeholder="Ask a follow-up…"
-					className="lh-prose field-sizing-content max-h-28 min-h-9 flex-1 resize-none rounded-md border border-input bg-transparent px-2.5 py-2 text-sm outline-none placeholder:text-muted-foreground focus-visible:border-ring"
+					className="lh-prose field-sizing-content max-h-28 min-h-(--lh-tutor-row) flex-1 resize-none rounded-md border border-input bg-transparent px-2.5 py-2 text-sm outline-none placeholder:text-(length:--lh-tutor-hint) placeholder:leading-(--lh-tutor-line) placeholder:text-muted-foreground focus-visible:border-ring"
 					aria-label="Ask the side tutor"
 				/>
 				{/* Speak instead of typing (owner's ask): a microphone, and while it
@@ -457,11 +481,11 @@ export function SideTutor({ chatId, dictation }: { chatId: string; /** The page'
 							blurAfterPointerClick(e);
 							void stop();
 						}}
-						className="flex size-9 shrink-0 items-center justify-center rounded-md bg-secondary text-secondary-foreground hover:bg-secondary/80"
+						className="flex size-(--lh-tutor-row) shrink-0 items-center justify-center rounded-md bg-secondary text-secondary-foreground hover:bg-secondary/80"
 						aria-label="Stop the answer"
 						title="Stop"
 					>
-						<SquareIcon className="size-3.5" />
+						<SquareIcon className="size-4" />
 					</button>
 				) : (
 					<button
@@ -471,11 +495,11 @@ export function SideTutor({ chatId, dictation }: { chatId: string; /** The page'
 							void ask();
 						}}
 						disabled={busy || (input.trim().length === 0 && !tutorDictating)}
-						className="flex size-9 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40"
+						className="flex size-(--lh-tutor-row) shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40"
 						aria-label="Ask"
 						title="Ask (Enter)"
 					>
-						<ArrowUpIcon className="size-4" />
+						<ArrowUpIcon className="size-4.5" />
 					</button>
 				)}
 			</div>

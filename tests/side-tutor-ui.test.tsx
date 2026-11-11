@@ -121,6 +121,42 @@ describe("the open window", () => {
 		assert.ok(panel.querySelector("[aria-label='Clear side questions']"));
 		assert.ok(panel.querySelector("[aria-label='Minimize the side tutor']"));
 	});
+
+	it("has a middle that is closer to black and more see-through than its bars", async () => {
+		const host = await mountTutor();
+		const panel = host.querySelector("[data-testid='side-tutor']") as HTMLElement;
+		const classes = (el: Element) => (el.getAttribute("class") ?? "").split(/\s+/);
+		const [bar, body, row] = [...panel.children];
+		assert.equal(body, panel.querySelector("[data-testid='side-tutor-body']"));
+		assert.ok(classes(body!).includes("bg-black/70"));
+		// The bars keep the app's background, nearly solid.
+		assert.ok(classes(bar!).includes("bg-background/95"));
+		assert.ok(classes(row!).includes("bg-background/95"));
+		// The window has no background of its own (it would sit behind the
+		// middle and close it up), only the blur of what is behind it.
+		assert.deepEqual(classes(panel).filter((c) => c.startsWith("bg-")), []);
+		assert.ok(classes(panel).includes("backdrop-blur"));
+	});
+
+	it("sizes Dictate and Send from the one-line typing box, and makes the hint a little smaller", async () => {
+		const host = await mountTutor(fakeDictation());
+		const panel = host.querySelector("[data-testid='side-tutor']") as HTMLElement;
+		const classes = (el: Element) => (el.getAttribute("class") ?? "").split(/\s+/);
+		const row = panel.lastElementChild as HTMLElement;
+		const box = row.querySelector("textarea") as HTMLElement;
+		// One line of the box's text, plus its padding (py-2) and border.
+		assert.match(styleOf(row), /--lh-tutor-line:\s*calc\(var\(--lh-tutor-text, var\(--lh-prose-size\)\) \* var\(--lh-prose-leading\)\)/);
+		assert.match(styleOf(row), /--lh-tutor-row:\s*calc\(var\(--lh-tutor-line\) \+ 1rem \+ 2px\)/);
+		assert.ok(classes(box).includes("py-2") && classes(box).includes("border"));
+		assert.ok(classes(box).includes("min-h-(--lh-tutor-row)"));
+		for (const name of ["[data-testid='side-tutor-dictate']", "[aria-label='Ask']"]) {
+			assert.ok(classes(row.querySelector(name)!).includes("size-(--lh-tutor-row)"), name);
+		}
+		// The hint: seven eighths of the typed size, on the typed text's line.
+		assert.match(styleOf(row), /--lh-tutor-hint:\s*calc\(var\(--lh-tutor-text, var\(--lh-prose-size\)\) \* 0\.875\)/);
+		assert.ok(classes(box).includes("placeholder:text-(length:--lh-tutor-hint)"));
+		assert.ok(classes(box).includes("placeholder:leading-(--lh-tutor-line)"));
+	});
 });
 
 describe("speaking to the tutor", () => {
@@ -155,6 +191,9 @@ describe("speaking to the tutor", () => {
 		assert.equal(host.querySelectorAll("[data-testid='side-tutor-meter'] span").length, 14);
 		assert.equal(button(host).getAttribute("aria-label"), "Stop dictation");
 		assert.match(button(host).className, /text-destructive/);
+		// Stop and the waveform are as tall as the typing box, like Dictate and Send.
+		assert.ok(button(host).className.split(/\s+/).includes("size-(--lh-tutor-row)"));
+		assert.ok((host.querySelector("[data-testid='side-tutor-meter']") as HTMLElement).className.split(/\s+/).includes("h-(--lh-tutor-row)"));
 		await act(async () => button(host).click());
 		assert.deepEqual(live.calls, ["toggle"]);
 		// The run ends: dictation.tsx hands the transcript to whoever claimed it.

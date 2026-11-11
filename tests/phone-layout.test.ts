@@ -119,6 +119,21 @@ describe("phone rules", () => {
 		assert.deepEqual(dockAnchor(null), { place: "top" });
 	});
 
+	it("the tutor sheet leaves its middle see-through, and sizes its typing row from the phone's 16px text", () => {
+		const sheet = /\[data-phone="tutor-sheet"\] \{([^}]*)\}/.exec(css)?.[1] ?? "";
+		// The window's parts paint themselves (the middle is darker and
+		// see-through); a solid sheet behind them would close the middle up.
+		// The sheet fills only the strip around its handle and the home-bar strip.
+		const background = /(?:^|;)\s*background:([^;]*);/.exec(sheet)?.[1] ?? "";
+		assert.match(background, /top \/ 100% 0\.75rem no-repeat/);
+		assert.match(background, /bottom \/ 100% env\(safe-area-inset-bottom, 0px\) no-repeat/);
+		assert.equal((background.match(/linear-gradient/g) ?? []).length, 2, "nothing else is painted");
+		// Text boxes are 16px on a phone whatever the reading size, so the
+		// Dictate and Send buttons take their height from that.
+		assert.match(sheet, /--lh-tutor-text: 16px;/);
+		assert.match(css, /:is\(textarea,[^{]*\{\s*font-size: 16px;/);
+	});
+
 	it("a hold survives a small drift but not a scroll", () => {
 		assert.equal(stillHolding({ x: 100, y: 100 }, { x: 104, y: 106 }), true);
 		assert.equal(stillHolding({ x: 100, y: 100 }, { x: 100, y: 100 + HOLD_SLOP + 1 }), false);
