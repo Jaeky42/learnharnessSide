@@ -211,7 +211,7 @@ describe("minimized", () => {
 		assert.equal(storage.get("lh:side-tutor:open"), "false");
 	});
 
-	it("is drawn inside the dock, just above the question bar's right end, wherever the window was", async () => {
+	it("is drawn inside the dock, off to the side above the question bar, wherever the window was", async () => {
 		// The window had been dragged to the top left.
 		storage.set("lh:side-tutor:pos", JSON.stringify({ left: 300, top: 90 }));
 		dockAt(640, 900);
@@ -223,10 +223,11 @@ describe("minimized", () => {
 		assert.match(bubble.className, /\babsolute\b/);
 		assert.match(bubble.className, /pointer-events-auto/);
 		assert.doesNotMatch(bubble.className, /\bfixed\b/);
-		// 8 px above the dock's top; its right edge on the bar's (the dock's
-		// centred 46rem column, 1rem in).
-		assert.match(styleOf(bubble), /bottom:\s*calc\(100% \+ 8px\)/);
-		assert.match(styleOf(bubble), /right:\s*calc\(max\(0px, \(100% - 46rem\) \/ 2\) \+ 1rem\)/);
+		// The owner's placing: 20 px above the bar and 16 px in from the lesson's
+		// right edge (the dock spans the lesson), as far right as its place
+		// under the top bar.
+		assert.match(styleOf(bubble), /bottom:\s*calc\(100% \+ 20px\)/);
+		assert.match(styleOf(bubble), /right:\s*16px/);
 		assert.doesNotMatch(styleOf(bubble), /top:|left:/);
 	});
 

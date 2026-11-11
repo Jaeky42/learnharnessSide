@@ -34,15 +34,14 @@ import {
 } from "@/src/core";
 
 /** The minimized bubble on a computer (the phone's own values are in
- *  app/phone.css). It sits just above the question bar, its right edge on
- *  the bar's: the bar is the dock's centred column (chat.tsx DOCK:
- *  max-w-[46rem], px-4), so that edge is a fixed distance in from the
- *  dock's own. */
-const BUBBLE_BAR_GAP = 8;
-const BUBBLE_BAR_RIGHT = "calc(max(0px, (100% - 46rem) / 2) + 1rem)";
-/** While an opened question leaves no room above the bar: under the top bar,
- *  this far in from the lesson's right edge. */
+ *  app/phone.css). Owner's placing, after trying it right on the bar's end
+ *  (too close): off to the side at the lesson's bottom right, this far in
+ *  from the lesson's right edge and this far above the question bar. On a
+ *  wide lesson that is beside the bar's end, not over it. */
 const BUBBLE_EDGE_GAP = 16;
+const BUBBLE_BAR_GAP = 20;
+/** While an opened question leaves no room above the bar: under the top
+ *  bar, the same distance in from the lesson's right edge. */
 const BUBBLE_TOP = 72;
 
 const OPEN_KEY = "lh:side-tutor:open";
@@ -310,9 +309,10 @@ export function SideTutor({ chatId, dictation }: { chatId: string; /** The page'
 
 	if (!open) {
 		// On a computer the bubble is drawn inside the dock, above its top right
-		// (owner's ask): it then keeps its place against the question bar
-		// exactly, while the lesson scrolls and while a question opens or folds.
-		// With no room above an opened question it sits under the top bar.
+		// corner, which is the lesson's bottom right (owner's ask): it then keeps
+		// its place against the question bar exactly, while the lesson scrolls
+		// and while a question opens or folds. With no room above an opened
+		// question it sits under the top bar, as far right as here.
 		const onDock = !phone && anchor.place === "above-dock" && anchor.dock !== null;
 		const bubble = (
 			<button
@@ -335,7 +335,7 @@ export function SideTutor({ chatId, dictation }: { chatId: string; /** The page'
 							? { top: anchor.top }
 							: {}
 						: onDock
-							? { right: BUBBLE_BAR_RIGHT, bottom: `calc(100% + ${BUBBLE_BAR_GAP}px)`, WebkitAppRegion: "no-drag" }
+							? { right: BUBBLE_EDGE_GAP, bottom: `calc(100% + ${BUBBLE_BAR_GAP}px)`, WebkitAppRegion: "no-drag" }
 							: { right: anchor.right + BUBBLE_EDGE_GAP, top: BUBBLE_TOP, WebkitAppRegion: "no-drag" }) as React.CSSProperties
 				}
 				className={cn(
