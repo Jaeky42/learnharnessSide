@@ -1,6 +1,6 @@
 # Cloud sync: approved plan
 
-Status: **Phases 1–4 done (server mode, sign-in on the server, phone layouts, the Obsidian vault on the server); the rest is planned.** Work happens on a separate branch. It merges into `side-tutor` only once the whole feature works and the owner approves the merge, because every push to `side-tutor` publishes a release. Change these decisions only with the owner's approval.
+Status: **Phases 1–4 done (server mode, sign-in on the server, phone layouts, the Obsidian vault on the server). Phase 5 (the sync engine) is designed and waiting for the owner to approve its plan; nothing of it is built.** Work happens on a separate branch. It merges into `side-tutor` only once the whole feature works and the owner approves the merge, because every push to `side-tutor` publishes a release. Change these decisions only with the owner's approval.
 
 Goal: keep learning progress on several devices. The Windows desktop app stays fully usable, works offline, and keeps the Obsidian connection. A phone uses LearnHarness from the browser.
 
@@ -38,7 +38,8 @@ A teaching transcript can't be merged, because two teachers built on the same tu
 
 - Only the device holding a session's **lease** may continue it. The VPS is the lease authority.
 - **A lease never runs out on its own.** Other devices show "Held by Desktop (offline since …)" with a **Take over** button.
-- **Take over warns first** when the holder may have turns that haven't synced. If the learner goes ahead anyway, the holder's unsynced turns become a separate session, "Title (desktop copy)", when that device reconnects. Nothing is lost silently.
+- **Take over warns first** when there is evidence that the holder has turns that haven't synced (see "Phase 5 decisions").
+- **No copies** (owner's change during Phase 5 planning; it replaces the earlier "Title (desktop copy)" rule). A device that lost a session to a take-over discards its unsent turns for that session when it reconnects and shows the server's version. The loss isn't silent: the desktop shows a heads-up while it works offline, and a notice after a discard.
 - An offline desktop can only continue sessions it held before it went offline.
 - A session's side-tutor thread (`side-tutor/<chatId>.json`) and notes home folder (`notes/sessions/<chatId>.json`) follow its lease.
 
@@ -352,7 +353,7 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 2. ✅ **Sign-in on the server.** The ChatGPT paste box, plus the Claude sign-in button and Disconnect. Verified on the VPS: Claude Code installed itself onto the volume, and both ChatGPT and Claude connected from Settings.
 3. ✅ **Phone layouts.** Every view, the side tutor bubble and sheet, the full-screen notes drawer, Settings, press and hold, and the home-screen app. Two real-phone rounds; the owner declared Phase 3 complete.
 4. ✅ **Vault on the server.** Settings → Obsidian, the sync manager around `ob`, folders left out automatically, the safety check and Disconnect. Verified by the owner on the server with their real Obsidian account.
-5. **Sync engine.** The lease API, session sync with take-over and desktop copies, graph line and operation sync, per-key settings merges, and the sync protocol version check.
+5. **Sync engine.** Pairing and device keys, the lease API, session sync with take-over (no copies: unsent turns are discarded), graph line and operation sync, per-key settings merges, and the sync protocol version check.
    - Built as wrapper stores at the composition root (`src/server/stores.ts`) over the `core/ports.ts` interfaces, so upstream store code stays untouched and rebasing onto upstream stays cheap.
 6. **Desktop sync UI.** Settings → Cloud (server URL, sign-in, device name, Sync now); a sync status chip; lease state on each session.
 7. **Tests and docs.** Lease, take-over and graph operation tests; an end-to-end test with two servers and one cloud; and an update of this file from "planned" to built.
@@ -438,9 +439,46 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 
 ### Next: Phase 5, the sync engine
 
-**Nothing of Phase 5 is built or decided beyond "Decisions" at the top of this file.** No sync code exists yet.
+**Nothing of Phase 5 is built. Its design questions are answered ("Phase 5 decisions" below), and the phase plan is with the owner for approval.** No sync code exists yet. Don't build until the owner approves the plan page; then record its "smaller rules" here too.
 
-- Phase 5's open questions are listed below. Ask them one at a time, with pictures.
+#### Phase 5 decisions (owner, asked one at a time)
+
+1. **Signing in: a pairing code.** The server's site (Settings → Account, signed in) shows a code that works once, for 10 minutes. The desktop app takes the server address and the code and gets its own device key. The key works only for the sync API, is stored on the server only as a hash, and never involves the server password.
+2. **Pairing lasts until removed.** No time limit. A desktop is unpaired by its own Remove button, and also by Sign out everywhere, a password change and `reset-password`, as those sign out every other device. Unpairing deletes nothing on the PC. A new code reconnects it as the same device, with whatever it hadn't synced.
+3. **Trying the desktop side: two server copies only.** No desktop test build and no run from source. One copy plays the desktop and one plays the server, in automated tests and browser runs. The owner tries nothing on the PC before the merge, so **sync must stay off in the app until it is paired**, and an unpaired app must behave exactly as today.
+4. **First sync: combine both libraries.** Pairing deletes nothing. Desktop sessions go up and cloud sessions come down, each still held by the side it came from. The graphs are joined; a concept learned on both sides before pairing shows twice (the known limit).
+5. **A backup once per side**, right before that side's first sync: a dated folder under `backups/` beside the data folder (sessions, graph, side-tutor threads, jobs, settings; no credentials, not the vault). Restored by hand with a guide.
+6. **Take over warns only on evidence.** The server keeps, per session, when the holder last checked in and its last word. Warn when that was "busy" or "unsent", or the holder went silent in the middle of a reply. If it was "all sent", no warning, even if the holder has been offline since. An online holder is asked to hand over and no warning is needed.
+7. **No copies** (see "Sessions" at the top).
+8. **The gap that leaves** (a desktop that said "all sent", went offline and was then used offline): while it can't reach the server, the desktop shows a heads-up in a session being continued; after a discard it shows a notice naming the session and the number of turns. Both screens are Phase 6; Phase 5 supplies the facts.
+9. **A busy online holder at take-over:** the reply being written finishes and is sent. Background helpers (research, demo, visual, PDF) stop there and start again from the beginning on the new holder. Extraction stops and the new holder redoes it later.
+10. **A held session is read-only until taken over.** Reading it, the notes drawer and moving it between folders work. Sending a message, the side tutor, renaming, changing its model and deleting wait for Take over.
+11. **Timing:** a session is sent about 2 seconds after a change; the desktop tells the server when a reply starts and ends; it asks the server for news every 10 seconds; a full sync at app start; quiet retries while offline, slowing to once every few minutes. There is no "final sync on quit" (on Windows the local server is killed at once).
+12. **Settings split.**
+    - Synced, latest change wins per setting: appearance (mode, background, text size, serif session names, heading weight, bold and italic colours), dictation language, graph (extraction on/off, rendering on/off, chunk size, the graph view sliders), compaction threshold, agent (tool switches, search engine, prober graph tools), and prompt overrides (the texts and their switches).
+    - Per device, never synced: model slots and per-role model overrides, the custom provider, the Claude Code switch, file-access folders, the reading font, automatic updates, keyboard shortcuts, keys and sign-ins.
+    - The chains-view folders (`source-organization.json`) always sync.
+    - At the first pairing, where the two sides differ, the desktop's value is kept.
+    - A session's own model travels with the session; if it isn't set up on the other device, the learner picks one there.
+13. **Graph deletions: repeat the action.** The server keeps one ordered log of graph changes. A deletion is logged as what was done ("delete session X with its concepts", "delete node N", the chain clean-up) and each device runs it on its own graph. A rewrite the engine doesn't recognise is logged as its exact result (which lines went or changed), so nothing is skipped.
+14. **Protocol version:** starts at 1 and rises only when a release changes the wire format, a stored format that syncs, or the replayed deletion rules. The two sides must be equal or sync pauses. Messages: "Update the server to continue syncing" (server behind) and "Update LearnHarness to continue syncing" (app behind).
+15. **Vault folders:** at each sync the desktop sends the names of its vault's top-level folders (names only), and the server adds them to the folders it leaves out.
+
+#### What the investigation found (for whoever builds it)
+
+- **The approved table misses four things:**
+  - `jobs/*.json`: a finished helper result lives only in its job file until it is delivered into the session (`delivery.status: "pending"`), so job files travel with the session's lease.
+  - A fourth ledger rewrite: `mergeFindings` (`src/core/graph.ts`) ends with `simplifyChains` and `rewriteLedgers({ chains })`.
+  - Background writers of the chat file: extraction (`appendExtractionUsage`) and the visual maker (`saveImageSnapshot`).
+  - Three unlisted files: `graph/source-organization.json`, `graph/render-settings.json`, `prompts/**`.
+- **Not everything goes through `stores`:** settings, prompt overrides and render settings are imported straight from `src/store` (`src/server/index.ts` and a few server files).
+- **The turn gate is too late for a lease check:** in `handleChatInput`, `ensureCompacted` and the parallel-question branch write the chat record before `beginTurn`. The check belongs at the top of that function.
+- **Helpers restart by themselves:** `recoverStaleJobs` (`src/server/jobs.ts`) respawns any job left `running` with no live worker. It must only do that on the lease holder.
+- **Graph ids, folder ids and chat ids are all random,** so combining two libraries can't collide.
+- **The login file parser drops unknown fields** (`parseServerAuthState`), and `reset-password` writes a fresh state. Paired devices stored there are cleared by a reset for free; stored anywhere else, the script must clear them.
+- **Desktop shell:** quitting kills the local server at once (`killServer` in `electron/main.cjs`); there is no secure store in use (credentials are 0600 JSON files, and a test forbids `safeStorage`); a build opts out of updates with `lhAutoUpdate: false` in its packaged `package.json`.
+
+- The open questions that were listed here are answered above.
 - **Which branch builds the server image:** `.github/workflows/server-image.yml` lists the branches that build (`side-tutor` → `:latest`; `claude/pensive-goldberg-7dty2m` → `:dev`). A push to any other branch builds nothing, and the owner's server follows `:dev`. Keep working on that branch, or add the new branch's name to that list in the same change.
 - **Where the engine attaches** (read these first):
   - `src/core/ports.ts`: the store interfaces (`ChatStore`, `GraphStore`, `SourceOrganizationStore`, `JobStore`, `SettingsStore`, `PromptOverrideStore`, `AuthStore`);
@@ -449,32 +487,27 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
   - `src/core/graph.ts` and `src/core/graph-deletion.ts` (`rewriteLedgers`): the destructive graph changes that must sync as replayed operations;
   - `src/store/side-tutor.ts` and the notes home-folder records (`src/store/notes.ts`): the two fork files that follow a chat's lease;
   - `src/server/server-auth.ts` and `proxy.ts`: the login gate every new `/api/sync` route sits behind.
-- **A suggested order** (the order is a suggestion; every decision in it is the owner's):
-  1. Investigate the files above, and where background jobs start (graph extraction, research, compaction, visuals), since those may only run on the lease holder.
-  2. Ask the open questions, one per call, with a picture each. Start with the ones the data shapes hang on: the lease API, what a take-over warning needs to know, how "(desktop copy)" sessions are named, the graph operation log, the protocol version.
-  3. Write the phase plan as a page with diagrams and get it approved.
-  4. Build in slices, each with its tests: the protocol version check and the API's skeleton; leases with whole-file chat sync (the side-tutor thread and the notes home folder ride along); take-over and desktop copies; graph lines and replayed operations; per-key merges for settings, sources and positions; the lease rule for background work.
-- **Two things to raise with the owner early**, because they shape the whole phase:
-  - **How the desktop signs in to the server.** Device tokens are listed under Phase 6, but the sync API can't be left open and can't be tried from a desktop without them. Either the pairing decision moves forward, or Phase 5 ends at a tested engine with nothing for the owner to try.
-  - **How the owner tries the desktop side before the merge.** The desktop app only gets new code from pushes to `side-tutor`, and each of those publishes a release to every installed app. There is no desktop build from the feature branch today. Options to put to the owner: a separate test build that doesn't touch the update feed, running the app from source on their PC, or testing sync between two server-mode copies until the merge.
-- **Phase 5 has almost no screens** (the sync UI is Phase 6), so the usual "what to try on your server" list will be short unless the owner wants a small status readout pulled forward.
+- **Build order in the plan page** (six slices, each with its tests, a browser run in server mode, and a commit and push):
+  1. pairing codes, device keys, the sync API behind the login gate, and the protocol version check;
+  2. sessions and leases: whole sessions with their side-tutor thread, notes home folder and job files, the read-only rule, new and deleted sessions, and the first sync (backup, then combine);
+  3. take-over: the evidence rule, hand-over from an online holder, take-over from an offline one, the discard at reconnect, and the facts for the heads-up and the notice;
+  4. the graph log: lines, repeated actions, the exact-result fallback, redoing unsent entries on top of fetched ones, and combining two graphs;
+  5. settings and the other maps: the approved split, prompt overrides, render settings, chains-view folders, source records, positions, and the vault folder names;
+  6. timing (2 s and 10 s, retries while offline), pictures sent once, a full two-copy run in browsers, and the docs.
+- **The engine must do nothing where no desktop is paired.** Every push to this branch reaches the owner's real server at the nightly update, so a server with no paired device, and an app that isn't paired, must leave the data folder byte for byte as it is. A test pins this.
+- **Phase 5 has no screens.** The owner sees nothing new until Phase 6; the thing to check after each update is that the server and phone work as before. The phase ends with a page of screenshots from two copies syncing.
 - **Sample data for UI screenshots:** copy `tests/fixtures/golden-data` to a scratch `LH_DATA_DIR`. Truncating a copy of the teaching chat right after a `quiz` tool call gives a session with an open question. Phone screenshots: Playwright `devices["iPhone 13"]`; real touch (press and hold, pinch) through CDP `Input.dispatchTouchEvent`.
 
 ### Later phases: decisions still open (ask when you get there)
 
-- **Phase 5 (sync engine):**
-  - whether the desktop sends its vault's top-level folder names to the server ahead of time, so not even a stray file of a new folder arrives (the server leaves folders out by itself since Phase 4);
-  - which device holds the take-over warning's data;
-  - lease API details;
-  - how "(desktop copy)" sessions are named and filed;
-  - the operation-log format for graph deletions;
-  - the sync protocol version number;
-  - how background jobs already running behave when a lease is taken over.
-- **Phase 6 (desktop sync UI):**
-  - where Settings → Cloud lives;
+- **Phase 5 (sync engine):** answered; see "Phase 5 decisions".
+- **Phase 6 (sync UI, desktop and phone):**
+  - where Settings → Cloud lives, and its pairing form (server address, code);
+  - "Add a desktop app" and the paired desktops in Settings → Account on the server;
   - the sync status chip;
-  - the lock indicator on sessions;
-  - device token pairing (how the desktop signs in to the server).
+  - the held-session line, Take over, and what it shows while an online holder finishes a reply;
+  - the wording of the take-over warning, the offline heads-up and the discard notice;
+  - device names (what a desktop and the server are called in "Held by …").
 
 ### Development notes for this work
 
