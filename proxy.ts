@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { desktopAPIAuthorized } from "./src/server/desktop-access.ts";
 import { SERVER_MARKER_COOKIE, serverGate, serverModeEnabled } from "./src/server/server-auth.ts";
+import { heldElsewhereResponse, sessionWritePath } from "./src/server/sync/engine.ts";
 
 /** Applies to every API method, including SSE and spending/settings routes.
  * No public callback or worker bypass: internal jobs call server functions,
@@ -20,6 +21,11 @@ export function proxy(request: NextRequest) {
 			{ status: 403, headers: { "Cache-Control": "no-store" } },
 		);
 	}
+	// Cloud sync (Phase 5): a session another device holds is read-only here.
+	// Every write under /api/chats/<id> is refused in one place.
+	const writes = sessionWritePath(request.method, pathname);
+	const held = writes ? heldElsewhereResponse(writes) : null;
+	if (held) return held;
 	const response = NextResponse.next();
 	// Lets the page know it's the cloud server without an extra request
 	// (components/settings/server-mode.ts). Not a credential.

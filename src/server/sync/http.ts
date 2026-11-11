@@ -9,6 +9,11 @@
  *                                    → its device key. Wrong codes count
  *                                    toward the login lockout.
  *   POST /api/sync/hello             a paired desktop: the protocol check.
+ *   POST /api/sync/sessions          a paired desktop: "what changed since
+ *                                    I last asked?" (slice 2)
+ *   GET | PUT | DELETE /api/sync/sessions/<id>
+ *                                    fetch a session's files, send them
+ *                                    (the holder only), or delete it
  *
  * Everything answers 404 outside server mode. The gate for /api/sync/* is
  * syncGate in server-auth.ts: a device key, never the login cookie.
@@ -33,7 +38,9 @@ import {
 } from "../../core/sync/devices.ts";
 import { parseProtocolHeader, protocolVerdict, SYNC_PROTOCOL_HEADER, SYNC_PROTOCOL_VERSION } from "../../core/sync/protocol.ts";
 import { readServerAuthState, updateServerAuthState } from "../../store/server-auth.ts";
+import { MAX_BUNDLE_BYTES } from "../../core/sync/sessions.ts";
 import { clientAddress, json, lockedMessage, notFound, readBody, serverModeEnabled, signedIn } from "../server-auth.ts";
+import { syncAuthority } from "./engine.ts";
 
 const NOT_PAIRED = { error: "This desktop app isn't paired with this server.", code: "not_paired" } as const;
 
@@ -126,4 +133,39 @@ export function helloResponse(request: Request, now = Date.now()): Response {
 	const refusal = protocolRefusal(request);
 	if (refusal) return refusal;
 	return json({ protocol: SYNC_PROTOCOL_VERSION, time: now, device: { id: device.id, name: device.name } });
+}
+
+// ─── Sessions (slice 2) ──────────────────────────────────────────────────────
+
+/** A sync request's JSON body. Session files can be large, so no 8 KB cap here. */
+async function syncBody(request: Request): Promise<unknown> {
+	const length = Number(request.headers.get("content-length") ?? "0");
+	if (length > MAX_BUNDLE_BYTES * 1.2) return undefined;
+	try { return await request.json(); } catch { return undefined; }
+}
+
+/** The checks every session route shares; a Response means "refused". */
+function syncCaller(request: Request): DeviceRecord | Response {
+	if (!serverModeEnabled()) return notFound();
+	const device = deviceFromRequest(request);
+	if (!device) return json(NOT_PAIRED, 401);
+	return protocolRefusal(request) ?? device;
+}
+
+export async function sessionsExchangeResponse(request: Request): Promise<Response> {
+	const caller = syncCaller(request);
+	if (caller instanceof Response) return caller;
+	const reply = syncAuthority().exchange(caller.id, await syncBody(request));
+	return json(reply.body, reply.status);
+}
+
+export async function sessionBundleResponse(request: Request, chatId: string): Promise<Response> {
+	const caller = syncCaller(request);
+	if (caller instanceof Response) return caller;
+	const authority = syncAuthority();
+	const reply = request.method === "GET" ? authority.fetch(caller.id, chatId)
+		: request.method === "PUT" ? authority.store(caller.id, chatId, await syncBody(request))
+		: request.method === "DELETE" ? authority.remove(caller.id, chatId)
+		: { status: 405, body: { error: "Method not allowed." } };
+	return json(reply.body, reply.status);
 }

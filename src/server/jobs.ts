@@ -69,6 +69,7 @@ import type { TurnInput } from "../core/input-events.ts";
 import { hasUnresolvedQuestion, endsInDismissal, endsInQuestionRecovery, type LhMessage } from "../core/native-messages.ts";
 import { fireJobAbort, isJobLive } from "../agent/subagents/aborts.ts";
 import { stores, effectiveSettings } from "./stores.ts";
+import { holdsSession } from "./sync/engine.ts";
 import { resolveConversationSpec } from "../core/settings-resolution.ts";
 import { connectionBackgroundAllowed, isSubscriptionProvider, onSubscriptionChange } from "../agent/subscription-connections.ts";
 import { isTurnRunning } from "./turn-liveness.ts";
@@ -742,6 +743,7 @@ export function recoverStaleJobs(): void {
 		for (const chat of stores.chatStore.listChats()) {
 			for (const job of stores.jobStore.listJobs(chat.id)) {
 				if (isJobLive(job.id)) continue; // never re-run beside live computation
+				if (!holdsSession(job.chatId)) continue; // side-tutor fork (cloud sync): helpers restart only on the device that holds the session
 				if (!stores.chatStore.getChat(job.chatId)) continue;
 				if (isTurnRunning(job.chatId)) continue;
 				const recovered = normalizeLegacyResult(job);

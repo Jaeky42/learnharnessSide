@@ -1,6 +1,6 @@
 # Cloud sync: approved plan
 
-Status: **Phases 1–4 done (server mode, sign-in on the server, phone layouts, the Obsidian vault on the server). Phase 5 (the sync engine) is approved and being built in slices; slice 1 of 6 is done.** Work happens on a separate branch. It merges into `side-tutor` only once the whole feature works and the owner approves the merge, because every push to `side-tutor` publishes a release. Change these decisions only with the owner's approval.
+Status: **Phases 1–4 done (server mode, sign-in on the server, phone layouts, the Obsidian vault on the server). Phase 5 (the sync engine) is approved and being built in slices; slices 1 and 2 of 6 are done.** Work happens on a separate branch. It merges into `side-tutor` only once the whole feature works and the owner approves the merge, because every push to `side-tutor` publishes a release. Change these decisions only with the owner's approval.
 
 Goal: keep learning progress on several devices. The Windows desktop app stays fully usable, works offline, and keeps the Obsidian connection. A phone uses LearnHarness from the browser.
 
@@ -439,7 +439,7 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 
 ### Next: Phase 5, the sync engine
 
-**The owner approved the Phase 5 plan page.** It is being built in six slices ("Build order" below). Built so far: slice 1 (pairing, device keys, the version check); see "Phase 5: what is built".
+**The owner approved the Phase 5 plan page.** It is being built in six slices ("Build order" below). Built so far: slices 1 and 2 (pairing, device keys, the version check; sessions and leases); see "Phase 5: what is built".
 
 #### Phase 5 decisions (owner, asked one at a time)
 
@@ -499,6 +499,28 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 - **Wording added while building, for the owner to review in Phase 6** (it is only reachable through the API today): "That pairing code isn't right, or it has run out. Get a new one from the server's site.", "This server already has 10 desktop apps paired. Remove one first.", "This server isn't set up yet. Open its site and choose a password first.", "That desktop app isn't paired any more.", "This desktop app isn't paired with this server.", "Couldn't reach that server. Check the address and your connection.", "That address didn't answer like a LearnHarness server.", "Enter your server's address.", "The server's address must start with https://", "Give this desktop a name of up to 40 characters.", "Enter the pairing code from the server's site."
 - **Code:** `src/core/sync/{protocol,devices,address}.ts`, `src/store/sync/pairing.ts`, `src/server/sync/{http,client,cloud-http}.ts`, `app/api/sync/{pair,hello}`, `app/api/server-auth/desktops`, `app/api/cloud`; changes in `src/core/server-auth.ts` (the state's `devices` and `pairing`), `src/server/server-auth.ts` (the gate, the account data, unpairing on a password change and Sign out everywhere), `src/agent/tools/fs-shared.ts`, `scripts/server-reset-password.mjs`.
 - **Tests:** `tests/sync-pairing.test.ts`. One process plays both sides: the desktop's client is given a `fetch` that delivers to the server's gate and routes.
+
+**Slice 2: sessions and leases**
+
+- **A session travels whole**, as the exact text of its files: `chats/<id>.json`, `side-tutor/<id>.json`, `notes/sessions/<id>.json`, and every `jobs/<jobId>.json` whose `chatId` names it (`src/store/sync/session-files.ts`). Both sides end with the same bytes.
+- **The server is the lease authority** (`src/server/sync/authority.ts`, state in `<data>/sync/authority.json`). Per session it records the holder (a device id, or `cloud` for the server's own), a version, and the holder's last word. Only the holder's send is accepted; any other device gets 409 `lease_lost` with the current state.
+  - The server's own changes (what the phone does) are found by comparing file stamps (times and sizes), then content digests, whenever a desktop asks for news. Nothing in the server's own write path was changed for that.
+- **A desktop's round** (`src/server/sync/desktop-sync.ts`, state in `<data>/sync/desktop.json`): ask what changed since its place in the server's list and fetch those sessions; send the sessions it holds that changed and the new ones it made; report sessions it deleted. `POST /api/cloud {op:"sync"}` runs one round (the timed rounds come with slice 6).
+- **Routes for a paired desktop:** `POST /api/sync/sessions` (what changed since `cursor`; also carries the holder's reports), and `GET | PUT | DELETE /api/sync/sessions/<id>`.
+- **The first sync is nothing special:** every session here that the server doesn't know is new and goes up, held by this desktop; every session there comes down, held by whoever holds it. The backup is made first, once per side (`src/store/sync/backup.ts`); if it can't be made, the sync doesn't start.
+  - The same id on both sides before they ever synced (possible only if one side's data was copied from the other): identical files are one session; different files are left alone on both sides and never sent over each other.
+- **Read-only until taken over** is enforced in three layers:
+  1. `proxy.ts`: every write under `/api/chats/<id>` answers 409 `session_held_elsewhere` with the holder (`sessionWritePath` in `src/server/sync/engine.ts`).
+  2. Where the session id is in the body: the top of `handleChatInput` (before compaction, any write or any model call), the manual extraction route, and `runningWorkBlocker` (deleting through the sources view).
+  3. The stores (`src/server/sync/guarded-stores.ts`, wired in `src/server/stores.ts`): a write that still arrives, for example from background work that was running when a session moved, is dropped, never saved.
+  - The notes home folder: its route leaves the record as it is on a held session and answers normally, so the drawer keeps working.
+  - `recoverStaleJobs` skips sessions this copy doesn't hold, so fetching a session whose helper is still running elsewhere doesn't start it here.
+- **While unpaired or paused** the desktop still knows which sessions are held elsewhere (its identity is kept in `cloud-sync.json`), so they stay read-only and nothing is discarded.
+- **Deleting:** the holder's delete removes the session's files on the server and on every other device at their next round; a deleted id is never accepted again. The graph side of a deletion comes with slice 4.
+- **Wording added while building, for Phase 6:** "This session is held by another device. Take it over to continue it here." (the 409's text).
+- **The store wrappers call the inner store's method as it is at that moment**, never a reference taken at wiring time: upstream's tests replace methods on the inner store object.
+- **Tests:** `tests/sync-sessions.test.ts` (an authority and one or two desktops over separate data folders in one process), `tests/sync-sessions-gate.test.ts` (the read-only rule at the real entry points, with this process as a paired desktop).
+- **Real run:** two copies of the built app (`next build`, `scripts/build-server.mjs`, then `.next/standalone/server.js` twice with different `PORT`, `LH_DATA_DIR` and `LH_AUTH_FILE`, one with `LH_SERVER_MODE=1`), paired and synced through browsers.
 
 #### What the investigation found (for whoever builds it)
 
@@ -577,4 +599,8 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
   - To have notes for a run, write files into the server's vault folder and wait until they show in the stand-in's `remote.json`; a later deletion then shows there as a record with `deleted: true`.
 - **The local dev server** (`next dev` on port 3100) doesn't survive between turns in a cloud session; start it with `setsid nohup … &` and check it answers before each browser run.
 - **The owner's phone screenshots are the ground truth for iPhone behaviour.** Measure them (PIL: pixel rows and columns; a full iPhone screenshot is 3 px per point, a cropped or resized one scales from the status-bar icons) before deciding what iOS does; several early guesses about Safari's bars were wrong until measured.
+- **Two real copies for a sync run:** `npx next build`, then `node scripts/build-server.mjs`, then start `.next/standalone/server.js` twice.
+  - `build-server.mjs` refuses when `.next/standalone/data` exists. That happens when the repo has a local `data/` folder (tests that don't set `LH_DATA_DIR` leave one): the tracer sweeps it in. Delete `.next/standalone/data` and run the script again. A clean checkout (CI, the image) has no `data/`.
+  - The server process is titled `next-server`; `pkill -f "node server.js"` doesn't find it.
+  - Plain `http` works between the two because the desktop accepts it for `127.0.0.1`.
 - **Desktop must not change:** server-only UI keys off `isServerMode()` (the `lh_server` cookie) with no extra requests. `tests/claude-code-status-ui.test.tsx` pins the desktop's exact request list.

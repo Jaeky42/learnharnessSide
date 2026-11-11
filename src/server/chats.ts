@@ -10,6 +10,8 @@ import { stores } from "./stores.ts";
 import { isTurnRunning } from "./turn-liveness.ts";
 import { clearTurnFailure } from "./turn-runs.ts";
 import { discardChatDeliveries } from "./jobs.ts";
+import { holdsSession } from "./sync/engine.ts";
+import { HELD_ELSEWHERE_CODE, HELD_ELSEWHERE_MESSAGE } from "../core/sync/sessions.ts";
 
 /**
  * Server-side chat entries for the transport layer (app/api/chats*,
@@ -37,7 +39,7 @@ const WIND_DOWN_POLL_MS = 50;
 /** What deleteChatSession did — the route maps it straight to HTTP. */
 export type ChatDeleteOutcome =
 	| { ok: false; status: 404; code: "not_found"; error: string }
-	| { ok: false; status: 409; code: "turn_in_flight" | "jobs_running"; error: string; jobIds: string[] }
+	| { ok: false; status: 409; code: "turn_in_flight" | "jobs_running" | "session_held_elsewhere"; error: string; jobIds: string[] }
 	| { ok: false; status: 503; code: "extraction_winding_down"; error: string }
 	| {
 			ok: true;
@@ -71,6 +73,10 @@ export type ChatDeleteOutcome =
  *      nothing merged.
  */
 export function runningWorkBlocker(chatId: string): Extract<ChatDeleteOutcome, { status: 409 }> | null {
+	// Side-tutor fork (cloud sync): a session another device holds can't be deleted here.
+	if (!holdsSession(chatId)) {
+		return { ok: false, status: 409, code: HELD_ELSEWHERE_CODE, error: HELD_ELSEWHERE_MESSAGE, jobIds: [] };
+	}
 	if (isTurnRunning(chatId)) {
 		return {
 			ok: false,

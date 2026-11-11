@@ -14,14 +14,20 @@ import { settingsStore } from "../store/settings.ts";
 import { sideTutorStore } from "../store/side-tutor.ts";
 import { resolveSettings, type EffectiveSettings } from "../core/settings-resolution.ts";
 import { syncCustomProvider } from "./custom-provider.ts";
-/** The wired adapters. Satisfies core/graph.ts's GraphDeps structurally. */
+import { holdsSession } from "./sync/engine.ts";
+import { guardChatStore, guardJobStore, guardSideTutorStore } from "./sync/guarded-stores.ts";
+/** The wired adapters. Satisfies core/graph.ts's GraphDeps structurally.
+ *
+ * Side-tutor fork (cloud sync Phase 5): the session stores are wrapped so a
+ * session another device holds can't be changed here (sync/guarded-stores.ts).
+ * Until a desktop has synced, the wrappers pass everything through. */
 export const stores = {
-	chatStore,
+	chatStore: guardChatStore(chatStore, holdsSession),
 	graphStore,
 	sourceOrganizationStore,
-	jobStore,
+	jobStore: guardJobStore(jobStore, holdsSession),
 	settingsStore,
-	sideTutorStore,
+	sideTutorStore: guardSideTutorStore(sideTutorStore, holdsSession),
 };
 
 export type Stores = typeof stores;

@@ -26,6 +26,7 @@ import { notesStore, NotesError } from "../store/notes.ts";
 import { obsidianSync } from "./obsidian-sync.ts";
 import { serverModeEnabled } from "./server-auth.ts";
 import { stores } from "./stores.ts";
+import { holdsSession } from "./sync/engine.ts";
 
 function fail(error: unknown): Response {
 	if (error instanceof NotesError) return Response.json({ error: error.message, ...(error.detail ?? {}) }, { status: error.status });
@@ -196,6 +197,9 @@ export async function noteSetHomeResponse(chatId: string, req: Request): Promise
 	const b = await json(req);
 	const folder = b.homeFolder === null ? null : str(b.homeFolder);
 	try {
+		// Cloud sync: the home-folder record travels with its session. On a
+		// session another device holds it is left as it is; the drawer works on.
+		if (!holdsSession(chatId)) return Response.json({ homeFolder: notesStore.getHome(chatId) });
 		notesStore.setHome(chatId, folder);
 		return Response.json({ homeFolder: folder });
 	} catch (e) {
