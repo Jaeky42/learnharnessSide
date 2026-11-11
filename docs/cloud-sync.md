@@ -1,6 +1,6 @@
 # Cloud sync: approved plan
 
-Status: **Phases 1–3 done (server mode, sign-in on the server, phone layouts); Phase 4 (the Obsidian vault on the server) is built and waits for the owner's check on the real server; the rest is planned.** Work happens on a separate branch. It merges into `side-tutor` only once the whole feature works and the owner approves the merge, because every push to `side-tutor` publishes a release. Change these decisions only with the owner's approval.
+Status: **Phases 1–4 done (server mode, sign-in on the server, phone layouts, the Obsidian vault on the server); the rest is planned.** Work happens on a separate branch. It merges into `side-tutor` only once the whole feature works and the owner approves the merge, because every push to `side-tutor` publishes a release. Change these decisions only with the owner's approval.
 
 Goal: keep learning progress on several devices. The Windows desktop app stays fully usable, works offline, and keeps the Obsidian connection. A phone uses LearnHarness from the browser.
 
@@ -198,7 +198,7 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
   - These tests need the program: `LH_TEST_OB_CLI=<path>/obsidian-headless/cli.js`. Without it they are skipped. The image workflow fetches the pinned version for them.
 - `tests/obsidian-sync-ui.test.tsx`: every state of Settings → Obsidian and the drawer's server-only changes, with the approved wording; the desktop's drawer is unchanged.
 
-**Not verified against Obsidian's real servers yet.** They are blocked from the development sandbox. The first real sign-in and sync happen on the owner's server (see Handoff).
+**Verified on the owner's server** against Obsidian's real servers (they are blocked from the development sandbox): `ob` installed itself after the update, the owner signed in and connected the vault in Settings → Obsidian, and reported that it works.
 
 ### Phone layouts — built in Phase 3
 
@@ -339,7 +339,7 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 1. ✅ **Server mode.** Dockerfile, the `LH_DATA_DIR` volume, the password login gate in `proxy.ts`, Caddy (HTTPS), the server image workflow, and automatic server updates. Running on the permanent VPS: HTTPS via Caddy, setup and password, locked from outside, and the nightly timer installed.
 2. ✅ **Sign-in on the server.** The ChatGPT paste box, plus the Claude sign-in button and Disconnect. Verified on the VPS: Claude Code installed itself onto the volume, and both ChatGPT and Claude connected from Settings.
 3. ✅ **Phone layouts.** Every view, the side tutor bubble and sheet, the full-screen notes drawer, Settings, press and hold, and the home-screen app. Two real-phone rounds; the owner declared Phase 3 complete.
-4. 🔨 **Vault on the server.** Built: Settings → Obsidian, the sync manager around `ob`, folders left out automatically, the safety check and Disconnect. Waits for the owner's check with their real Obsidian account on the server.
+4. ✅ **Vault on the server.** Settings → Obsidian, the sync manager around `ob`, folders left out automatically, the safety check and Disconnect. Verified by the owner on the server with their real Obsidian account.
 5. **Sync engine.** The lease API, session sync with take-over and desktop copies, graph line and operation sync, per-key settings merges, and the sync protocol version check.
    - Built as wrapper stores at the composition root (`src/server/stores.ts`) over the `core/ports.ts` interfaces, so upstream store code stays untouched and rebasing onto upstream stays cheap.
 6. **Desktop sync UI.** Settings → Cloud (server URL, sign-in, device name, Sync now); a sync status chip; lease state on each session.
@@ -347,14 +347,15 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 
 ## Handoff: where things stand and how to continue
 
-### State (Phases 0–3 done; Phase 4 built, waiting for the owner's server check)
+### State (Phases 0–4 done)
 
 - **Branch:** `claude/pensive-goldberg-7dty2m`. All cloud sync work lives here.
   - Pushes build only the server image (`:dev`), never a desktop release.
   - **Never push to `side-tutor`** until the owner approves merging the whole feature.
-- **Phase 4 (the Obsidian vault on the server) is built and pushed**, with the plan approved by the owner beforehand (every decision is recorded under "Obsidian vault on the VPS").
-  - Tested here: the full suite, plus the manager driving the real `ob` program against a stand-in for Obsidian's servers, and a Playwright run in server mode at phone and desktop size (sign-in with a two-step code, vault password, first download, a folder left out, a note in each direction, a stopped sign-in, Disconnect).
-  - **Not yet tested: Obsidian's real servers.** The owner got a step-by-step page for the first real sign-in and sync. Expect a round of fixes; the likely places are the texts of Obsidian's real error messages (sign-in refused, two-step code) and anything about the real sync service that the stand-in doesn't copy.
+- **Phase 4 (the Obsidian vault on the server) is complete.** The plan was approved by the owner beforehand (every decision is recorded under "Obsidian vault on the VPS"), and the owner confirmed on the real server that sign-in, connecting and syncing work.
+  - Tested here: the full suite, plus the manager driving the real `ob` program against a stand-in for Obsidian's servers, and a Playwright run in server mode at phone and desktop size.
+  - The owner's check covered the update, the install of `ob`, sign-in and connect. The stopped states (a refused sign-in, an ended subscription, the safety pause) have only been seen against the stand-in; the texts of Obsidian's real error messages are the likeliest place for a surprise.
+  - The guide's server commands must each start with `cd ~/learnharnessSide/deploy &&`: `docker compose` only works from that folder (the owner hit this).
   - If the owner reports a problem, ask what Settings → Obsidian shows and for the lines `docker compose logs lh` prints that start with `[LearnHarness] Obsidian sync:`. They hold state changes and Obsidian's own reason for a refused sync, never note names, folder names or passwords. `ob`'s own log is `/data/home/.config/obsidian-headless/sync/<vault id>/sync.log` in the container; it lists note names, so ask the owner to read it rather than paste it.
   - Wording added while building, beyond the approved screens, for the owner to review: "Nothing yet" (no folders left out so far), "Obsidian said: …" (Obsidian's own words under a refused sign-in), "Loading your vaults…", "Couldn't check Obsidian sync on this server.", "The vault couldn't be connected. Try again.", "Obsidian's sync program couldn't be disconnected, so nothing was removed. Try again.", "Obsidian's sync program didn't answer. Try again.", the drawer gear's tooltip "Obsidian settings", and **Try again** on the ended-subscription state.
 - **Phase 3 (phone layouts) is complete** (the owner's call, after two real-phone rounds; see "Real-phone checks" above). The last fixes pushed before that call (the home-screen app's top inset at +26 points, phone menus pinned by their top, Fable as `fable`) weren't reported on individually; if the owner mentions one of them, start from its bullet in "Phone layouts".
@@ -383,10 +384,9 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
   - a commit and push to the branch;
   - a "what to try on your server" list.
 
-### Next: the owner's Phase 4 check, then Phase 5
+### Next: Phase 5, the sync engine
 
-- First: the owner's check of Phase 4 on the real server, and any fixes from it. When it works there, mark Phase 4 ✅ in "Phases" and in the status line at the top.
-- Then Phase 5 (the sync engine). Its open questions are listed below. Ask them one at a time, with pictures.
+- Phase 5's open questions are listed below. Ask them one at a time, with pictures.
 - **Sample data for UI screenshots:** copy `tests/fixtures/golden-data` to a scratch `LH_DATA_DIR`. Truncating a copy of the teaching chat right after a `quiz` tool call gives a session with an open question. Phone screenshots: Playwright `devices["iPhone 13"]`; real touch (press and hold, pinch) through CDP `Input.dispatchTouchEvent`.
 
 ### Later phases: decisions still open (ask when you get there)
