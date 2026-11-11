@@ -177,6 +177,25 @@ describe("drawer", () => {
 		assert.match(text, /Saved · LearnHarness\/Electricity\/Ohm's law\.md/);
 	});
 
+	it("rows are dragged by the list itself, not by the browser: each says what it is and how deep it sits", async () => {
+		const { host } = await drawerWithNotes();
+		const rows = [...host.querySelectorAll("[role='tree'] [role='treeitem']")];
+		assert.deepEqual(
+			rows.map((r) => [r.getAttribute("data-drag-path"), r.hasAttribute("data-row-folder"), r.getAttribute("data-depth")]),
+			[
+				["Electricity", true, "0"],
+				["Electricity/Current.md", false, "1"],
+				["Electricity/Ohm's law.md", false, "1"],
+				["Physics", true, "0"],
+			],
+		);
+		// No browser drag and drop, and none of the old drag's pieces.
+		assert.equal(host.querySelectorAll("[draggable]").length, 0);
+		assert.ok(rows.every((r) => r.hasAttribute("data-phone-press") && r.hasAttribute("data-phone-drag")));
+		for (const gone of ["notes-drag-label", "notes-drag-top-level", "notes-tree-root-drop"]) assert.equal(document.querySelector(`[data-testid='${gone}']`), null);
+		assert.equal(host.querySelector("[role='tree']")?.hasAttribute("data-dragging"), false);
+	});
+
 	// ── Row menus and Delete (owner's wording) ──────────────────────────────
 	const menuLabels = () => [...document.querySelectorAll("[role='menu'] [role='menuitem']")].map((b) => b.textContent);
 	const menuItem = (label: string) => [...document.querySelectorAll("[role='menu'] [role='menuitem']")].find((b) => b.textContent === label) as HTMLElement;

@@ -61,7 +61,21 @@ The learner's own notes beside the lesson, stored as Markdown in their Obsidian 
   - Link suggestions are opt-in: an unlinked mention of another note's name gets a "link?" button, and nothing changes unless it's clicked.
   - Links to notes outside `LearnHarness/` open in Obsidian (`obsidian://open`).
 - **Where new notes go:** the folder selected in the tree, otherwise the session's home folder, otherwise "Skip" files the note in `LearnHarness/Inbox/`. The first folder used becomes the session's home folder, stored in `<data>/notes/sessions/<chatId>.json` and never in the chat record.
-- **Moving:** drag and drop works for notes **and folders**, and there's also "Move to…". On a phone the drag is "hold, then move" (see "On a phone").
+- **Moving:** notes **and folders** can be dragged, and there's also "Move to…".
+- **Dragging** (owner-approved design; it replaced the browser's drag and drop on the computer and an earlier phone drag):
+  - **The row itself moves.** It follows the pointer up and down, and the other rows slide out of its way. A dragged folder moves with everything shown in it, as one piece.
+  - **The list still sorts itself** (owner's choice over keeping a hand-made order): Inbox first, then folders A–Z, then notes A–Z. So a drag decides only **which folder** the item ends up in. After the drop the row slides to its sorted place.
+  - **Where it lands:**
+    - a gap among a folder's rows: that folder (the line is indented like them);
+    - a gap at the top level, above Inbox too: outside every folder (the line isn't indented);
+    - the middle half of a folder's row: inside that folder. The folder lights up after the line has rested on it for a moment, no gap stays open next to it, and the line tucks in from the left, a little smaller and see-through, so the folder's name stays readable;
+    - the top or bottom quarter of a folder's row: next to the folder (rows part).
+  - Under a folder's last row the gap could mean that folder or the level outside it: it means the one ahead of the line, and turning back clearly switches to the other.
+  - **Nothing changes** when the line is put back among its own neighbours. Then, after a refused move (the reason shows in the message line) and on Esc, everything slides back.
+  - **Limits:** the line stays inside the list (on a phone the divider under "Topics" is the upper limit). Pushing on against a limit reaches the first or last place. Near the list's top or bottom edge the list scrolls.
+  - **Starting it:** on a computer, press a row and move (a press that doesn't move is still a click). On a phone, hold, then move (see "On a phone").
+  - **Gone, by the owner's ask:** a box over the heading for "outside every folder", the lit area under the list, and a floating label with the item's name.
+  - Search results can't be dragged.
 - **Row menus** (right-click or ⋯ on a computer, press and hold on a phone):
   - a note: Open, Move to…, Split note… (when it has sections), Merge into parent (after a split), Open in Obsidian, **Delete**;
   - a folder: **New note**, **New folder**, Move to…, the session's home folder item, **Delete**. The owner's wording: no "here" after "New note" and "New folder"; the folder you opened the menu on says where.
@@ -121,13 +135,15 @@ The learner's own notes beside the lesson, stored as Markdown in their Obsidian 
   - `app/api/chats/[id]/notes` (home folder)
 - **`components/notes/`:**
   - `notes-drawer.tsx`: the panel, state, saving and polling;
-  - `notes-tree.tsx`: tree model, drag and drop (the mouse, and the phone's hold-then-move), row menus;
+  - `notes-tree.tsx`: tree model, the rows and their pointer events, row menus;
+  - `row-drag.ts`: the dragging rules (the dragged block, where the gap opens, which folder a gap means, the folder's middle band, the limits);
+  - `row-drag-dom.ts`: the movement (measures the rows, moves them frame by frame, settles, and slides every row to its sorted place after the move);
   - `note-editor.tsx`: CodeMirror;
   - `note-read-view.tsx`;
   - `notes-dialogs.tsx`: Move to, Split, Delete, name prompt;
   - `notes-api.ts`.
 - **Wiring:** `components/chat.tsx` (Notes chip and drawer mount), `src/core/keyboard.ts` (`toggle-notes`, `focus-notes`), and `src/server/chats.ts` (session deletion hook).
-- **Tests:** `tests/notes-core.test.ts`, `notes-store.test.ts`, `notes-privacy.test.ts`, `notes-ui.test.tsx`; the phone's hold-then-move touch rules: `tests/phone-hold-drag.test.ts`.
+- **Tests:** `tests/notes-core.test.ts`, `notes-store.test.ts`, `notes-privacy.test.ts`, `notes-ui.test.tsx`; the dragging rules: `tests/notes-row-drag.test.ts`; the phone's hold-then-move touch rules: `tests/phone-hold-drag.test.ts`.
 
 ## Claude Code: Fable in the model list
 

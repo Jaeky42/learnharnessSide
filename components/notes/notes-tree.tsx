@@ -2,27 +2,30 @@
 
 /**
  * The notes drawer's folder tree: folders that fold, notes edited in this
- * session marked with a dot, the Inbox pinned first with its count, drag
- * and drop for notes AND folders (onto a folder, or onto the empty space
- * below for the top level), and a right-click / ⋯ menu per row.
+ * session marked with a dot, the Inbox pinned first with its count, dragging
+ * for notes AND folders, and a right-click / ⋯ menu per row.
  *
- * PHONE: press and hold opens that menu; holding and then moving the finger
- * drags the row instead (owner's choice). A label follows the finger,
- * folders light up as it passes, an empty box over the heading takes it out
- * of every folder (no words on it, owner's ask),
- * and the list scrolls near its edges. The hold itself is detected in
- * components/phone/long-press.ts.
+ * DRAGGING (owner-approved design): the row itself follows the pointer and
+ * the other rows slide out of its way. The list still sorts itself, so a
+ * drag decides only which folder the item ends up in: a gap among a
+ * folder's rows means that folder, a gap at the top level (above Inbox
+ * too) means outside every folder, and the middle of a folder row lights
+ * the folder and means inside it. After the drop the row slides to its
+ * sorted place.
+ *   - With a mouse: press a row and move.
+ *   - On a phone: press and hold opens the row's menu; holding and then
+ *     moving drags the row instead (components/phone/long-press.ts).
+ * The rules are in row-drag.ts, the movement in row-drag-dom.ts.
  */
 
-import { useEffect, useRef, useState, type DragEvent, type MouseEvent as ReactMouseEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { createPortal } from "react-dom";
 import { ChevronRightIcon, FileTextIcon, FolderIcon, FolderOpenIcon, InboxIcon, MoreHorizontalIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { folderOf, INBOX_FOLDER, isFolderSummary, isWithinFolder, noteName, type NotesTreeNote } from "@/src/core";
 import { useIsPhone } from "@/components/phone/use-phone";
-import { edgeScrollStep, HOLD_DRAG_EVENT, type HoldDragDetail } from "@/components/phone/long-press";
-
-export const DRAG_TYPE = "application/x-lh-note-item";
+import { HOLD_DRAG_EVENT, type HoldDragDetail } from "@/components/phone/long-press";
+import { createRowDrag, type RowDrag, type RowDragUi } from "./row-drag-dom";
 
 /** May `from` (a note or a folder) be moved into `toFolder`? Not into the
  *  folder it is already in, and a folder never into itself. */
@@ -32,13 +35,8 @@ export function canDropInto(from: string | null, toFolder: string): boolean {
 	return !isWithinFolder(toFolder, from) && folderOf(from) !== toFolder;
 }
 
-function scrollParent(el: HTMLElement | null): HTMLElement | null {
-	for (let node = el; node; node = node.parentElement) {
-		const overflow = getComputedStyle(node).overflowY;
-		if ((overflow === "auto" || overflow === "scroll") && node.scrollHeight > node.clientHeight) return node;
-	}
-	return null;
-}
+/** How far the mouse must move with the button down before a row is dragged. */
+const MOUSE_DRAG_SLOP = 5;
 
 export interface TreeFolder {
 	path: string;
@@ -160,7 +158,6 @@ export function NotesTreeView({
 	onMove,
 	menuFor,
 	flat,
-	dragSlot,
 }: {
 	root: TreeFolder;
 	openPath: string | null;
@@ -172,129 +169,124 @@ export function NotesTreeView({
 	onToggleFolder: (path: string) => void;
 	onSelectFolder: (path: string | null) => void;
 	onOpenNote: (path: string) => void;
-	/** Drag and drop: move `from` (note or folder) into `toFolder`. */
-	onMove: (from: string, toFolder: string) => void;
+	/** A drag ended on another folder: move `from` (note or folder) into
+	 *  `toFolder`. Resolves true once the list shows the result, false when
+	 *  the move was refused (the rows then slide back). */
+	onMove: (from: string, toFolder: string) => Promise<boolean>;
 	menuFor: (target: RowTarget) => TreeMenuItem[];
-	/** Search results: a flat list with folder paths. */
+	/** Search results: a flat list with folder paths. They can't be dragged. */
 	flat?: NotesTreeNote[];
-	/** PHONE: where the top-level drop box shows while a row is dragged (an
-	 *  element laid over the list's heading, so the list doesn't jump). */
-	dragSlot?: HTMLElement | null;
 }) {
-	const [dropTarget, setDropTarget] = useState<string | null>(null);
 	const [menu, setMenu] = useState<{ x: number; y: number; items: TreeMenuItem[] } | null>(null);
-	const dragging = useRef<string | null>(null);
-
-	const canDrop = canDropInto;
-
-	// PHONE: no HTML drag and drop (a touch never starts one reliably). Press
-	// and hold opens the row menu; hold, then move drags the row.
 	const phone = useIsPhone();
 	const treeRef = useRef<HTMLDivElement | null>(null);
-	const chipRef = useRef<HTMLDivElement | null>(null);
-	const [touchDrag, setTouchDrag] = useState<{ path: string; name: string } | null>(null);
-	const latest = useRef({ onMove, dragSlot });
-	latest.current = { onMove, dragSlot };
+	/** What is being dragged and the folder lit under it. Only the rows'
+	 *  classes follow this; the movement is written straight to the rows. */
+	const [dragUi, setDragUi] = useState<RowDragUi | null>(null);
+	const latest = useRef({ onMove });
+	latest.current = { onMove };
+	const dragRef = useRef<RowDrag | null>(null);
+	if (!dragRef.current) {
+		dragRef.current = createRowDrag({
+			tree: () => treeRef.current,
+			canEnter: canDropInto,
+			setUi: setDragUi,
+			move: (from, toFolder) => latest.current.onMove(from, toFolder),
+		});
+	}
+	const drag = dragRef.current;
+	useEffect(() => () => drag.destroy(), [drag]);
+	// After every render: a drop that is waiting for the list slides the rows
+	// to their sorted places as soon as the list shows the move.
+	useLayoutEffect(() => {
+		drag.afterRender();
+	});
+
+	const canDrag = !flat;
+
+	// PHONE: press and hold opens the row menu; hold, then move drags the row.
 	useEffect(() => {
-		if (!phone) return;
-		let drag: { path: string; x: number; y: number; target: string | null; scroller: HTMLElement | null; frame: number } | null = null;
-		const place = () => {
-			if (drag && chipRef.current) chipRef.current.style.transform = `translate(${Math.round(drag.x + 12)}px, ${Math.round(drag.y - 52)}px)`;
-		};
-		/** The folder under the finger: the nearest one around what it touches. */
-		const aim = () => {
-			if (!drag) return;
-			const hit = document.elementFromPoint(drag.x, drag.y)?.closest("[data-drop-folder]") ?? null;
-			const ours = hit && (treeRef.current?.contains(hit) || latest.current.dragSlot?.contains(hit));
-			const folder = hit && ours ? hit.getAttribute("data-drop-folder") : null;
-			const next = folder !== null && canDropInto(drag.path, folder) ? folder : null;
-			if (next !== drag.target) {
-				drag.target = next;
-				setDropTarget(next);
-			}
-		};
-		const tick = () => {
-			if (!drag) return;
-			place();
-			if (drag.scroller) {
-				const box = drag.scroller.getBoundingClientRect();
-				const step = edgeScrollStep(drag.y, box.top, box.bottom);
-				if (step) {
-					drag.scroller.scrollTop += step;
-					aim();
-				}
-			}
-			drag.frame = requestAnimationFrame(tick);
-		};
-		const stop = () => {
-			if (!drag) return;
-			cancelAnimationFrame(drag.frame);
-			drag = null;
-			setTouchDrag(null);
-			setDropTarget(null);
-		};
+		if (!phone || !canDrag) return;
 		const onHoldDrag = (event: Event) => {
 			const d = (event as CustomEvent<HoldDragDetail>).detail;
 			if (d.phase === "start") {
 				const path = d.row.getAttribute("data-drag-path");
 				if (!path || !treeRef.current?.contains(d.row)) return;
 				setMenu(null);
-				drag = { path, x: d.x, y: d.y, target: null, scroller: scrollParent(treeRef.current), frame: 0 };
-				setTouchDrag({ path, name: itemName(path) });
-				drag.frame = requestAnimationFrame(tick);
-				return;
-			}
-			if (!drag) return;
-			if (d.phase === "move") {
-				drag.x = d.x;
-				drag.y = d.y;
-				place();
-				aim();
-				return;
-			}
-			const { path, target } = drag;
-			stop();
-			if (d.phase === "end" && target !== null) latest.current.onMove(path, target);
+				drag.start(path, d.x, d.y);
+			} else if (d.phase === "move") drag.move(d.x, d.y);
+			else if (d.phase === "end") drag.end();
+			else drag.cancel();
 		};
 		document.addEventListener(HOLD_DRAG_EVENT, onHoldDrag);
 		return () => {
 			document.removeEventListener(HOLD_DRAG_EVENT, onHoldDrag);
-			stop();
+			drag.cancel();
 		};
-	}, [phone]);
-	const dragProps = (path: string) => ({
-		draggable: !phone,
-		onDragStart: (e: DragEvent) => {
-			dragging.current = path;
-			e.dataTransfer.setData(DRAG_TYPE, path);
-			e.dataTransfer.effectAllowed = "move";
-		},
-		onDragEnd: () => {
-			dragging.current = null;
-			setDropTarget(null);
-		},
-	});
+	}, [phone, canDrag, drag]);
 
-	const dropProps = (folder: string) => ({
-		onDragOver: (e: DragEvent) => {
-			if (!canDrop(dragging.current, folder)) return;
+	// MOUSE (and pen): press a row and move. A press that doesn't move is the
+	// click it always was.
+	useEffect(() => {
+		const tree = treeRef.current;
+		if (phone || !canDrag || !tree) return;
+		let press: { path: string; x: number; y: number; id: number } | null = null;
+		const swallowClick = () => {
+			const stop = (e: MouseEvent) => {
+				e.preventDefault();
+				e.stopPropagation();
+			};
+			document.addEventListener("click", stop, true);
+			setTimeout(() => document.removeEventListener("click", stop, true), 0);
+		};
+		const onDown = (e: PointerEvent) => {
+			if (e.button !== 0 || e.pointerType === "touch" || drag.active()) return;
+			const target = e.target as Element | null;
+			const row = target?.closest?.("[data-drag-path]") ?? null;
+			if (!row || !tree.contains(row) || target?.closest("button")) return;
+			press = { path: row.getAttribute("data-drag-path") ?? "", x: e.clientX, y: e.clientY, id: e.pointerId };
+		};
+		const onMoved = (e: PointerEvent) => {
+			if (!press || e.pointerId !== press.id) return;
+			if (!drag.active()) {
+				if (Math.hypot(e.clientX - press.x, e.clientY - press.y) < MOUSE_DRAG_SLOP) return;
+				if (!drag.start(press.path, press.x, press.y)) {
+					press = null;
+					return;
+				}
+				setMenu(null);
+			}
+			drag.move(e.clientX, e.clientY);
+		};
+		const onUp = (e: PointerEvent) => {
+			if (!press || e.pointerId !== press.id) return;
+			press = null;
+			if (!drag.active()) return;
+			swallowClick();
+			if (e.type === "pointercancel") drag.cancel();
+			else drag.end();
+		};
+		const onKey = (e: KeyboardEvent) => {
+			if (e.key !== "Escape" || !press || !drag.active()) return;
 			e.preventDefault();
 			e.stopPropagation();
-			e.dataTransfer.dropEffect = "move";
-			setDropTarget(folder);
-		},
-		onDragLeave: (e: DragEvent) => {
-			if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node | null)) setDropTarget((t) => (t === folder ? null : t));
-		},
-		onDrop: (e: DragEvent) => {
-			e.preventDefault();
-			e.stopPropagation();
-			const from = e.dataTransfer.getData(DRAG_TYPE) || dragging.current;
-			setDropTarget(null);
-			dragging.current = null;
-			if (from && canDrop(from, folder)) onMove(from, folder);
-		},
-	});
+			press = null;
+			drag.cancel();
+		};
+		tree.addEventListener("pointerdown", onDown);
+		document.addEventListener("pointermove", onMoved);
+		document.addEventListener("pointerup", onUp);
+		document.addEventListener("pointercancel", onUp);
+		document.addEventListener("keydown", onKey, true);
+		return () => {
+			tree.removeEventListener("pointerdown", onDown);
+			document.removeEventListener("pointermove", onMoved);
+			document.removeEventListener("pointerup", onUp);
+			document.removeEventListener("pointercancel", onUp);
+			document.removeEventListener("keydown", onKey, true);
+			drag.cancel();
+		};
+	}, [phone, canDrag, drag]);
 
 	const openMenu = (e: ReactMouseEvent, target: RowTarget) => {
 		e.preventDefault();
@@ -302,6 +294,9 @@ export function NotesTreeView({
 		const items = menuFor(target);
 		if (items.length) setMenu({ x: e.clientX, y: e.clientY, items });
 	};
+
+	/** The dragged row (and, for a folder, the rows inside it) is drawn lifted. */
+	const lifted = (path: string) => !!dragUi && isWithinFolder(path, dragUi.path) && "relative z-10 bg-popover shadow-lg ring-1 ring-border hover:bg-popover";
 
 	const noteRow = (n: NotesTreeNote, depth: number, sub?: string) => {
 		const active = n.path === openPath;
@@ -312,16 +307,16 @@ export function NotesTreeView({
 				aria-selected={active}
 				tabIndex={-1}
 				data-testid="notes-tree-note"
-				{...dragProps(n.path)}
 				onClick={() => onOpenNote(n.path)}
 				onContextMenu={(e) => openMenu(e, { kind: "note", note: n })}
 				data-phone-press=""
-				data-phone-drag={flat ? undefined : ""}
-				data-drag-path={n.path}
+				data-phone-drag={canDrag ? "" : undefined}
+				data-drag-path={canDrag ? n.path : undefined}
+				data-depth={depth}
 				className={cn(
-					"group/row flex cursor-pointer items-center gap-1.5 rounded-sm py-1 pr-1 text-sm transition-colors hover:bg-accent/60",
+					"group/row flex cursor-pointer select-none items-center gap-1.5 rounded-sm py-1 pr-1 text-sm transition-colors hover:bg-accent/60",
 					active && "bg-accent",
-					touchDrag?.path === n.path && "opacity-40",
+					lifted(n.path),
 				)}
 				style={{ paddingLeft: 8 + depth * 14 }}
 			>
@@ -348,14 +343,13 @@ export function NotesTreeView({
 		const inbox = f.path === INBOX_FOLDER;
 		const selected = selectedFolder === f.path;
 		return (
-			<div key={f.path} role="group" data-drop-folder={f.path} {...dropProps(f.path)}>
+			<div key={f.path} role="group">
 				<div
 					role="treeitem"
 					aria-expanded={open}
 					aria-selected={selected}
 					tabIndex={-1}
 					data-testid="notes-tree-folder"
-					{...dragProps(f.path)}
 					onClick={() => {
 						onSelectFolder(selected ? null : f.path);
 						if (!forceOpen) onToggleFolder(f.path);
@@ -364,11 +358,14 @@ export function NotesTreeView({
 					data-phone-press=""
 					data-phone-drag=""
 					data-drag-path={f.path}
+					data-row-folder=""
+					data-depth={depth}
+					data-drop-lit={dragUi?.over === f.path ? "" : undefined}
 					className={cn(
-						"group/row flex cursor-pointer items-center gap-1.5 rounded-sm py-1 pr-1 text-sm font-medium transition-colors hover:bg-accent/60",
+						"group/row flex cursor-pointer select-none items-center gap-1.5 rounded-sm py-1 pr-1 text-sm font-medium transition-colors hover:bg-accent/60",
 						selected && "bg-accent/60",
-						dropTarget === f.path && "bg-accent ring-1 ring-border",
-						touchDrag?.path === f.path && "opacity-40",
+						dragUi?.over === f.path && "bg-accent ring-1 ring-border",
+						lifted(f.path),
 					)}
 					style={{ paddingLeft: 8 + depth * 14 }}
 				>
@@ -402,7 +399,7 @@ export function NotesTreeView({
 	};
 
 	return (
-		<div ref={treeRef} role="tree" aria-label="Notes" className="flex min-h-full flex-col">
+		<div ref={treeRef} role="tree" aria-label="Notes" data-dragging={dragUi ? "" : undefined} className="flex min-h-full flex-col">
 			{flat ? (
 				flat.length ? flat.map((n) => noteRow(n, 0, folderOf(n.path))) : <div className="px-2 py-3 text-xs text-muted-foreground">No notes match.</div>
 			) : (
@@ -415,43 +412,7 @@ export function NotesTreeView({
 					)}
 				</>
 			)}
-			{/* The empty space below the tree: drop here for the top level. */}
-			{!flat && (
-				<div
-					data-testid="notes-tree-root-drop"
-					data-drop-folder=""
-					{...dropProps("")}
-					className={cn("min-h-8 flex-1 rounded-sm transition-colors", dropTarget === "" && "bg-accent/50")}
-				/>
-			)}
 			{menu && <RowMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />}
-			{/* PHONE drag: the label under the finger, and the way out of every folder. */}
-			{touchDrag &&
-				createPortal(
-					<div
-						ref={chipRef}
-						data-testid="notes-drag-label"
-						className="pointer-events-none fixed left-0 top-0 z-[60] max-w-[70vw] truncate rounded-md border border-border bg-popover px-3 py-1.5 text-sm text-foreground shadow-lg"
-						style={{ transform: "translate(-999px, -999px)" }}
-					>
-						{touchDrag.name}
-					</div>,
-					document.body,
-				)}
-			{touchDrag &&
-				dragSlot &&
-				canDropInto(touchDrag.path, "") &&
-				createPortal(
-					// No words on it (owner's ask): the box itself shows where it goes.
-					<div
-						data-drop-folder=""
-						data-testid="notes-drag-top-level"
-						role="presentation"
-						aria-label="Top level"
-						className={cn("pointer-events-auto absolute inset-0 z-10 rounded-md bg-card ring-1 ring-border", dropTarget === "" && "bg-accent")}
-					/>,
-					dragSlot,
-				)}
 		</div>
 	);
 }

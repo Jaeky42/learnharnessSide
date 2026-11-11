@@ -139,7 +139,6 @@ export function NotesDrawer({ chatId, onClose }: { chatId: string; onClose: () =
 	const [tree, setTree] = useState<NotesTree | null>(null);
 	const [treeError, setTreeError] = useState<string | null>(null);
 	const [setupOpen, setSetupOpen] = useState(false);
-	const [dragSlot, setDragSlot] = useState<HTMLElement | null>(null);
 	const [view, setView] = useState<"session" | "all">(() => load("lh:notes-view", "all"));
 	const [query, setQuery] = useState("");
 	const [expanded, setExpanded] = useState<Set<string>>(() => new Set(load<string[]>("lh:notes-expanded", [])));
@@ -415,14 +414,17 @@ export function NotesDrawer({ chatId, onClose }: { chatId: string; onClose: () =
 				setOpenPath(nextOpen);
 			}
 			setSelectedFolder((s) => (s && !from.endsWith(".md") && isWithinFolder(s, from) ? res.path + s.slice(from.length) : s));
+			void getHomeFolder(chatId).then(setHomeState);
+			await refreshTree();
+			// After the refreshed list, in the same render: the folder it went
+			// into opens together with the list's new order, so the rows slide
+			// once from where they were to where they belong (notes-tree.tsx).
 			setExpanded((prev) => {
 				const next = new Set<string>();
 				for (const e of prev) next.add(!from.endsWith(".md") && isWithinFolder(e, from) ? res.path + e.slice(from.length) : e);
 				for (let x = to; x; x = folderOf(x)) next.add(x);
 				return next;
 			});
-			void getHomeFolder(chatId).then(setHomeState);
-			await refreshTree();
 			showToast(`Moved “${itemName(from)}” to ${to ? `${to}/` : "the top level"}.`);
 		},
 		[flush, openPath, chatId, refreshTree],
@@ -459,9 +461,16 @@ export function NotesDrawer({ chatId, onClose }: { chatId: string; onClose: () =
 		void folderContents(item).then((contents) => setDialog({ kind: "delete", item, contents })).catch((e) => showToast(message(e)));
 	};
 
-	const onDragMove = (from: string, to: string) => {
-		void doMove(from, to).catch((e) => showToast(message(e)));
-	};
+	/** A drag in the list ended on another folder. True once the list shows
+	 *  the move; false (with the reason shown) when it was refused. */
+	const onDragMove = (from: string, to: string): Promise<boolean> =>
+		doMove(from, to).then(
+			() => true,
+			(e) => {
+				showToast(message(e));
+				return false;
+			},
+		);
 
 	const doSplit = async (choices: Array<{ index: number; title: string }>) => {
 		const d = docRef.current;
@@ -839,10 +848,7 @@ export function NotesDrawer({ chatId, onClose }: { chatId: string; onClose: () =
 						/>
 					</label>
 
-					<div data-phone="notes-tree-head" className="relative mx-3 mt-2 flex shrink-0 items-center gap-1">
-						{/* PHONE drag: the tree lays its top-level drop box over this
-						    heading. Out of the flow, so nothing here moves. */}
-						<div ref={setDragSlot} className="pointer-events-none absolute inset-0" />
+					<div data-phone="notes-tree-head" className="mx-3 mt-2 flex shrink-0 items-center gap-1">
 							<button
 								type="button"
 								aria-expanded={treeShown}
@@ -872,7 +878,6 @@ export function NotesDrawer({ chatId, onClose }: { chatId: string; onClose: () =
 								<NotesTreeView
 									root={shownTree}
 									flat={results}
-									dragSlot={dragSlot}
 									openPath={openPath}
 									selectedFolder={selectedFolder}
 									expanded={expanded}
