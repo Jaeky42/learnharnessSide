@@ -432,13 +432,32 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
   - Checked in a browser at both sizes: the box and the buttons measure the same at reading sizes from 14 to 22 px, the box keeps its height when typing starts, and dictation still lands its words in the tutor's box.
   - Resizing was driven with a real mouse in the browser: the pointer over each zone and over the top bar, each side and corner, the limits, the remembered size after minimizing and after a reload, and a smaller app window. The owner approved the plan (a picture of the zones) and chose "remember the size"; they have seen a picture of the zones, tinted for the picture only.
   - Playwright hides scrollbars by default; launch with `ignoreDefaultArgs: ["--hide-scrollbars"]` to get real ones. The run of the larger zones did, and dragged the conversation's scrollbar thumb beside the right strip.
-- **Nothing is queued after this round.** The owner then asked whether anything was left in Phase 4 (nothing is) and was told Phase 5 is next.
-- **The drawer's message line** now goes after 5 seconds, or 20 with an Undo button (the owner's ask and choice; "The message line" under "Notes drawer" in `docs/side-tutor.md`). Timed in a browser.
+- **Nothing is queued after this round.** The owner asked whether anything was left in Phase 4 (nothing is), and then handed the work over for Phase 5 to begin.
+- **The drawer's message line** now goes after 5 seconds, or 20 with an Undo button (the owner's ask and choice; "The message line" under "Notes drawer" in `docs/side-tutor.md`). Timed in a browser. Pushed as the last change before Phase 5; the owner hasn't said yet whether they tried it.
 - **Wording and behaviour added without being asked:** the message `Deleted “Electricity”.` after a delete, and the message line showing on the phone's list screen. The owner has used both and asked only for the messages to go sooner, so they stand unless the owner says otherwise.
 
 ### Next: Phase 5, the sync engine
 
+**Nothing of Phase 5 is built or decided beyond "Decisions" at the top of this file.** No sync code exists yet.
+
 - Phase 5's open questions are listed below. Ask them one at a time, with pictures.
+- **Which branch builds the server image:** `.github/workflows/server-image.yml` lists the branches that build (`side-tutor` → `:latest`; `claude/pensive-goldberg-7dty2m` → `:dev`). A push to any other branch builds nothing, and the owner's server follows `:dev`. Keep working on that branch, or add the new branch's name to that list in the same change.
+- **Where the engine attaches** (read these first):
+  - `src/core/ports.ts`: the store interfaces (`ChatStore`, `GraphStore`, `SourceOrganizationStore`, `JobStore`, `SettingsStore`, `PromptOverrideStore`, `AuthStore`);
+  - `src/server/stores.ts`: the composition root (`stores`), where wrapper stores go so upstream's store code stays untouched;
+  - `src/store/*`: how each file is written today (whole-file rewrites, appends, read-modify-write maps), which decides how it can sync;
+  - `src/core/graph.ts` and `src/core/graph-deletion.ts` (`rewriteLedgers`): the destructive graph changes that must sync as replayed operations;
+  - `src/store/side-tutor.ts` and the notes home-folder records (`src/store/notes.ts`): the two fork files that follow a chat's lease;
+  - `src/server/server-auth.ts` and `proxy.ts`: the login gate every new `/api/sync` route sits behind.
+- **A suggested order** (the order is a suggestion; every decision in it is the owner's):
+  1. Investigate the files above, and where background jobs start (graph extraction, research, compaction, visuals), since those may only run on the lease holder.
+  2. Ask the open questions, one per call, with a picture each. Start with the ones the data shapes hang on: the lease API, what a take-over warning needs to know, how "(desktop copy)" sessions are named, the graph operation log, the protocol version.
+  3. Write the phase plan as a page with diagrams and get it approved.
+  4. Build in slices, each with its tests: the protocol version check and the API's skeleton; leases with whole-file chat sync (the side-tutor thread and the notes home folder ride along); take-over and desktop copies; graph lines and replayed operations; per-key merges for settings, sources and positions; the lease rule for background work.
+- **Two things to raise with the owner early**, because they shape the whole phase:
+  - **How the desktop signs in to the server.** Device tokens are listed under Phase 6, but the sync API can't be left open and can't be tried from a desktop without them. Either the pairing decision moves forward, or Phase 5 ends at a tested engine with nothing for the owner to try.
+  - **How the owner tries the desktop side before the merge.** The desktop app only gets new code from pushes to `side-tutor`, and each of those publishes a release to every installed app. There is no desktop build from the feature branch today. Options to put to the owner: a separate test build that doesn't touch the update feed, running the app from source on their PC, or testing sync between two server-mode copies until the merge.
+- **Phase 5 has almost no screens** (the sync UI is Phase 6), so the usual "what to try on your server" list will be short unless the owner wants a small status readout pulled forward.
 - **Sample data for UI screenshots:** copy `tests/fixtures/golden-data` to a scratch `LH_DATA_DIR`. Truncating a copy of the teaching chat right after a `quiz` tool call gives a session with an open question. Phone screenshots: Playwright `devices["iPhone 13"]`; real touch (press and hold, pinch) through CDP `Input.dispatchTouchEvent`.
 
 ### Later phases: decisions still open (ask when you get there)
