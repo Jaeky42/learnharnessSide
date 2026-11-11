@@ -1,6 +1,6 @@
 # Cloud sync: approved plan
 
-Status: **Phases 1–4 done (server mode, sign-in on the server, phone layouts, the Obsidian vault on the server). Phase 5 (the sync engine) is built, all six slices: a paired desktop and the server keep sessions, the graph, settings and folders in step. Phase 6 (the screens) is built, all three slices: Settings → Cloud on the desktop app (pairing, sync state, Unpair) and on the server's site (paired desktop apps, pairing codes); a held session ("Held by …", the strip, Take over, the warning box, greyed controls); and the desktop's own notices (the sync chip, the offline heads-up, the discard box). It has run between two built copies only; the owner's real PC meets the real server after the merge.** **Merged into `side-tutor` with the owner's approval, and released to the desktop app as 0.5.6.** The owner's real PC hasn't been paired with the real server yet; that is the next thing to hear about. Change these decisions only with the owner's approval.
+Status: **Phases 1–4 done (server mode, sign-in on the server, phone layouts, the Obsidian vault on the server). Phase 5 (the sync engine) is built, all six slices: a paired desktop and the server keep sessions, the graph, settings and folders in step. Phase 6 (the screens) is built, all three slices: Settings → Cloud on the desktop app (pairing, sync state, Unpair) and on the server's site (paired desktop apps, pairing codes); a held session ("Held by …", the strip, Take over, the warning box, greyed controls); and the desktop's own notices (the sync chip, the offline heads-up, the discard box). It has run between two built copies only; the owner's real PC meets the real server after the merge.** **Merged into `side-tutor` with the owner's approval, and released to the desktop app as 0.5.6.** The owner then updated the server, followed the pairing guide and reported: "everything works!". Change these decisions only with the owner's approval.
 
 Goal: keep learning progress on several devices. The Windows desktop app stays fully usable, works offline, and keeps the Obsidian connection. A phone uses LearnHarness from the browser.
 
@@ -367,7 +367,7 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 
 - **Merged:** `side-tutor` was fast-forwarded to the cloud sync branch at `a2d2b7e` with the owner's word ("merge"), and the Windows workflow published **release 0.5.6** from it. The desktop app now has everything in this file and in `docs/side-tutor.md`.
 - **Checked on Windows before it went out:** the Windows workflow was started by hand on the cloud sync branch (a dry run: no release) and passed, with the sync and cloud tests added to it. Before that the sync code had only run on Linux.
-- **Not seen yet:** the owner's real PC paired with the real server. The owner has a step-by-step pairing guide (an Artifact page). If they report a problem, ask what the screen shows and what Settings → Cloud reads on the PC; never ask for a pairing code, a password or the server's address.
+- **Confirmed by the owner on the real PC and the real server:** after release 0.5.6 they updated the server, followed the pairing guide (an Artifact page) and reported "everything works!". They didn't say which screens they tried, so a take-over, the offline chip and the discard box may still be unseen on real devices. If they report a problem later, ask what the screen shows and what Settings → Cloud reads on the PC; never ask for a pairing code, a password or the server's address.
 - **Which branch changes what, from now on:**
   - a push to `side-tutor` publishes a desktop release (and builds the server image `:latest`). It still needs the owner's approval every time;
   - the owner's server follows `LH_CHANNEL=dev`, which is built from `claude/pensive-goldberg-7dty2m`. A change the server should get must be pushed there; a change both should get goes to both branches, kept at the same commit.
@@ -846,7 +846,7 @@ One run between two built copies with the loop on, through the real screens, nob
 
 #### Still to do
 
-- The owner's real PC with the real server: the merge is done (release 0.5.6) and the owner has the pairing guide; not yet reported on.
+- Nothing for Phase 6: the owner's real PC is paired with the real server and they reported that everything works.
 - Phase 7 (not started; the owner starts it).
 
 ### Later phases: decisions still open (ask when you get there)
