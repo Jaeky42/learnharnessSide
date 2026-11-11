@@ -99,10 +99,11 @@ async function mountTutor(dictation?: FakeDictation) {
 	await act(async () => new Promise((r) => setTimeout(r, 20)));
 	return Object.assign(host, { rerender: render });
 }
+/** Minimizes the window and returns the bubble, wherever it is drawn. */
 const minimize = async (host: HTMLElement) => {
 	await act(async () => (host.querySelector("[aria-label='Minimize the side tutor']") as HTMLElement).click());
 	await act(async () => new Promise((r) => setTimeout(r, 20)));
-	return host.querySelector("[data-testid='side-tutor-toggle']") as HTMLElement;
+	return document.querySelector("[data-testid='side-tutor-toggle']") as HTMLElement;
 };
 const styleOf = (el: HTMLElement) => el.getAttribute("style") ?? "";
 
@@ -210,25 +211,39 @@ describe("minimized", () => {
 		assert.equal(storage.get("lh:side-tutor:open"), "false");
 	});
 
-	it("sits at the lesson's bottom right, just above the question, wherever the window was", async () => {
+	it("is drawn inside the dock, just above the question bar's right end, wherever the window was", async () => {
 		// The window had been dragged to the top left.
 		storage.set("lh:side-tutor:pos", JSON.stringify({ left: 300, top: 90 }));
-		// The lesson ends 380 px from the window's right edge (the notes drawer
-		// is open), and the dock's top is at 640.
 		dockAt(640, 900);
 		const bubble = await minimize(await mountTutor());
 		assert.equal(bubble.getAttribute("data-place"), "above-dock");
-		assert.match(styleOf(bubble), /top:\s*576px/, "12 px above the dock, 52 px tall");
-		assert.match(styleOf(bubble), /right:\s*396px/, "16 px in from the lesson's right edge");
-		assert.doesNotMatch(styleOf(bubble), /left:/);
+		// Inside the dock: it moves with the bar by itself, with nothing to
+		// measure while the lesson scrolls or a question opens and folds.
+		assert.equal(bubble.parentElement, document.querySelector("[data-phone='dock']"));
+		assert.match(bubble.className, /\babsolute\b/);
+		assert.match(bubble.className, /pointer-events-auto/);
+		assert.doesNotMatch(bubble.className, /\bfixed\b/);
+		// 8 px above the dock's top; its right edge on the bar's (the dock's
+		// centred 46rem column, 1rem in).
+		assert.match(styleOf(bubble), /bottom:\s*calc\(100% \+ 8px\)/);
+		assert.match(styleOf(bubble), /right:\s*calc\(max\(0px, \(100% - 46rem\) \/ 2\) \+ 1rem\)/);
+		assert.doesNotMatch(styleOf(bubble), /top:|left:/);
 	});
 
 	it("moves under the top bar while an opened question leaves no room above it", async () => {
 		dockAt(110, 1280);
-		const bubble = await minimize(await mountTutor());
+		const host = await mountTutor();
+		const bubble = await minimize(host);
 		assert.equal(bubble.getAttribute("data-place"), "top");
+		assert.ok(host.contains(bubble), "not inside the dock");
+		assert.match(bubble.className, /\bfixed\b/);
 		assert.match(styleOf(bubble), /top:\s*72px/);
 		assert.match(styleOf(bubble), /right:\s*16px/);
+		// With the notes drawer open, the lesson ends 380 px from the window's edge.
+		for (const dock of [...document.querySelectorAll("[data-phone='dock']")]) dock.remove();
+		dockAt(110, 900);
+		await act(async () => new Promise((r) => setTimeout(r, 650)));
+		assert.match(styleOf(document.querySelector("[data-testid='side-tutor-toggle']") as HTMLElement), /right:\s*396px/);
 	});
 
 	it("opens the window again where it was left", async () => {
@@ -237,6 +252,7 @@ describe("minimized", () => {
 		const host = await mountTutor();
 		const bubble = await minimize(host);
 		await act(async () => bubble.click());
+		assert.equal(document.querySelector("[data-testid='side-tutor-toggle']"), null);
 		const panel = host.querySelector("[data-testid='side-tutor']") as HTMLElement;
 		assert.match(styleOf(panel), /left:\s*300px/);
 		assert.match(styleOf(panel), /top:\s*90px/);

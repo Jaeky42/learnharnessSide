@@ -9,10 +9,13 @@
  *
  * Built for the phone (cloud sync Phase 3); the computer's minimized tutor
  * uses it too since the owner asked for the same bubble there. On a
- * computer the lesson doesn't reach the window's right edge when the notes
- * drawer is open, so the hook also says how far the lesson's right edge is
- * from the window's (`right`). The phone ignores that: its CSS places the
- * bubble sideways.
+ * computer the bubble is drawn INSIDE the dock (components/side-tutor.tsx),
+ * so it keeps its place against the question bar exactly, through every
+ * fold and resize; from this hook it takes the dock element (`dock`) and
+ * whether there is room above it (`place`). For the place under the top
+ * bar it also needs how far the lesson's right edge is from the window's
+ * (`right`), which isn't 0 while the notes drawer is open. The phone
+ * ignores both: its CSS places the bubble sideways.
  *
  * The position is a distance from the TOP of the screen: on an iPhone the
  * on-screen keyboard covers the bottom edge, so "from the bottom" would put
@@ -37,23 +40,24 @@ export function dockAnchor(dockTop: number | null): DockAnchor {
 	return { place: "above-dock", top };
 }
 
-/** The bubble's place, plus the lesson's right edge measured from the
- *  window's right edge (0 while the lesson reaches it, or isn't known). */
-export type PlacedAnchor = DockAnchor & { right: number };
+/** The bubble's place, plus the dock itself and the lesson's right edge
+ *  measured from the window's right edge (0 while the lesson reaches it,
+ *  or isn't known). */
+export type PlacedAnchor = DockAnchor & { right: number; dock: HTMLElement | null };
 
 function same(a: PlacedAnchor, b: PlacedAnchor): boolean {
-	return a.right === b.right && a.place === b.place && (a.place === "top" || (b.place === "above-dock" && a.top === b.top));
+	return a.dock === b.dock && a.right === b.right && a.place === b.place && (a.place === "top" || (b.place === "above-dock" && a.top === b.top));
 }
 
 export function useDockAnchor(active: boolean): PlacedAnchor {
-	const [anchor, setAnchor] = useState<PlacedAnchor>({ place: "top", right: 0 });
+	const [anchor, setAnchor] = useState<PlacedAnchor>({ place: "top", right: 0, dock: null });
 	useEffect(() => {
 		if (!active) return;
 		let frame = 0;
 		let observed: Element | null = null;
 		const ro = new ResizeObserver(() => schedule());
 		const measure = () => {
-			const dock = document.querySelector('[data-phone="dock"]');
+			const dock = document.querySelector<HTMLElement>('[data-phone="dock"]');
 			if (dock !== observed) {
 				if (observed) ro.unobserve(observed);
 				if (dock) ro.observe(dock);
@@ -64,7 +68,7 @@ export function useDockAnchor(active: boolean): PlacedAnchor {
 			// becomes the frame.
 			const bodyTop = document.body.dataset.lhKeyboard !== undefined ? document.body.getBoundingClientRect().top : 0;
 			const box = dock?.getBoundingClientRect() ?? null;
-			const next: PlacedAnchor = { ...dockAnchor(box ? box.top - bodyTop : null), right: box ? Math.max(0, Math.round(window.innerWidth - box.right)) : 0 };
+			const next: PlacedAnchor = { ...dockAnchor(box ? box.top - bodyTop : null), right: box ? Math.max(0, Math.round(window.innerWidth - box.right)) : 0, dock };
 			setAnchor((prev) => (same(prev, next) ? prev : next));
 		};
 		const schedule = () => {

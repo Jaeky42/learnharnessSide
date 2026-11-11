@@ -14,6 +14,7 @@
  */
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { ArrowUpIcon, GripHorizontalIcon, MessageCircleQuestionIcon, MinusIcon, SquareIcon, Trash2Icon } from "lucide-react";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { BrailleSpinner } from "@/components/braille-spinner";
@@ -32,9 +33,15 @@ import {
 	type SideTutorWireEvent,
 } from "@/src/core";
 
-/** The minimized bubble on a computer: its gap from the lesson's right edge,
- *  and its place under the top bar while an opened question leaves no room
- *  above the dock (the phone's own values are in app/phone.css). */
+/** The minimized bubble on a computer (the phone's own values are in
+ *  app/phone.css). It sits just above the question bar, its right edge on
+ *  the bar's: the bar is the dock's centred column (chat.tsx DOCK:
+ *  max-w-[46rem], px-4), so that edge is a fixed distance in from the
+ *  dock's own. */
+const BUBBLE_BAR_GAP = 8;
+const BUBBLE_BAR_RIGHT = "calc(max(0px, (100% - 46rem) / 2) + 1rem)";
+/** While an opened question leaves no room above the bar: under the top bar,
+ *  this far in from the lesson's right edge. */
 const BUBBLE_EDGE_GAP = 16;
 const BUBBLE_TOP = 72;
 
@@ -302,13 +309,18 @@ export function SideTutor({ chatId, dictation }: { chatId: string; /** The page'
 	};
 
 	if (!open) {
-		return (
+		// On a computer the bubble is drawn inside the dock, above its top right
+		// (owner's ask): it then keeps its place against the question bar
+		// exactly, while the lesson scrolls and while a question opens or folds.
+		// With no room above an opened question it sits under the top bar.
+		const onDock = !phone && anchor.place === "above-dock" && anchor.dock !== null;
+		const bubble = (
 			<button
 				type="button"
 				data-testid="side-tutor-toggle"
-				// A round bubble at the lesson's bottom right, just above the dock,
-				// or in the top-right corner while an opened question leaves no
-				// room there. PHONE: app/phone.css sizes and places it sideways.
+				// PHONE: a round bubble above the dock, or in the top-right corner
+				// while an opened question fills the screen; app/phone.css sizes it
+				// and places it sideways.
 				data-phone="tutor-bubble"
 				data-place={anchor.place}
 				data-phone-place={phone ? anchor.place : undefined}
@@ -322,9 +334,15 @@ export function SideTutor({ chatId, dictation }: { chatId: string; /** The page'
 						? anchor.place === "above-dock"
 							? { top: anchor.top }
 							: {}
-						: { right: anchor.right + BUBBLE_EDGE_GAP, top: anchor.place === "above-dock" ? anchor.top : BUBBLE_TOP, WebkitAppRegion: "no-drag" }) as React.CSSProperties
+						: onDock
+							? { right: BUBBLE_BAR_RIGHT, bottom: `calc(100% + ${BUBBLE_BAR_GAP}px)`, WebkitAppRegion: "no-drag" }
+							: { right: anchor.right + BUBBLE_EDGE_GAP, top: BUBBLE_TOP, WebkitAppRegion: "no-drag" }) as React.CSSProperties
 				}
-				className="fixed z-30 flex size-13 items-center justify-center rounded-full border border-border bg-card/85 text-muted-foreground shadow-[0_6px_18px_rgb(0_0_0/0.35)] backdrop-blur transition-colors hover:bg-accent hover:text-foreground"
+				className={cn(
+					"z-30 flex size-13 items-center justify-center rounded-full border border-border bg-card/85 text-muted-foreground shadow-[0_6px_18px_rgb(0_0_0/0.35)] backdrop-blur transition-colors hover:bg-accent hover:text-foreground",
+					// The dock lets clicks through to the lesson; the bubble takes its own.
+					onDock ? "pointer-events-auto absolute" : "fixed",
+				)}
 				aria-label="Open the side tutor"
 			>
 				<MessageCircleQuestionIcon className="size-6" />
@@ -335,6 +353,7 @@ export function SideTutor({ chatId, dictation }: { chatId: string; /** The page'
 				)}
 			</button>
 		);
+		return onDock && anchor.dock ? createPortal(bubble, anchor.dock) : bubble;
 	}
 
 	return (
