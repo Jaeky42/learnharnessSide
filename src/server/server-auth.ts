@@ -45,6 +45,7 @@ import {
 } from "../core/server-auth.ts";
 import { readServerAuthState, updateServerAuthState } from "../store/server-auth.ts";
 import { loginPageHtml, setupPageHtml } from "./server-auth-pages.ts";
+import { bearerKey, findDevice, removeAllDevices, touchDevice } from "../core/sync/devices.ts";
 
 type Env = Record<string, string | undefined>;
 
@@ -120,7 +121,7 @@ function clearedCookie(): string {
 	return `${SESSION_COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
 }
 
-function json(body: unknown, status = 200, extra: Record<string, string> = {}): Response {
+export function json(body: unknown, status = 200, extra: Record<string, string> = {}): Response {
 	return Response.json(body, { status, headers: { ...NO_STORE, ...extra } });
 }
 
@@ -165,6 +166,10 @@ export function serverGate(input: GateInput): Response | null {
 	if (!serverModeEnabled(env)) return null;
 	const now = input.now ?? Date.now();
 	const isApi = input.pathname.startsWith("/api/");
+	// The desktop app's sync API (cloud sync Phase 5) has its own door: a
+	// device key, never the login cookie. Checked before the same-site rule,
+	// because the desktop's requests come from a program, not from a page.
+	if (isSyncPath(input.pathname)) return syncGate(input, now);
 	if (!sameOrigin(input.method, input.headers)) {
 		return json({ error: "This request must come from the LearnHarness site itself." }, 403);
 	}
@@ -187,6 +192,42 @@ export function serverGate(input: GateInput): Response | null {
 	return redirect(state.password ? "/login" : "/setup", input.url && publicUrl(input.url, input.headers, env));
 }
 
+export function isSyncPath(pathname: string): boolean {
+	return pathname === "/api/sync" || pathname.startsWith("/api/sync/");
+}
+
+/** Where a desktop app trades its pairing code for a key: no key yet. */
+const SYNC_PAIR_PATH = "/api/sync/pair";
+
+/**
+ * The sync API's gate. A paired desktop's key opens these paths and nothing
+ * else; a signed-in browser's cookie does NOT open them, so no page (ours or
+ * anyone's) can drive sync through the learner's login.
+ */
+function syncGate(input: GateInput, now: number): Response | null {
+	// A browser always names the site a cross-site request comes from.
+	const origin = input.headers.get("origin");
+	const host = input.headers.get("host");
+	let foreign = input.headers.get("sec-fetch-site") === "cross-site";
+	if (origin) {
+		try { foreign ||= new URL(origin).host !== host; } catch { foreign = true; }
+	}
+	if (foreign) return json({ error: "This request must come from a paired LearnHarness desktop app." }, 403);
+	if (input.pathname === SYNC_PAIR_PATH) return null;
+	let state: ServerAuthState;
+	try {
+		state = (input.readState ?? readServerAuthState)();
+	} catch {
+		return json({ error: "The server login file is damaged. Run reset-password on the server." }, 503);
+	}
+	const device = findDevice(state, bearerKey(input.headers));
+	if (!device) return json({ error: "This desktop app isn't paired with this server.", code: "not_paired" }, 401);
+	try {
+		updateServerAuthState((current) => ({ state: touchDevice(current, device.id, now), result: undefined }));
+	} catch { /* last-seen time is cosmetic */ }
+	return null;
+}
+
 function touchStored(sessionId: string, now: number): void {
 	try {
 		updateServerAuthState((state) => ({ state: touchSession(state, sessionId, now), result: undefined }));
@@ -195,7 +236,7 @@ function touchStored(sessionId: string, now: number): void {
 
 // ─── Pages ───────────────────────────────────────────────────────────────────
 
-function signedIn(request: Request, state: ServerAuthState, now: number): SessionRecord | null {
+export function signedIn(request: Request, state: ServerAuthState, now: number): SessionRecord | null {
 	return findSession(state, readSessionCookie(request.headers), now);
 }
 
@@ -216,7 +257,7 @@ export function setupPageResponse(request: Request): Response {
 
 // ─── API routes ──────────────────────────────────────────────────────────────
 
-async function readBody(request: Request): Promise<Record<string, unknown> | null> {
+export async function readBody(request: Request): Promise<Record<string, unknown> | null> {
 	if (request.headers.get("content-type")?.split(";")[0]?.trim() !== "application/json") return null;
 	const text = await request.text();
 	if (text.length > 8192) return null;
@@ -231,11 +272,11 @@ async function readBody(request: Request): Promise<Record<string, unknown> | nul
 /** A login-type request ends with a new session token or an error to show. */
 type Outcome = { status: number; error: string } | { status: 200; token: string };
 
-function lockedMessage(ms: number): string {
+export function lockedMessage(ms: number): string {
 	return `Too many attempts. Try again in ${formatWait(ms)}.`;
 }
 
-function notFound(): Response {
+export function notFound(): Response {
 	return json({ error: "Not found." }, 404);
 }
 
@@ -310,7 +351,12 @@ export function accountResponse(request: Request, now = Date.now()): Response {
 	const devices = liveSessions(state, now)
 		.sort((a, b) => b.lastSeenAt - a.lastSeenAt)
 		.map((s) => ({ id: s.id, label: s.label, createdAt: s.createdAt, lastSeenAt: s.lastSeenAt, expiresAt: s.expiresAt, current: s.id === current.id }));
-	return json({ devices });
+	// Paired desktop apps (cloud sync Phase 5). The key itself is never sent.
+	const desktops = state.devices
+		.slice()
+		.sort((a, b) => b.pairedAt - a.pairedAt)
+		.map((d) => ({ id: d.id, name: d.name, pairedAt: d.pairedAt, lastSeenAt: d.lastSeenAt }));
+	return json({ devices, desktops });
 }
 
 /** POST {current, next}: change the password; other devices are signed out. */
@@ -332,7 +378,8 @@ export async function changePasswordResponse(request: Request, now = Date.now())
 		}
 		const problem = passwordProblem(body.next);
 		if (problem) return { state: null, result: { status: 400, error: problem } };
-		const next = removeOtherSessions({ ...clearFailures(state, address), password: hashPassword(body.next as string) }, session.id);
+		// Other devices are signed out, paired desktop apps included (owner's rule).
+		const next = removeAllDevices(removeOtherSessions({ ...clearFailures(state, address), password: hashPassword(body.next as string) }, session.id));
 		return { state: next, result: { status: 200, error: "" } };
 	});
 	return outcome.status === 200 ? json({ ok: true }) : json({ error: outcome.error }, outcome.status);
@@ -344,7 +391,7 @@ export async function signOutEverywhereResponse(request: Request, now = Date.now
 	const token = readSessionCookie(request.headers);
 	const ok = updateServerAuthState((state) => {
 		if (!findSession(state, token, now)) return { state: null, result: false };
-		return { state: removeOtherSessions(state, null), result: true };
+		return { state: removeAllDevices(removeOtherSessions(state, null)), result: true };
 	});
 	if (!ok) return json({ error: "Sign in to LearnHarness first." }, 401);
 	return json({ ok: true }, 200, { "Set-Cookie": clearedCookie() });

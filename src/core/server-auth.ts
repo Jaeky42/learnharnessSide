@@ -69,6 +69,25 @@ export interface LockoutRecord {
 	lastFailureAt: number;
 }
 
+/** A paired desktop app (cloud sync Phase 5, src/core/sync/devices.ts). Its
+ *  key opens only the sync API; only the key's SHA-256 is stored. */
+export interface DeviceRecord {
+	/** Chosen by the desktop and kept across re-pairing ("dev_" + 16 hex). */
+	id: string;
+	name: string;
+	/** SHA-256 (hex) of the device key. */
+	keyHash: string;
+	pairedAt: number;
+	lastSeenAt: number;
+}
+
+/** The one pairing code that is waiting to be typed into a desktop app. */
+export interface PairingRecord {
+	/** SHA-256 (hex) of the normalized code. */
+	codeHash: string;
+	expiresAt: number;
+}
+
 export interface ServerAuthState {
 	version: typeof SERVER_AUTH_VERSION;
 	password: PasswordHash | null;
@@ -76,10 +95,13 @@ export interface ServerAuthState {
 	setupCodeHash: string | null;
 	sessions: SessionRecord[];
 	lockouts: Record<string, LockoutRecord>;
+	/** Paired desktop apps. Absent in files written before Phase 5. */
+	devices: DeviceRecord[];
+	pairing: PairingRecord | null;
 }
 
 export function emptyServerAuthState(): ServerAuthState {
-	return { version: SERVER_AUTH_VERSION, password: null, setupCodeHash: null, sessions: [], lockouts: {} };
+	return { version: SERVER_AUTH_VERSION, password: null, setupCodeHash: null, sessions: [], lockouts: {}, devices: [], pairing: null };
 }
 
 // ─── Passwords ───────────────────────────────────────────────────────────────
@@ -266,6 +288,7 @@ export function formatWait(ms: number): string {
 
 const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
 const isStr = (v: unknown): v is string => typeof v === "string" && v.length > 0;
+const isHash = (v: unknown): v is string => typeof v === "string" && /^[0-9a-f]{64}$/.test(v);
 
 /** Strict parse: anything malformed throws (the store refuses to guess). */
 export function parseServerAuthState(raw: unknown): ServerAuthState {
@@ -284,5 +307,13 @@ export function parseServerAuthState(raw: unknown): ServerAuthState {
 	for (const r of Object.values(value.lockouts)) {
 		if (!r || !isNum(r.failures) || !isNum(r.level) || !isNum(r.lockedUntil) || !isNum(r.lastFailureAt)) throw new Error("Invalid lockout.");
 	}
-	return { version: SERVER_AUTH_VERSION, password: password ?? null, setupCodeHash: value.setupCodeHash ?? null, sessions: value.sessions, lockouts: value.lockouts };
+	// Paired desktops (Phase 5). Files from before it have neither field.
+	const devices = value.devices ?? [];
+	if (!Array.isArray(devices)) throw new Error("Invalid devices.");
+	for (const d of devices) {
+		if (!d || !isStr(d.id) || !isStr(d.name) || !isHash(d.keyHash) || !isNum(d.pairedAt) || !isNum(d.lastSeenAt)) throw new Error("Invalid device.");
+	}
+	const pairing = value.pairing ?? null;
+	if (pairing !== null && (typeof pairing !== "object" || !isHash(pairing.codeHash) || !isNum(pairing.expiresAt))) throw new Error("Invalid pairing record.");
+	return { version: SERVER_AUTH_VERSION, password: password ?? null, setupCodeHash: value.setupCodeHash ?? null, sessions: value.sessions, lockouts: value.lockouts, devices, pairing };
 }

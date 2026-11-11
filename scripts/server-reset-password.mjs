@@ -41,7 +41,8 @@ export function serverLoginFile(env = process.env) {
 /** Write the reset state atomically at 0600 and return the new code. */
 export function resetServerPassword(file) {
 	const code = newSetupCode();
-	const state = { version: 1, password: null, setupCodeHash: setupCodeHash(code), sessions: [], lockouts: {} };
+	// Paired desktop apps go too (cloud sync Phase 5): a reset unpairs every device.
+	const state = { version: 1, password: null, setupCodeHash: setupCodeHash(code), sessions: [], lockouts: {}, devices: [], pairing: null };
 	fs.mkdirSync(path.dirname(file), { recursive: true });
 	const tmp = `${file}.tmp-${randomUUID()}`;
 	const fd = fs.openSync(tmp, "wx", 0o600);

@@ -1,6 +1,6 @@
 # Cloud sync: approved plan
 
-Status: **Phases 1–4 done (server mode, sign-in on the server, phone layouts, the Obsidian vault on the server). Phase 5 (the sync engine) is designed and waiting for the owner to approve its plan; nothing of it is built.** Work happens on a separate branch. It merges into `side-tutor` only once the whole feature works and the owner approves the merge, because every push to `side-tutor` publishes a release. Change these decisions only with the owner's approval.
+Status: **Phases 1–4 done (server mode, sign-in on the server, phone layouts, the Obsidian vault on the server). Phase 5 (the sync engine) is approved and being built in slices; slice 1 of 6 is done.** Work happens on a separate branch. It merges into `side-tutor` only once the whole feature works and the owner approves the merge, because every push to `side-tutor` publishes a release. Change these decisions only with the owner's approval.
 
 Goal: keep learning progress on several devices. The Windows desktop app stays fully usable, works offline, and keeps the Obsidian connection. A phone uses LearnHarness from the browser.
 
@@ -439,7 +439,7 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 
 ### Next: Phase 5, the sync engine
 
-**Nothing of Phase 5 is built. Its design questions are answered ("Phase 5 decisions" below), and the phase plan is with the owner for approval.** No sync code exists yet. Don't build until the owner approves the plan page; then record its "smaller rules" here too.
+**The owner approved the Phase 5 plan page.** It is being built in six slices ("Build order" below). Built so far: slice 1 (pairing, device keys, the version check); see "Phase 5: what is built".
 
 #### Phase 5 decisions (owner, asked one at a time)
 
@@ -463,6 +463,42 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 13. **Graph deletions: repeat the action.** The server keeps one ordered log of graph changes. A deletion is logged as what was done ("delete session X with its concepts", "delete node N", the chain clean-up) and each device runs it on its own graph. A rewrite the engine doesn't recognise is logged as its exact result (which lines went or changed), so nothing is skipped.
 14. **Protocol version:** starts at 1 and rises only when a release changes the wire format, a stored format that syncs, or the replayed deletion rules. The two sides must be equal or sync pauses. Messages: "Update the server to continue syncing" (server behind) and "Update LearnHarness to continue syncing" (app behind).
 15. **Vault folders:** at each sync the desktop sends the names of its vault's top-level folders (names only), and the server adds them to the folders it leaves out.
+
+#### Smaller rules (proposed in the plan page, approved with it)
+
+- **Pairing code:** 8 characters shown as `XXXX-XXXX`, the setup code's alphabet. Wrong codes count toward the same pause as wrong passwords (5 tries, then 15 minutes).
+- **Address:** the desktop only connects to an `https://` address (plain `http` only for this machine itself, which is how two copies run side by side in tests).
+- **The device key on the PC:** `cloud-sync.json` beside `auth.json`, mode 0600, never synced, refused by the agents' file tools.
+- **Online** means the server heard from the device in the last 30 seconds (three missed checks).
+- **At most 10** paired desktops.
+- **New sessions** belong to the device that created them; one created offline goes up at reconnect. Practice sessions follow the same lease rule.
+- **What a discard removes:** the session's turns that never reached the server, counted as the messages the learner sent, plus graph knowledge extracted from that session and not yet sent. The new holder extracts again where needed.
+- **Helpers restart** only on the device that holds the session. A helper needs its model set up there; otherwise the lesson shows the existing "needs setup" state.
+- **Pictures in a session** are sent once, not with every send of the session.
+- **Clock differences:** the server corrects for a PC clock that is off before deciding which settings change is the latest.
+- **Imported-file records and graph positions** sync one item at a time, latest wins. An imported file's path stays the path on the device that imported it.
+- **Backup contents:** sessions, graph, side-tutor threads, helper jobs, settings, prompt overrides and the notes home-folder records.
+- **While sync is paused** (versions differ, or unpaired) nothing is discarded; it resumes where it stopped.
+- **Device names and the wording of every message** ("Held by Desktop", the warning, the heads-up, the notice) are asked in Phase 6 with the screens. Phase 5 stores a name per device and the facts each message needs.
+
+#### Phase 5: what is built
+
+**Slice 1: pairing, device keys, the version check**
+
+- **On the server** (server mode only; everything answers 404 without it):
+  - `POST /api/server-auth/desktops` (a signed-in browser): `{op:"code"}` returns a pairing code and when it runs out; `{op:"remove", id}` unpairs one desktop. `GET /api/server-auth/account` now also returns `desktops` (id, name, paired and last-seen times; never a key).
+  - `POST /api/sync/pair` (a desktop app): `{code, deviceId, name}` returns the device key, once.
+  - `POST /api/sync/hello` (a paired desktop): the protocol check; answers the server's clock too.
+  - Paired desktops and the waiting code live in `server-login.json` (`devices`, `pairing`), as hashes. `reset-password` writes a fresh file, which unpairs every desktop.
+- **The gate** (`syncGate` in `src/server/server-auth.ts`): `/api/sync/*` opens to a device key in `Authorization: Bearer …` and to nothing else. The login cookie does **not** open it, and a device key opens no other path. A request that names another site (`Origin`, or `Sec-Fetch-Site: cross-site`) is refused. `/api/sync/pair` passes the gate without a key; its route checks the code and the lockout.
+- **The version rule** (`src/core/sync/protocol.ts`): the desktop sends `x-lh-sync-protocol` on every request. Unequal → 409 `protocol_mismatch` with the server's number; the desktop then shows the approved sentence for the side that is behind. A server too old to have the sync API at all counts as behind.
+- **On the desktop** (`src/server/sync/client.ts`): `pairWithServer`, `contactServer`, and `syncRequest`, the one function every later sync request goes through. It handles the three shared outcomes: the server unpaired this desktop (the key is dropped, the device id and address kept, so a new code reconnects it as the same device), the versions differ (paused), the server can't be reached (offline; never unpairs).
+  - `GET /api/cloud` returns this copy's state: `off` (never paired), `starting`, `ok`, `offline`, `paused` (with the sentence), `needs-pairing`. `POST /api/cloud` takes `{op:"pair", server, code, name}` and `{op:"check"}`. On the cloud server `GET` answers `{role:"server"}` and `POST` 404. Phase 6's screens will call this; nothing calls it yet.
+  - A desktop sends its device id only to the server it was paired with; another address gets a fresh id.
+- **Nothing runs where nothing is paired:** an app with no `cloud-sync.json` makes no request and writes no file.
+- **Wording added while building, for the owner to review in Phase 6** (it is only reachable through the API today): "That pairing code isn't right, or it has run out. Get a new one from the server's site.", "This server already has 10 desktop apps paired. Remove one first.", "This server isn't set up yet. Open its site and choose a password first.", "That desktop app isn't paired any more.", "This desktop app isn't paired with this server.", "Couldn't reach that server. Check the address and your connection.", "That address didn't answer like a LearnHarness server.", "Enter your server's address.", "The server's address must start with https://", "Give this desktop a name of up to 40 characters.", "Enter the pairing code from the server's site."
+- **Code:** `src/core/sync/{protocol,devices,address}.ts`, `src/store/sync/pairing.ts`, `src/server/sync/{http,client,cloud-http}.ts`, `app/api/sync/{pair,hello}`, `app/api/server-auth/desktops`, `app/api/cloud`; changes in `src/core/server-auth.ts` (the state's `devices` and `pairing`), `src/server/server-auth.ts` (the gate, the account data, unpairing on a password change and Sign out everywhere), `src/agent/tools/fs-shared.ts`, `scripts/server-reset-password.mjs`.
+- **Tests:** `tests/sync-pairing.test.ts`. One process plays both sides: the desktop's client is given a `fetch` that delivers to the server's gate and routes.
 
 #### What the investigation found (for whoever builds it)
 
