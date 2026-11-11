@@ -541,6 +541,36 @@ describe("Obsidian sync manager with the real ob program", { skip: realOb ? fals
 		assert.deepEqual([...again.view().leftOut].sort(), ["Projects, old", "Recipes", "Untitled"]);
 	});
 
+	it("cloud sync: folder names a paired desktop sent are left out before any of their files arrive", async () => {
+		const w = world("announced");
+		w.addRemote(...SEED, ["Journal", null], ["Journal/Monday.md", "dear diary\n"]);
+		// What the desktop's vault has at its top level: names only. The notes
+		// folder and dot-folders are in that list too, and are never left out.
+		const announced = ["Journal", "LearnHarness", "Projects, old", "Untitled", ".obsidian"];
+		w.deps.announcedFolders = () => announced;
+		const m = start(w);
+		await m.boot();
+		await m.signIn("learner@example.invalid", "right password", "");
+		assert.deepEqual(await m.connect("vault1", "vault password"), { ok: true });
+		await until(() => m.view().sync === "up-to-date", "the first download");
+		assert.deepEqual([...m.view().leftOut].sort(), ["Journal", "Projects, old", "Untitled"]);
+		assert.equal(fs.readFileSync(w.inVault("LearnHarness", "Calculus.md"), "utf8"), "# Calculus\n");
+		// Not even the stray file or two that arrive when a folder is only noticed as it shows up.
+		for (const folder of ["Journal", "Untitled", "Projects, old"]) assert.equal(fs.existsSync(w.inVault(folder)), false, folder);
+		assert.equal(w.spawned.filter((args) => args[0] === "sync").length, 1, "ob never had to be stopped to leave a folder out");
+
+		// While ob runs, the desktop reports a new folder: ob restarts once, before the folder's files exist anywhere.
+		announced.push("Recipes");
+		m.foldersAnnounced();
+		await until(() => m.view().leftOut.includes("Recipes") && m.view().sync === "up-to-date", "the announced folder to be left out");
+		m.foldersAnnounced();
+		w.addRemote(["Recipes", null], ["Recipes/Soup.md", "soup\n"], ["LearnHarness/Chemistry.md", "# Chemistry\n"]);
+		await until(() => fs.existsSync(w.inVault("LearnHarness", "Chemistry.md")) && m.view().sync === "up-to-date", "the note to arrive");
+		assert.equal(fs.existsSync(w.inVault("Recipes")), false);
+		assert.equal(w.spawned.filter((args) => args[0] === "sync").length, 2);
+		assert.equal(w.readRemote().records.some((r) => r.deleted || r.device === "LearnHarness server"), false, "nothing was uploaded or deleted");
+	});
+
 	it("restarts ob after a crash and reports a crash loop", async () => {
 		const w = world("crash");
 		w.addRemote(...SEED);

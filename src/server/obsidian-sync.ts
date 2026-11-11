@@ -66,6 +66,8 @@ import {
 } from "../core/obsidian-sync.ts";
 import { EMPTY_OBSIDIAN_RECORD, obConfigDir, obsidianSyncFiles, obsidianVaultDir, type ObsidianSyncFiles, type ObsidianSyncRecord } from "../store/obsidian-sync.ts";
 import { notesStore } from "../store/notes.ts";
+import { announcedVaultFolders } from "../store/sync/vault-folders.ts";
+import { PATHS } from "../../config.ts";
 
 const MAX_OUTPUT = 256 * 1024;
 const SIGN_IN_AGAIN = "Sign in to Obsidian again.";
@@ -83,6 +85,9 @@ export interface ObsidianSyncDeps {
 	notes: { setVault: (dir: string) => void; clearVault: () => void };
 	now: () => number;
 	log: (message: string) => void;
+	/** Cloud sync: top-level folder names a paired desktop's vault has. They are
+	 *  left out like folders found here, before any of their files arrive. */
+	announcedFolders?: () => string[];
 	timing: {
 		restartBaseMs: number;
 		restartMaxMs: number;
@@ -122,6 +127,7 @@ function defaultDeps(): ObsidianSyncDeps {
 		notes: { setVault: (dir) => { notesStore.setVault(dir); }, clearVault: () => notesStore.clearVault() },
 		now: Date.now,
 		log: (message) => console.log(`[LearnHarness] Obsidian sync: ${message}`),
+		announcedFolders: () => announcedVaultFolders(path.join(/* turbopackIgnore: true */ PATHS.data, "sync")),
 		timing: { restartBaseMs: OB_RESTART_BASE_MS, restartMaxMs: OB_RESTART_MAX_MS, scanMs: 10_000, commandMs: 120_000, stopMs: 10_000, installPollMs: 15_000, lockMs: OB_LOCK_WAIT_MS, offlineGraceMs: 60_000 },
 	};
 }
@@ -509,7 +515,7 @@ export function createObsidianSync(deps: ObsidianSyncDeps = defaultDeps()) {
 			record = { ...record, connectedAt: deps.now(), notesSeen: notesNow, firstSyncDone: remembered && notesNow > 0 };
 			saveRecord();
 		}
-		if (!(await leaveOut(foldersToLeaveOut(deps.files.topLevelFolders(deps.vaultDir), leftOut)))) {
+		if (!(await leaveOut(foldersToLeaveOut([...deps.files.topLevelFolders(deps.vaultDir), ...(deps.announcedFolders?.() ?? [])], leftOut)))) {
 			deps.log("couldn't update the excluded folders; trying again shortly");
 			scheduleRestart();
 			return;
@@ -779,6 +785,16 @@ export function createObsidianSync(deps: ObsidianSyncDeps = defaultDeps()) {
 	/** The learner changed the notes here on purpose (a delete in the notes
 	 *  drawer): the safety check's baseline follows, whether ob is running or
 	 *  not, so a deliberate clear-out is never taken for the notes going missing. */
+	/** Cloud sync: a desktop sent folder names. While ob runs, it is stopped
+	 *  once to leave the new ones out; otherwise they are picked up at its next start. */
+	function foldersAnnounced(): void {
+		if (!child || stopReason) return;
+		const found = foldersToLeaveOut(deps.announcedFolders?.() ?? [], [...leftOut, ...waitingToLeaveOut]);
+		if (!found.length) return;
+		for (const name of found) waitingToLeaveOut.add(name);
+		void stopChild("leave-out");
+	}
+
 	function notesChangedHere(): void {
 		if (!ready || !vault || !recordLoaded) return;
 		const notes = deps.files.countNotes(deps.vaultDir);
@@ -792,7 +808,7 @@ export function createObsidianSync(deps: ObsidianSyncDeps = defaultDeps()) {
 		return ready && vault?.name ? vault.name : null;
 	}
 
-	return { boot, view, notesSync, vaultName, notesChangedHere, signIn, signOut, vaults, connect, disconnect, retry, shutdown, settled: () => chain.then(() => undefined) };
+	return { boot, view, notesSync, vaultName, notesChangedHere, foldersAnnounced, signIn, signOut, vaults, connect, disconnect, retry, shutdown, settled: () => chain.then(() => undefined) };
 }
 
 export type ObsidianSync = ReturnType<typeof createObsidianSync>;

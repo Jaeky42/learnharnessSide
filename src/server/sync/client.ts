@@ -34,12 +34,14 @@ interface LinkState {
 	pause: Extract<ProtocolVerdict, { ok: false }> | null;
 	/** How far the server's clock is ahead of this PC's, in ms (for "latest change wins"). */
 	clockOffsetMs: number;
+	/** Has the offset been measured since the app started? */
+	clockMeasured: boolean;
 }
 
 const globals = globalThis as typeof globalThis & { __lhCloudLink?: LinkState };
 
 function link(): LinkState {
-	return (globals.__lhCloudLink ??= { lastContactAt: null, offline: false, pause: null, clockOffsetMs: 0 });
+	return (globals.__lhCloudLink ??= { lastContactAt: null, offline: false, pause: null, clockOffsetMs: 0, clockMeasured: false });
 }
 
 /** Tests start from a clean slate. */
@@ -89,6 +91,11 @@ export function activePairing(): (CloudPairing & { key: string }) | null {
 
 export function serverClockOffsetMs(): number {
 	return link().clockOffsetMs;
+}
+
+/** The same, or null when it hasn't been measured since the app started. */
+export function measuredClockOffsetMs(): number | null {
+	return link().clockMeasured ? link().clockOffsetMs : null;
 }
 
 export type SyncReply<T> =
@@ -167,6 +174,7 @@ export async function syncRequest<T = Record<string, unknown>>(
 	if (typeof body.time === "number") {
 		// Halfway through the round trip is the best guess at "the same moment".
 		state.clockOffsetMs = Math.round(body.time - (sentAt + state.lastContactAt) / 2);
+		state.clockMeasured = true;
 	}
 	return { ok: true, body: body as T };
 }

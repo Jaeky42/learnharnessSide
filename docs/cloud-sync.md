@@ -1,6 +1,6 @@
 # Cloud sync: approved plan
 
-Status: **Phases 1–4 done (server mode, sign-in on the server, phone layouts, the Obsidian vault on the server). Phase 5 (the sync engine) is approved and being built in slices; slices 1 to 4 of 6 are done.** Work happens on a separate branch. It merges into `side-tutor` only once the whole feature works and the owner approves the merge, because every push to `side-tutor` publishes a release. Change these decisions only with the owner's approval.
+Status: **Phases 1–4 done (server mode, sign-in on the server, phone layouts, the Obsidian vault on the server). Phase 5 (the sync engine) is approved and being built in slices; slices 1 to 5 of 6 are done.** Work happens on a separate branch. It merges into `side-tutor` only once the whole feature works and the owner approves the merge, because every push to `side-tutor` publishes a release. Change these decisions only with the owner's approval.
 
 Goal: keep learning progress on several devices. The Windows desktop app stays fully usable, works offline, and keeps the Obsidian connection. A phone uses LearnHarness from the browser.
 
@@ -439,7 +439,7 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 
 ### Next: Phase 5, the sync engine
 
-**The owner approved the Phase 5 plan page.** It is being built in six slices ("Build order" below). Built so far: slices 1 to 4 (pairing and the version check; sessions and leases; take-over; the graph log); see "Phase 5: what is built".
+**The owner approved the Phase 5 plan page.** It is being built in six slices ("Build order" below). Built so far: slices 1 to 5 (pairing and the version check; sessions and leases; take-over; the graph log; settings and the other small files); see "Phase 5: what is built".
 
 #### Phase 5 decisions (owner, asked one at a time)
 
@@ -563,6 +563,38 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 - **`POST /api/cloud {op:"sync"}`** now answers `{round: {sessions, graph}}` (`src/server/sync/round.ts`).
 - **Tests:** `tests/sync-graph.test.ts` (the rules, with each side's graph in memory and real log files), `tests/sync-graph-wiring.test.ts` (the real ledger files and the app's real deletion entry points, this process as the server).
 - **Real run:** two built copies with the test library on the desktop and two concepts on the server: first sync (ledgers identical on both), a concept deleted on each side, and a session deleted with its concepts.
+
+**Slice 5: settings and the other small files**
+
+- **What travels, one item at a time** (`src/core/sync/maps.ts`; the key's first letter says what it is):
+  - `s|…` the synced settings from `settings.json`, each on its own: the approved list (`SYNCED_SETTINGS`), plus every tool switch and every prompt switch (`SYNCED_SETTING_MAPS`). **Nothing else in `settings.json` is ever read or written by sync**: a request that names any other setting is refused whole.
+  - `p|…` prompt override texts (`prompts/**`);
+  - `r|…` the graph view's sliders, one field each (`graph/render-settings.json`);
+  - `f|…` and `o|…` chains-view folders and where each source is filed (`graph/source-organization.json`);
+  - `n|…` imported-file records (`graph/sources.json`); the file path in a record stays the importing device's;
+  - `x|…` node places (`graph/positions.json`).
+- **No hook in any write path.** Each side compares its files with what it last agreed on, whenever a round runs. That also catches a file edited by hand. The files are read and written through the app's own stores (`src/server/sync/map-views.ts`), so a value passes the same sanitizers as one set in the app.
+- **Latest change wins, on the server's clock.**
+  - A change found in a file gets that file's own modified time (never later than now). A desktop adds the difference between its clock and the server's, measured on every answer and remembered for when it is offline.
+  - A desktop notes its changes with their times while it is offline or paused (`detect()`), so a change made on Monday is still Monday's when it reconnects on Wednesday.
+  - A time from the future is cut back to the server's "now".
+- **One exchange** (`POST /api/sync/maps`): the desktop sends its changes and its place in the server's counter; the server takes each one newer than what it has and answers with everything changed since that place (and, for each item the desktop sent, either "same" or what the server has instead).
+- **A desktop's first sync** (owner: "where the two sides differ, the desktop's value is kept"):
+  - an item both sides have, with different values: the desktop's;
+  - a synced **setting** the server has set and the desktop hasn't: it goes back to its default on the server too (not set is the desktop's value);
+  - everything else is joined: a folder, a prompt text, an imported-file record or a node place that only one side has is kept on both.
+  - **Read this way while building, for the owner to review:** the rule is applied at each desktop's first sync with a server, so a second desktop's settings would replace the first's; and a prompt text that only the server has is kept, with its switch off (the desktop's value).
+- **A file that is there but can't be read is left alone**, on both sides: its items are neither sent, taken nor deleted that round. Reading a damaged `settings.json` as "no settings" would have reset the other side's.
+- **Chains-view folders changed on two devices at once** are made whole after every change that arrives (`withOrganizationItems`): a folder whose parent is gone, or that would sit inside itself, moves to the top; a source filed in a missing folder is unfiled. The same on every device.
+- **A value a file adjusts on the way in** (the settings sanitizer clamps a number, say) is recorded as adjusted and sent back once; it doesn't bounce.
+- **A server that lost its records** answers `409 send_all`; the desktop then sends everything once, as at a first sync.
+- **An open page** shows a setting that arrived by sync the next time it loads its settings; the chains view updates at once (`sources-changed`).
+- **The vault's folder names** (decision 15): with a round, when the list changed, the desktop sends the names of its vault's top-level folders (`desktopVaultFolders`; names only, nothing inside them is opened; nothing is said while the vault is offline). The server keeps them in `<data>/sync/vault-folders.json`, and the Obsidian sync manager leaves them out like folders found on disk: at every start of `ob` (so before a first download), and at once if `ob` is running when a new name arrives (`foldersAnnounced`, one restart). The notes folder and dot-folders are never left out, whatever is sent.
+- **State:** `<data>/sync/maps.json` on the server (per item: a fingerprint, the time, the counter; never a value), `<data>/sync/maps-desktop.json` on a desktop. Neither exists before a desktop's first round.
+- **A round** is now sessions, then the graph, then these files: `{round: {sessions, graph, maps}}`.
+- **Code:** `src/core/sync/maps.ts`, `src/server/sync/{map-views,maps-sync,maps-engine}.ts`, `src/store/sync/vault-folders.ts`, `app/api/sync/maps`, and three small additions to `src/server/obsidian-sync.ts`.
+- **Tests:** `tests/sync-maps.test.ts` (the rules; each side's files in memory, real state files, PCs with wrong clocks), `tests/sync-maps-wiring.test.ts` (the real stores and files), and one more case in `tests/obsidian-sync.test.ts` (the real `ob`: announced folders are left out before any of their files arrive).
+- **Real run:** two built copies: a first sync (the desktop's settings on both, the server's model and font untouched, 371 node places and the sliders equal), a setting changed on each side, and a chains-view folder made on the server showing on the desktop.
 
 #### What the investigation found (for whoever builds it)
 

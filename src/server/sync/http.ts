@@ -14,6 +14,10 @@
  *   GET | PUT | DELETE /api/sync/sessions/<id>
  *                                    fetch a session's files, send them
  *                                    (the holder only), or delete it
+ *   POST /api/sync/sessions/<id>/take   ask for a session (slice 3)
+ *   GET | POST /api/sync/graph       the graph log (slice 4)
+ *   POST /api/sync/maps              settings and the other files that
+ *                                    sync one item at a time (slice 5)
  *
  * Everything answers 404 outside server mode. The gate for /api/sync/* is
  * syncGate in server-auth.ts: a device key, never the login cookie.
@@ -42,6 +46,7 @@ import { MAX_BUNDLE_BYTES } from "../../core/sync/sessions.ts";
 import { clientAddress, json, lockedMessage, notFound, readBody, serverModeEnabled, signedIn } from "../server-auth.ts";
 import { syncAuthority } from "./engine.ts";
 import { graphAuthority } from "./graph-engine.ts";
+import { mapsAuthority } from "./maps-engine.ts";
 
 const NOT_PAIRED = { error: "This desktop app isn't paired with this server.", code: "not_paired" } as const;
 
@@ -192,5 +197,15 @@ export async function graphLogResponse(request: Request): Promise<Response> {
 		return json(reply.body, reply.status);
 	}
 	const reply = graphAuthority().push(caller.id, await syncBody(request));
+	return json(reply.body, reply.status);
+}
+
+// ─── Settings and the other small files (slice 5) ────────────────────────────
+
+/** POST {cursor, all, changes, vaultFolders?}: one exchange of the files that sync item by item. */
+export async function mapsExchangeResponse(request: Request): Promise<Response> {
+	const caller = syncCaller(request);
+	if (caller instanceof Response) return caller;
+	const reply = mapsAuthority().exchange(caller.id, await syncBody(request));
 	return json(reply.body, reply.status);
 }

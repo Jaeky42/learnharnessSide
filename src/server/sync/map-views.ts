@@ -38,11 +38,17 @@ export interface MapSnapshot {
 	items: Map<string, MapItem>;
 	/** Kinds whose file is there but can't be read: left alone this round. */
 	unreadable: Set<MapKind>;
+	/** When each kind's file last changed: the time given to an item that went. */
+	fileTimes: Map<MapKind, number | null>;
 }
 
 export interface MapFiles {
 	read(): MapSnapshot;
-	/** Set items, or remove them (null). Keys of unreadable kinds must not be passed. */
+	/**
+	 * Set items, or remove them (null). Keys of unreadable kinds must not be
+	 * passed. A file that refuses the change keeps what it had; the caller
+	 * reads again to see what is really there.
+	 */
 	apply(changes: ReadonlyMap<string, unknown>): void;
 }
 
@@ -150,11 +156,13 @@ export const mapFiles: MapFiles = {
 	read() {
 		const items = new Map<string, MapItem>();
 		const unreadable = new Set<MapKind>();
+		const fileTimes = new Map<MapKind, number | null>();
 		for (const view of views) {
 			let found: Map<string, unknown> | null;
 			try { found = view.read(); } catch { found = null; }
 			if (!found) { for (const kind of view.kinds) unreadable.add(kind); continue; }
 			const mtime = mtimeOf(view.file);
+			for (const kind of view.kinds) fileTimes.set(kind, mtime);
 			for (const [key, value] of found) items.set(key, { value, mtime });
 		}
 		try {
@@ -165,17 +173,20 @@ export const mapFiles: MapFiles = {
 		} catch {
 			unreadable.add("p");
 		}
-		return { items, unreadable };
+		return { items, unreadable, fileTimes };
 	},
 	apply(changes) {
 		// Prompt texts first: a switch that arrives with its text finds the file there.
 		for (const [key, value] of changes) {
 			if (kindOf(key) !== "p") continue;
-			if (value === null) promptOverrides.deleteOverride(key.slice(2)); else promptOverrides.writeOverride(key.slice(2), String(value));
+			try {
+				if (value === null) promptOverrides.deleteOverride(key.slice(2)); else promptOverrides.writeOverride(key.slice(2), String(value));
+			} catch { /* kept as it was */ }
 		}
 		for (const view of views) {
 			const mine = new Map([...changes].filter(([key]) => view.kinds.includes(kindOf(key) as MapKind)));
-			if (mine.size > 0) view.apply(mine);
+			if (mine.size === 0) continue;
+			try { view.apply(mine); } catch { /* kept as it was */ }
 		}
 	},
 };
