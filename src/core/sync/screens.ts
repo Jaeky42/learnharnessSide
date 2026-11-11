@@ -148,3 +148,84 @@ export function takeOverWarning(title: string, holder: Pick<SessionHolder, "id" 
 		body: `${offline} may have turns that never reached the server. If you take over, those turns are discarded when ${holderName(holder)} is back online.`,
 	};
 }
+
+// ─── Slice 3: the desktop's own notices ─────────────────────────────────────
+
+/** What is off with this PC's sync. Never set on a PC that was never paired, or that the learner unpaired. */
+export type SyncTrouble = "offline" | "paused" | "needs-pairing";
+
+/** The sync chip at the foot of the session list (shown in capitals). */
+export const SYNC_CHIP_TEXT: Record<SyncTrouble, string> = {
+	offline: "Offline",
+	paused: "Sync paused",
+	"needs-pairing": "Not paired",
+};
+
+/** The heads-up strip in a session this PC can continue. */
+export const SYNC_TROUBLE_STRIP_TEXT: Record<SyncTrouble, string> = {
+	offline: "This PC can't reach the server. If this session is taken over on another device before it reconnects, what you add here now is discarded.",
+	paused: "Sync is paused. If this session is taken over on another device before sync is back, what you add here now is discarded.",
+	"needs-pairing": "This PC isn't paired any more. If this session is taken over on another device before you pair again, what you add here now is discarded.",
+};
+
+/** Quiet for short blips: the chip and the heads-up wait this long after the PC first fails to reach the server. */
+export const OFFLINE_QUIET_MS = 30_000;
+
+interface SyncFacts {
+	state: string;
+	lastContactAt: number | null;
+	offlineSince?: number | null;
+}
+
+/**
+ * How long until the chip and the heads-up should show, in ms: 0 = now,
+ * null = nothing is off. A paused or removed PC shows at once; an offline
+ * one after 30 seconds, or at once when the app started with no connection
+ * (it hasn't reached the server since it started).
+ */
+export function syncTroubleDueIn(sync: SyncFacts | null | undefined, now: number): { trouble: SyncTrouble; inMs: number } | null {
+	if (!sync) return null;
+	if (sync.state === "paused" || sync.state === "needs-pairing") return { trouble: sync.state, inMs: 0 };
+	if (sync.state !== "offline") return null;
+	if (sync.lastContactAt === null || typeof sync.offlineSince !== "number") return { trouble: "offline", inMs: 0 };
+	return { trouble: "offline", inMs: Math.max(0, sync.offlineSince + OFFLINE_QUIET_MS - now) };
+}
+
+export function syncTrouble(sync: SyncFacts | null | undefined, now: number): SyncTrouble | null {
+	const due = syncTroubleDueIn(sync, now);
+	return due && due.inMs === 0 ? due.trouble : null;
+}
+
+/** What a discarded session lost, as the notice says it. */
+export function discardedText(turns: number): string {
+	if (turns <= 0) return "Changes made here that hadn't reached the server were discarded.";
+	if (turns === 1) return "1 message you sent here never reached the server and was discarded.";
+	return `${turns} messages you sent here never reached the server and were discarded.`;
+}
+
+export const DISCARD_OK = "OK";
+
+/**
+ * The discard box: one session, or several at once (one box, one line per
+ * session). `before`, the lines and `after` read as one paragraph for a
+ * single session.
+ */
+export function discardBox(notices: ReadonlyArray<{ title: string; turns: number }>): { title: string; before: string; lines: string[]; after: string } | null {
+	if (notices.length === 0) return null;
+	const name = (title: string): string => title.trim() || "Untitled session";
+	if (notices.length === 1) {
+		const only = notices[0]!;
+		return {
+			title: `“${name(only.title)}” was taken over`,
+			before: "It was taken over on another device while this PC was offline.",
+			lines: [discardedText(only.turns)],
+			after: "The session now shows the server's version.",
+		};
+	}
+	return {
+		title: "Sessions were taken over",
+		before: "They were taken over on another device while this PC was offline.",
+		lines: notices.map((notice) => `“${name(notice.title)}”: ${discardedText(notice.turns)}`),
+		after: "The sessions now show the server's version.",
+	};
+}

@@ -30,6 +30,8 @@ interface LinkState {
 	lastContactAt: number | null;
 	/** The last attempt didn't reach the server. */
 	offline: boolean;
+	/** When the first attempt of this offline spell failed; null while the server answers. */
+	offlineSince: number | null;
 	/** Sync is paused because the two sides speak different protocol versions. */
 	pause: Extract<ProtocolVerdict, { ok: false }> | null;
 	/** How far the server's clock is ahead of this PC's, in ms (for "latest change wins"). */
@@ -41,7 +43,7 @@ interface LinkState {
 const globals = globalThis as typeof globalThis & { __lhCloudLink?: LinkState };
 
 function link(): LinkState {
-	return (globals.__lhCloudLink ??= { lastContactAt: null, offline: false, pause: null, clockOffsetMs: 0, clockMeasured: false });
+	return (globals.__lhCloudLink ??= { lastContactAt: null, offline: false, offlineSince: null, pause: null, clockOffsetMs: 0, clockMeasured: false });
 }
 
 /** Tests start from a clean slate. */
@@ -66,12 +68,18 @@ export interface CloudStatus {
 		/** The approved sentence when sync is paused for a version difference. */
 		message: string | null;
 		lastContactAt: number | null;
+		/**
+		 * Since when the server hasn't been reached, while it can't be (Phase 6:
+		 * the sync chip and the offline heads-up wait 30 seconds, so a short
+		 * blip shows nothing).
+		 */
+		offlineSince: number | null;
 	};
 }
 
 export function cloudStatus(): CloudStatus {
 	const pairing = readCloudPairing();
-	if (!pairing) return { role: "desktop", paired: false, server: null, device: null, sync: { state: "off", message: null, lastContactAt: null } };
+	if (!pairing) return { role: "desktop", paired: false, server: null, device: null, sync: { state: "off", message: null, lastContactAt: null, offlineSince: null } };
 	const state = link();
 	const syncState: CloudSyncState = !pairing.key ? (pairing.unpairedHere ? "unpaired" : "needs-pairing")
 		: state.pause ? "paused"
@@ -83,8 +91,13 @@ export function cloudStatus(): CloudStatus {
 		paired: pairing.key !== null,
 		server: pairing.server,
 		device: { id: pairing.deviceId, name: pairing.name },
-		sync: { state: syncState, message: state.pause?.message ?? null, lastContactAt: state.lastContactAt },
+		sync: { state: syncState, message: state.pause?.message ?? null, lastContactAt: state.lastContactAt, offlineSince: syncState === "offline" ? state.offlineSince : null },
 	};
+}
+
+function wentOffline(state: LinkState, at: number): void {
+	if (!state.offline || state.offlineSince === null) state.offlineSince = at;
+	state.offline = true;
 }
 
 /** The pairing when this app may sync right now, or null. */
@@ -141,7 +154,7 @@ export async function syncRequest<T = Record<string, unknown>>(
 			signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
 		});
 	} catch {
-		state.offline = true;
+		wentOffline(state, now());
 		return { ok: false, reason: "offline" };
 	}
 	let body: Record<string, unknown> = {};
@@ -153,10 +166,11 @@ export async function syncRequest<T = Record<string, unknown>>(
 	// Anything that isn't the server's own JSON (a proxy's error page, a
 	// captive portal) counts as not reaching it.
 	if (response.status >= 500 || (!response.ok && code === null && typeof body.error !== "string")) {
-		state.offline = true;
+		wentOffline(state, now());
 		return { ok: false, reason: "offline" };
 	}
 	state.offline = false;
+	state.offlineSince = null;
 	state.lastContactAt = now();
 	if (response.status === 401 && code === "not_paired") {
 		// The server removed this desktop. Keep who we are, drop the dead key.

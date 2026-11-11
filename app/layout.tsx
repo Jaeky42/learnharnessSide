@@ -8,6 +8,7 @@ import { AppShell, SidebarProvider } from "@/components/sidebar";
 import { ActivityProvider } from "@/components/activity-dock";
 import { ServerEventsProvider } from "@/components/server-events";
 import { CloudProvider } from "@/components/cloud/cloud-state";
+import { DiscardNotice } from "@/components/cloud/discard-notice";
 import { AppearanceProvider } from "@/components/settings/appearance";
 import UpdateBanner from "@/components/update-banner";
 import { PhoneRuntime } from "@/components/phone/phone-runtime";
@@ -69,6 +70,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 							<AppShell>{children}</AppShell>
 						</ActivityProvider>
 					</SidebarProvider>
+					{/* What this PC had to discard after a take-over, said once. */}
+					<DiscardNotice />
 					</CloudProvider>
 				</AppearanceProvider>
 			</ServerEventsProvider>

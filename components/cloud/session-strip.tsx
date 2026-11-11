@@ -13,15 +13,21 @@
  *   waiting         the holder hands over by itself: ask again every 2 s
  *   warning         the offline holder may have unsent turns: the box
  *
+ * THE OFFLINE HEADS-UP is the same strip in a session this PC can continue,
+ * while the PC can't reach the server, sync is paused, or the server removed
+ * the PC (owner's choice: the strip, for as long as it lasts; the message
+ * box stays). What is added then is lost if another device takes the
+ * session over first. Desktop only, and quiet for the first 30 seconds.
+ *
  * The strip is always in the page and opens or closes by a data attribute,
  * so it can fade and slide both ways (app/cloud.css). It renders nothing
  * where sync isn't in use.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { askingText, cannotTakeOverText, finishingText, HELD_TEXT, heldStripText, takeOverWarning, type SessionHolder } from "@/src/core";
+import { askingText, cannotTakeOverText, finishingText, HELD_TEXT, heldStripText, SYNC_TROUBLE_STRIP_TEXT, takeOverWarning, type SessionHolder } from "@/src/core";
 import { lastSyncedText } from "@/components/settings/obsidian-section";
-import { useCloud } from "./cloud-state";
+import { useCloud, useSyncTrouble } from "./cloud-state";
 import { TakeOverDialog } from "./take-over-dialog";
 
 const ASK_AGAIN_MS = 2000;
@@ -57,9 +63,16 @@ async function ask(chatId: string, force: boolean): Promise<Record<string, unkno
 	}
 }
 
-export function SessionStrip({ chatId, title }: { chatId: string; title: string }) {
+export function SessionStrip({ chatId, title, onBottom }: {
+	chatId: string;
+	title: string;
+	/** Where the open strip ends, in px from the top of the window; 0 while it is closed.
+	 *  The side tutor's window keeps below it, so it never covers the strip's words. */
+	onBottom?: (px: number) => void;
+}) {
 	const cloud = useCloud();
 	const holder = cloud.held[chatId] ?? null;
+	const trouble = useSyncTrouble();
 	const [phase, setPhase] = useState<Phase>({ kind: "idle" });
 	const [forcing, setForcing] = useState(false);
 	/** Bumped to drop the answer of a request the learner has cancelled or left. */
@@ -142,6 +155,9 @@ export function SessionStrip({ chatId, title }: { chatId: string; title: string 
 		} else {
 			shown = { key: "held", text: heldStripText(holder, since(holder)), note: blocked, busy: false, button: "take-over", disabled: blocked !== null || phase.kind === "asking" || phase.kind === "warning" };
 		}
+	} else if (trouble) {
+		// A session this PC can continue, while it isn't syncing.
+		shown = { key: `sync-${trouble}`, text: SYNC_TROUBLE_STRIP_TEXT[trouble], note: null, busy: false, button: null, disabled: false };
 	}
 
 	// Open one frame after there is something to show, and keep the last
@@ -152,16 +168,34 @@ export function SessionStrip({ chatId, title }: { chatId: string; title: string 
 	const has = shown !== null;
 	useEffect(() => { setOpen(has); }, [has]);
 	const view = shown ?? lastRef.current;
+
+	const stripRef = useRef<HTMLDivElement>(null);
+	const wordsRef = useRef<HTMLDivElement>(null);
+	const onBottomRef = useRef(onBottom);
+	onBottomRef.current = onBottom;
+	const key = shown?.key;
+	useEffect(() => {
+		const report = () => {
+			const strip = stripRef.current, words = wordsRef.current;
+			// Its full height, not the height it has part-way through sliding open.
+			onBottomRef.current?.(has && strip && words && typeof strip.getBoundingClientRect === "function" ? Math.round(strip.getBoundingClientRect().top + words.offsetHeight) : 0);
+		};
+		report();
+		if (!has) return;
+		window.addEventListener("resize", report);
+		return () => window.removeEventListener("resize", report);
+	}, [has, key]);
+
 	if (cloud.role === null && !view) return null;
 
 	const warning = phase.kind === "warning" && holder ? takeOverWarning(title, phase.holder, since(phase.holder)) : null;
 
 	return (
 		<>
-			<div className="lh-strip" data-open={open && has ? "" : undefined} data-testid="session-strip" data-strip={has ? view?.key : undefined} inert={!(open && has)}>
+			<div ref={stripRef} className="lh-strip" data-open={open && has ? "" : undefined} data-testid="session-strip" data-strip={has ? view?.key : undefined} inert={!(open && has)}>
 				<div>
 					{view && (
-						<div role="status" className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-border bg-card px-3 py-2 font-ui text-sm text-foreground">
+						<div ref={wordsRef} role="status" className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-border bg-card px-3 py-2 font-ui text-sm text-foreground">
 							<p key={view.key} className="lh-strip-words min-w-0 flex-1 basis-56">
 								{view.busy && <span aria-hidden className="mr-2 inline-block size-2.5 animate-spin rounded-full border-[1.5px] border-muted-foreground border-t-transparent align-[-1px]" />}
 								<span data-testid="session-strip-text">{view.text}</span>

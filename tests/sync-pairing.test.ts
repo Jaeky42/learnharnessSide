@@ -466,9 +466,72 @@ describe("the desktop's view of its link", () => {
 	});
 });
 
+describe("Phase 6: since when the server can't be reached, and telling the open windows", () => {
+	async function paired(): Promise<void> {
+		const cookie = await serverWithLogin();
+		await client.pairWithServer({ server: SERVER, code: await pairingCode(cookie), name: "Desk" }, { fetch: serverFetch });
+		client.resetCloudLink();
+	}
+
+	it("remembers the first failure of an offline spell, and forgets it when the server answers", async () => {
+		await paired();
+		const down: typeof fetch = async () => { throw new Error("no route"); };
+		assert.equal(client.cloudStatus().sync.offlineSince, null);
+		await client.syncRequest("/api/sync/hello", { method: "POST", body: {} }, { fetch: down, now: () => 50_000 });
+		assert.deepEqual([client.cloudStatus().sync.state, client.cloudStatus().sync.offlineSince], ["offline", 50_000]);
+		await client.syncRequest("/api/sync/hello", { method: "POST", body: {} }, { fetch: down, now: () => 61_000 });
+		assert.equal(client.cloudStatus().sync.offlineSince, 50_000, "a second failure is the same spell");
+		// A proxy's error page counts as not reaching the server, too.
+		const page: typeof fetch = async () => new Response("<html>Bad gateway</html>", { status: 502 });
+		await client.syncRequest("/api/sync/hello", { method: "POST", body: {} }, { fetch: page, now: () => 70_000 });
+		assert.equal(client.cloudStatus().sync.offlineSince, 50_000);
+		await client.syncRequest("/api/sync/hello", { method: "POST", body: {} }, { fetch: serverFetch, now: () => 80_000 });
+		assert.deepEqual([client.cloudStatus().sync.state, client.cloudStatus().sync.offlineSince], ["ok", null]);
+		await client.syncRequest("/api/sync/hello", { method: "POST", body: {} }, { fetch: down, now: () => 90_000 });
+		assert.equal(client.cloudStatus().sync.offlineSince, 90_000, "a new spell has its own start");
+	});
+
+	it("announces a changed sync state once, and nothing while it stays the same", async () => {
+		const { subscribe } = await import("../src/core/events.ts");
+		const { announceCloudState } = await import("../src/server/sync/round.ts");
+		await paired();
+		let heard = 0;
+		const off = subscribe((event) => { if (event.type === "cloud-changed") heard += 1; });
+		try {
+			await client.syncRequest("/api/sync/hello", { method: "POST", body: {} }, { fetch: serverFetch });
+			announceCloudState();
+			const start = heard;
+			announceCloudState();
+			announceCloudState();
+			assert.equal(heard, start, "the same state again says nothing");
+			const down: typeof fetch = async () => { throw new Error("no route"); };
+			await client.syncRequest("/api/sync/hello", { method: "POST", body: {} }, { fetch: down });
+			announceCloudState();
+			assert.equal(heard, start + 1, "offline is said once");
+			announceCloudState();
+			assert.equal(heard, start + 1);
+			await client.syncRequest("/api/sync/hello", { method: "POST", body: {} }, { fetch: serverFetch });
+			announceCloudState();
+			assert.equal(heard, start + 2, "and so is being back");
+		} finally { off(); }
+	});
+
+	it("an app that was never paired announces nothing", async () => {
+		const { subscribe } = await import("../src/core/events.ts");
+		const { announceCloudState } = await import("../src/server/sync/round.ts");
+		let heard = 0;
+		const off = subscribe((event) => { if (event.type === "cloud-changed") heard += 1; });
+		try {
+			announceCloudState();
+			assert.equal(heard, 0);
+			assert.deepEqual(desktopFiles(), []);
+		} finally { off(); }
+	});
+});
+
 describe("where nothing is paired, nothing happens", () => {
 	it("an app that was never paired reads as off and writes no file", async () => {
-		assert.deepEqual(client.cloudStatus(), { role: "desktop", paired: false, server: null, device: null, sync: { state: "off", message: null, lastContactAt: null } });
+		assert.deepEqual(client.cloudStatus(), { role: "desktop", paired: false, server: null, device: null, sync: { state: "off", message: null, lastContactAt: null, offlineSince: null } });
 		let called = false;
 		const spy: typeof fetch = async () => { called = true; return Response.json({}); };
 		assert.equal((await client.contactServer({ fetch: spy })).sync.state, "off");

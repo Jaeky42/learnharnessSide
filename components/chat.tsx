@@ -55,6 +55,7 @@ import { PlanMarginalia, planExists } from "@/components/plan-window";
 import { SideTutor } from "@/components/side-tutor";
 import { SessionStrip } from "@/components/cloud/session-strip";
 import { useSessionHolder } from "@/components/cloud/cloud-state";
+import { isSyncInUse } from "@/components/cloud/sync-marker";
 import { HELD_TEXT } from "@/src/core";
 import { NotesDrawer, useNotesDrawerOpen } from "@/components/notes/notes-drawer";
 import { MermaidOverlay, SessionMermaidContext } from "@/components/session-overlay";
@@ -94,6 +95,9 @@ import {
 } from "@/src/core";
 import { ReadingThinkingField } from "@/components/reading-thinking";
 import { currentUserThinkingOpen, setAllUserThinkingOpen } from "@/components/thinking-block";
+
+/** Cloud sync: how long after a lesson opens it reads its record once more (see catchUpRef). */
+const SYNC_CATCH_UP_MS = 1000;
 
 /** One width for everything: transcript, cards, and the bottom blob share this column. */
 /**
@@ -294,6 +298,8 @@ export function Chat({
 	// Cloud sync (Phase 6): another device holds this session, so it is
 	// read-only here until it is taken over. Always false where sync isn't in use.
 	const heldElsewhere = useSessionHolder(chatId) !== null;
+	/** Where the strip under the top bar ends (0 = none); the tutor's window keeps below it. */
+	const [stripBottom, setStripBottom] = useState(0);
 	const [titleDraft, setTitleDraft] = useState("");
 	const titleInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -1231,6 +1237,26 @@ export function Chat({
 		void syncFromServer();
 	});
 
+	// Cloud sync (Phase 6): the app's first sync round runs while its window
+	// is still opening. A session that round replaced (taken over on another
+	// device, continued on the phone) said so before this window was
+	// listening, and the page was rendered from the version before. Where
+	// sync is in use, read the record once more a moment after opening, when
+	// the live channel is surely attached, and after every reconnect of it.
+	// An app that isn't paired asks nothing more than before.
+	const catchUpRef = useRef(() => {});
+	catchUpRef.current = () => {
+		if (!isSyncInUse()) return;
+		if (localStreamRef.current || turnInFlightRef.current) return;
+		void syncFromServer();
+	};
+	useEffect(() => {
+		if (!isSyncInUse()) return;
+		const timer = setTimeout(() => catchUpRef.current(), SYNC_CATCH_UP_MS);
+		return () => clearTimeout(timer);
+	}, [chatId]);
+	useServerResync(() => catchUpRef.current());
+
 	const onSend = () => {
 		if (pending || compacting) return;
 		/* FINISH DICTATION FIRST (owner, 2026-10-01): a learner who keeps
@@ -1312,7 +1338,7 @@ export function Chat({
 		<div className="flex h-dvh">
 			{/* The side-tutor window (fixed overlay): quick questions answered by a
 			    second agent that reads the lesson but never writes into it. */}
-			{kind !== "practice" && <SideTutor chatId={chatId} dictation={dictation} held={heldElsewhere} />}
+			{kind !== "practice" && <SideTutor chatId={chatId} dictation={dictation} held={heldElsewhere} clearBelow={stripBottom} />}
 			<div className="flex min-w-0 flex-1 flex-col">
 				{/* The top bar is its own block (owner, top-fade round 4): in flow
 				    above the scroller on the plain page background — no gradient. Its
@@ -1453,7 +1479,7 @@ export function Chat({
 				</TopBar>
 				{/* Cloud sync (Phase 6): "Held by …" and Take over, when another
 				    device holds this session. Nothing where sync isn't in use. */}
-				<SessionStrip chatId={chatId} title={titleText} />
+				<SessionStrip chatId={chatId} title={titleText} onBottom={setStripBottom} />
 
 				<SessionFind scopeRef={sessionFindScopeRef} scrollContextRef={scrollContextRef} />
 				<div ref={sessionFindScopeRef} className="relative flex min-h-0 flex-1">

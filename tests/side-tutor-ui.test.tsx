@@ -331,6 +331,23 @@ describe("on a session another device holds (cloud sync)", () => {
 	});
 });
 
+describe("under a strip below the top bar (cloud sync)", () => {
+	it("the window keeps below the strip while it is there, and is back at its own place after", async () => {
+		const host = await mountTutor();
+		const frame = () => host.querySelector("[data-testid='side-tutor-frame']") as HTMLElement;
+		assert.match(styleOf(frame()), /top:\s*72px/, "its usual place, 12 px under the top bar");
+		const { SideTutor } = await import("../components/side-tutor.tsx");
+		const root = roots.at(-1)!.root;
+		// The offline heads-up opened: it ends 126 px from the top.
+		await act(async () => root.render(<SideTutor chatId="chat_1" clearBelow={126} />));
+		assert.match(styleOf(frame()), /top:\s*138px/, "12 px under the strip");
+		assert.match(styleOf(frame()), /transition:\s*top 200ms/, "it glides there with the strip");
+		await act(async () => root.render(<SideTutor chatId="chat_1" clearBelow={0} />));
+		assert.match(styleOf(frame()), /top:\s*72px/);
+		assert.equal(localStorage.getItem("lh:side-tutor:pos"), null, "its remembered place is untouched");
+	});
+});
+
 describe("moving and resizing (computer)", () => {
 	const frameOf = (host: HTMLElement) => host.querySelector("[data-testid='side-tutor-frame']") as HTMLElement;
 	const zone = (host: HTMLElement, edge: string) => host.querySelector(`[data-testid='side-tutor-resize-${edge}']`) as HTMLElement;

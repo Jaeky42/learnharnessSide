@@ -14,7 +14,7 @@
  */
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import type { SessionHolder } from "@/src/core";
+import { syncTrouble, syncTroubleDueIn, type SessionHolder, type SyncTrouble } from "@/src/core";
 import { useServerEvent, useServerResync } from "@/components/server-events";
 import { useSyncInUse } from "./sync-marker";
 
@@ -29,6 +29,8 @@ export interface CloudSync {
 	state: string;
 	message: string | null;
 	lastContactAt: number | null;
+	/** Since when the server hasn't been reached, while it can't be. */
+	offlineSince?: number | null;
 }
 
 export interface CloudState {
@@ -106,4 +108,27 @@ export function useCloud(): CloudState {
 export function useSessionHolder(chatId: string | null | undefined): SessionHolder | null {
 	const { held } = useCloud();
 	return chatId ? held[chatId] ?? null : null;
+}
+
+/**
+ * What is off with this PC's sync, for the sync chip and the heads-up strip:
+ * offline, paused, or removed by the server. Null when all is in step, on
+ * the server's site and a phone, and on a PC that was never paired or that
+ * the learner unpaired (no marker, so nothing is known here at all).
+ * An offline spell shows after 30 seconds, so a short blip shows nothing.
+ */
+export function useSyncTrouble(): SyncTrouble | null {
+	const { role, sync } = useCloud();
+	const facts = role === "desktop" ? sync : null;
+	const [, again] = useState(0);
+	const state = facts?.state;
+	const offlineSince = facts?.offlineSince;
+	const lastContactAt = facts?.lastContactAt;
+	useEffect(() => {
+		const due = syncTroubleDueIn(state ? { state, offlineSince, lastContactAt: lastContactAt ?? null } : null, Date.now());
+		if (!due || due.inMs === 0) return;
+		const timer = setTimeout(() => again((n) => n + 1), due.inMs + 20);
+		return () => clearTimeout(timer);
+	}, [state, offlineSince, lastContactAt]);
+	return syncTrouble(facts, Date.now());
 }

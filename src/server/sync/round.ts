@@ -5,7 +5,9 @@
  * concepts, so those are in place first).
  */
 
+import { emit } from "../../core/events.ts";
 import { serverModeEnabled } from "../server-auth.ts";
+import { cloudStatus } from "./client.ts";
 import type { TickResult } from "./desktop-sync.ts";
 import { desktopSync } from "./engine.ts";
 import { graphDesktop } from "./graph-engine.ts";
@@ -20,7 +22,24 @@ export interface SyncRound {
 	maps: MapsRound | null;
 }
 
-const globals = globalThis as typeof globalThis & { __lhSyncRound?: Promise<SyncRound> };
+const globals = globalThis as typeof globalThis & { __lhSyncRound?: Promise<SyncRound>; __lhCloudSeen?: string };
+
+/**
+ * Phase 6: tell this app's open windows when its sync state changed
+ * (offline, back, paused, removed by the server) or a discard notice was
+ * added, so the sync chip, the heads-up and the notice show at once and
+ * not at the page's next look. Says nothing for an app that isn't paired.
+ */
+export function announceCloudState(): void {
+	const status = cloudStatus();
+	if (status.sync.state === "off") return;
+	let notices = 0;
+	try { notices = desktopSync().notices().length; } catch { /* counted as none */ }
+	const seen = `${status.sync.state}|${status.sync.offlineSince ?? ""}|${notices}`;
+	if (globals.__lhCloudSeen === seen) return;
+	globals.__lhCloudSeen = seen;
+	emit("cloud-changed", {});
+}
 
 /**
  * One round at a time: a round asked for while another is under way (the
@@ -28,7 +47,7 @@ const globals = globalThis as typeof globalThis & { __lhSyncRound?: Promise<Sync
  */
 export function runSyncRound(): Promise<SyncRound> {
 	const previous: Promise<unknown> = globals.__lhSyncRound ?? Promise.resolve();
-	const mine = previous.catch(() => undefined).then(oneRound);
+	const mine = previous.catch(() => undefined).then(oneRound).finally(() => { if (!serverModeEnabled()) announceCloudState(); });
 	globals.__lhSyncRound = mine;
 	return mine.finally(() => { if (globals.__lhSyncRound === mine) delete globals.__lhSyncRound; });
 }

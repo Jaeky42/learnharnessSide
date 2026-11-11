@@ -1,6 +1,6 @@
 # Cloud sync: approved plan
 
-Status: **Phases 1–4 done (server mode, sign-in on the server, phone layouts, the Obsidian vault on the server). Phase 5 (the sync engine) is built, all six slices: a paired desktop and the server keep sessions, the graph, settings and folders in step. Phase 6 (the screens) is planned and approved, and two of its three slices are built: Settings → Cloud on the desktop app (pairing, sync state, Unpair) and on the server's site (paired desktop apps, pairing codes), and a held session ("Held by …", the strip, Take over, the warning box, greyed controls). The sync chip and the desktop's notices are still to build.** Work happens on a separate branch. It merges into `side-tutor` only once the whole feature works and the owner approves the merge, because every push to `side-tutor` publishes a release. Change these decisions only with the owner's approval.
+Status: **Phases 1–4 done (server mode, sign-in on the server, phone layouts, the Obsidian vault on the server). Phase 5 (the sync engine) is built, all six slices: a paired desktop and the server keep sessions, the graph, settings and folders in step. Phase 6 (the screens) is built, all three slices: Settings → Cloud on the desktop app (pairing, sync state, Unpair) and on the server's site (paired desktop apps, pairing codes); a held session ("Held by …", the strip, Take over, the warning box, greyed controls); and the desktop's own notices (the sync chip, the offline heads-up, the discard box). It has run between two built copies only; the owner's real PC meets the real server after the merge.** Work happens on a separate branch. It merges into `side-tutor` only once the whole feature works and the owner approves the merge, because every push to `side-tutor` publishes a release. Change these decisions only with the owner's approval.
 
 Goal: keep learning progress on several devices. The Windows desktop app stays fully usable, works offline, and keeps the Obsidian connection. A phone uses LearnHarness from the browser.
 
@@ -355,10 +355,10 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 4. ✅ **Vault on the server.** Settings → Obsidian, the sync manager around `ob`, folders left out automatically, the safety check and Disconnect. Verified by the owner on the server with their real Obsidian account.
 5. ✅ **Sync engine.** Pairing and device keys, the lease API, session sync with take-over (no copies: unsent turns are discarded), graph line and operation sync, per-key settings merges, and the sync protocol version check. Run between two built copies; not yet between the owner's real PC and server, which needs Phase 6's screens.
    - Built as wrapper stores at the composition root (`src/server/stores.ts`) over the `core/ports.ts` interfaces, so upstream store code stays untouched and rebasing onto upstream stays cheap.
-6. **Sync screens** (desktop app, server's site and phone). Plan approved by the owner; see "Phase 6, the sync screens".
+6. ✅ **Sync screens** (desktop app, server's site and phone). Plan approved by the owner and built; see "Phase 6, the sync screens".
    - ✅ Slice 1: Settings → Cloud on both sides (pairing, sync state, Sync now, Unpair this PC; paired desktop apps and pairing codes on the server), with four engine changes.
    - ✅ Slice 2: a held session (the list line, the strip, Take over, the warning box, greyed controls).
-   - Slice 3: the desktop's own notices (the sync chip, the offline strip, the discard box).
+   - ✅ Slice 3: the desktop's own notices (the sync chip, the offline strip, the discard box).
 7. **Tests and docs.** Lease, take-over and graph operation tests; an end-to-end test with two servers and one cloud; and an update of this file from "planned" to built.
 
 ## Handoff: where things stand and how to continue
@@ -442,12 +442,12 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 
 ### Phase 5, the sync engine (built), and what comes next
 
-**The owner approved the Phase 5 plan page, and all six slices are built** ("Phase 5: what is built"). **Phase 6, the screens, is under way**: its plan is approved and slice 1 is built ("Phase 6, the sync screens", below). Phase 6 changed four of the engine's rules at the owner's request; they are listed there, and the Phase 5 text below is corrected where it described the old rule.
+**The owner approved the Phase 5 plan page, and all six slices are built** ("Phase 5: what is built"). **Phase 6, the screens, is built too**, all three slices ("Phase 6, the sync screens", below). Phase 6 changed four of the engine's rules at the owner's request; they are listed there, and the Phase 5 text below is corrected where it described the old rule.
 
 **What the owner can and can't see now**
 
 - **Can see, since Phase 6 slice 1:** a Cloud row in the server's Settings ("No desktop app is paired.", Add a desktop app). There is no desktop app with this code installed anywhere, so nothing is paired and the engine stays switched off on the owner's server and phone.
-- **Can't see yet:** the sync chip or the notices (slice 3). "Held by …" and Take over are built (slice 2) but show only once a desktop is paired.
+- **Built but not visible there:** "Held by …", Take over (slice 2), the sync chip and the notices (slice 3) show only once a desktop app is paired, and the last three only in the desktop app.
 - **What an update to the server should look like:** exactly as before. That is the thing to check.
 - **Can see:** the page of screenshots and timings from two copies syncing (shown to the owner at the end of Phase 5).
 - **The API under the screens:** `GET | POST /api/cloud` on the app, `POST /api/server-auth/desktops` on the server's site.
@@ -680,9 +680,9 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 - **Phase 5 has no screens.** The owner sees nothing new until Phase 6; the thing to check after each update is that the server and phone work as before. The phase ended with a page of screenshots and timings from two copies syncing.
 - **Sample data for UI screenshots:** copy `tests/fixtures/golden-data` to a scratch `LH_DATA_DIR`. Truncating a copy of the teaching chat right after a `quiz` tool call gives a session with an open question. Phone screenshots: Playwright `devices["iPhone 13"]`; real touch (press and hold, pinch) through CDP `Input.dispatchTouchEvent`.
 
-### Phase 6, the sync screens (slices 1 and 2 built)
+### Phase 6, the sync screens (built)
 
-**The plan was approved by the owner** after one question per decision and a plan page with a drawing of every screen. Slice 3 builds what is listed under "Still to build"; its design is settled here, so build it as written and ask only about what this section doesn't cover.
+**The plan was approved by the owner** after one question per decision and a plan page with a drawing of every screen. All three slices are built as written here. Change a decision or a sentence only with the owner's approval.
 
 #### Phase 6 decisions (owner)
 
@@ -751,6 +751,9 @@ Kept in one place: `src/core/sync/screens.ts`. Change them only with the owner's
    - **A PC the server removed** (`needs-pairing`) keeps the Phase 5 behaviour: nothing is freed.
 5. **Read-only additions to the status.** `GET /api/cloud` on the server now also returns `desktops` (id, name, pairedAt, online, lastSeenAt), from `presence()` in `authority.ts`, which knows "last heard from" to the second. A new sync state, `unpaired`, beside `needs-pairing`.
 
+6. **Since when the server can't be reached** (slice 3). `sync.offlineSince` in `GET /api/cloud` on a desktop: the time of the first failed attempt of the current offline spell, null otherwise (`wentOffline` in `client.ts`). The 30-second quiet rule counts from it. `sync.lastContactAt` is null until the app has reached the server once since it started, which is how "started with no connection" is told.
+7. **A signal when the sync state changes** (slice 3). `announceCloudState()` in `round.ts` sends `cloud-changed` on the live channel after a round, a check or a dismissed notice, when the state, the start of the offline spell or the number of notices differs from what was last said. Nothing is sent by an app that isn't paired.
+
 The sync protocol version stays at 1: nothing has been paired anywhere yet.
 
 #### Slice 1: what is built
@@ -786,15 +789,41 @@ The sync protocol version stays at 1: nothing has been paired anywhere yet.
 - **Tests:** `tests/cloud-held-ui.test.tsx` (the words, the provider asking nothing where sync isn't in use, the list line, every state of the strip, the warning box, Cancel), a held session in `tests/side-tutor-ui.test.tsx`, and a removed PC keeping its name in `tests/sync-unpair.test.ts`.
 - **Run between two built copies** with the loop on, at computer and phone size: the list lines and the strip on the server's site; the greyed bubble and menu items; a rename refused; a hand-over from the online PC (6.6 s: the PC hears of it at its next 10-second check); the PC showing "Held by the web app" and taking it back (0.3 s); the PC stopped, "offline since …" after 30 seconds, the warning box, Take over anyway, and the PC showing the server's version when it came back.
 
-#### Still to build
+#### Slice 3: what is built
 
-- **Slice 3:** the chip, the offline strip and the discard box, desktop only. The facts: `sync.state`, `sync.lastContactAt` and `notices` in `GET /api/cloud`. It needs a signal when the sync state changes, so the chip updates at once (`cloud-changed`; today it is sent only after a pairing or an unpairing).
-- **Then:** a full run between two copies with nobody pressing "sync", this file's last "planned" parts updated, and Phase 7.
+- **What is off** (`syncTroubleDueIn` and `syncTrouble` in `src/core/sync/screens.ts`, `useSyncTrouble()` in `cloud-state.tsx`): `offline`, `paused` or `needs-pairing`; nothing for `ok`, `starting`, `unpaired` and `off`, and nothing on the server's site. Paused and removed show at once. Offline shows 30 seconds after the first failed attempt (`OFFLINE_QUIET_MS`), or at once when the app hasn't reached the server since it started. The hook sets one timer for the moment the 30 seconds are up.
+- **The sync chip** (`components/cloud/sync-chip.tsx`, mounted in `components/sidebar.tsx` between Background agents and Settings): an outline ring (lucide's `CircleIcon`, the Settings gear's weight) and the word, both `text-amber-500`, in the Settings row's own type. A click opens Settings → Cloud. It goes the moment a round reaches the server again.
+- **The offline heads-up** is one more state of the strip (`session-strip.tsx`, `data-strip="sync-offline"`, `sync-paused` or `sync-needs-pairing`): the approved sentence and no button, in a session this PC can continue. The message box stays. A held session keeps its own strip.
+- **The side tutor's window keeps below a strip** (found in the browser run; added without being asked, for the owner to review). The tutor starts open at the lesson's top right, 12 px under the top bar, which is where a strip opens, so it covered the end of the heads-up. While a strip is open the window is shown 12 px under it and glides there with the strip (200 ms); when the strip goes it is back at its own place. Its remembered place changes only if it is dragged meanwhile. A window too tall to move down stays. `clearBelow` on `SideTutor`, `onBottom` on `SessionStrip`.
+- **The discard box** (`components/cloud/discard-notice.tsx`, mounted once in the root layout): reads `notices`, so it shows on any screen as soon as a round discards something, or at the next app start. **Only OK closes it**: Esc and a click outside do nothing, so it can't be lost by accident. OK sends `dismiss-notice` for every notice shown; they stay away at once and don't come back.
+- **A lesson opened in the same moment as the app's first round** (found in the browser run): the page is rendered from the session as it was, the round then replaces it, and the page isn't listening yet when that is announced. The live channel also has no first frame, so its "open" can come late. Where sync is in use, `components/chat.tsx` reads the record once more a second after a lesson opens (`SYNC_CATCH_UP_MS`) and after every reconnect of the channel, unless a reply is being written. An app that isn't paired asks nothing more than before.
+- **Wording added while building, beyond the plan page, for the owner to review:**
+  - several sessions in one box: "They were taken over on another device while this PC was offline." above the lines, each line `“Circuits”: 3 messages you sent here never reached the server and were discarded.`, and "The sessions now show the server's version." below;
+  - "Untitled session" for a discarded session with no title.
+- **Read while building:**
+  - The discard sentence says "while this PC was offline" also when the discard comes from pairing again after an Unpair (both sides had continued the session). The owner hasn't been asked for a second wording.
+  - The chip's words are stored as "Offline", "Sync paused" and "Not paired" and shown in capitals by the row's style.
+- **Tests:** `tests/cloud-notices-ui.test.tsx` (the words, the quiet rule with a moved clock, the chip in every state and where it never shows, the heads-up, the discard box), the window under a strip in `tests/side-tutor-ui.test.tsx`, and `offlineSince` and the signal in `tests/sync-pairing.test.ts`.
+- **Run between two built copies** with the loop on:
+  - never paired: no chip, no strip, no marker;
+  - the server stopped while a lesson was open: nothing for the first 30 seconds, then the chip and the heads-up (30 to 40 s after the stop, depending on where in its 10-second rhythm the PC was); the same strip in a practice session; the chip alone on the home screen; a click opening Settings → Cloud on "Can't reach the server. Trying again.";
+  - the app started with the server away: the chip at once;
+  - the server back: the chip and the strip gone 7 s later, and the tutor's window back at its place;
+  - the PC stopped, three messages added to its copy, the session taken over on the server, the PC started: the box with "3 messages …", still there after Esc and a click outside, gone for good after OK;
+  - two sessions at once: one box, one line each;
+  - Remove on the server's site: NOT PAIRED within 10 s;
+  - the learner's own Unpair: no chip and no strip.
+- **Not seen in a browser:** SYNC PAUSED (two copies of one build always speak the same protocol version); it is covered by the unit tests.
+
+#### Still to do
+
+- The owner's real PC with the real server: only after the merge into `side-tutor`, which needs the owner's approval and a pairing guide.
+- Phase 7 (not started; the owner starts it).
 
 ### Later phases: decisions still open (ask when you get there)
 
 - **Phase 5 (sync engine):** answered and built. The owner confirmed the wording listed under slices 1 and 2 with the Phase 6 plan page, and settled the two readings of "the desktop's value is kept" (decisions 15 and 16 above).
-- **Phase 6 (sync screens):** answered; see "Phase 6, the sync screens". Nothing is open.
+- **Phase 6 (sync screens):** answered and built; see "Phase 6, the sync screens". For the owner to review: the wording and the two behaviours listed as added while building, under slices 1 to 3.
 - **Phase 7 and the merge:** not started. The merge into `side-tutor` needs the owner's approval and a guide for pairing the real PC with the real server.
 
 ### Development notes for this work

@@ -20,6 +20,7 @@ import { cn } from "@/lib/utils";
 import { fuzzyScore } from "@/src/core";
 import { useServerEvent, useServerResync } from "@/components/server-events";
 import { useCloud } from "@/components/cloud/cloud-state";
+import { SyncChip } from "@/components/cloud/sync-chip";
 import { HELD_TEXT, heldByText } from "@/src/core";
 import type { ChatListItem } from "@/src/core";
 import { kbdEventForAction } from "@/src/core";
@@ -881,6 +882,10 @@ function SessionsSidebar() {
 					    flex-1, so this pins to the bottom. Sidebar closed = the
 					    learner opted out (no ambient signal, user decision). */}
 					<ActivitySection />
+
+					{/* Cloud sync (Phase 6): the sync chip, only while this PC's
+					    sync is off (offline, paused, removed by the server). */}
+					<SyncChip onOpen={() => openSettings("cloud")} />
 
 					{/* Settings entry (settings-app wave): same row language as
 					    New session — quiet, bottom-pinned, opens the centered

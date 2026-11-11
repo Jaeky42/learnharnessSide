@@ -22,7 +22,7 @@ import { CLOUD_HOLDER, isSessionId } from "../../core/sync/sessions.ts";
 import { json, readBody, serverModeEnabled } from "../server-auth.ts";
 import { cloudStatus, contactServer, pairWithServer } from "./client.ts";
 import { desktopSync, syncAuthority } from "./engine.ts";
-import { runSyncRound } from "./round.ts";
+import { announceCloudState, runSyncRound } from "./round.ts";
 import { kickSyncLoop } from "./loop.ts";
 import { readServerAuthState } from "../../store/server-auth.ts";
 import { readCloudPairing } from "../../store/sync/pairing.ts";
@@ -74,7 +74,11 @@ export async function cloudActionResponse(request: Request): Promise<Response> {
 		if (result.ok && process.env.NODE_ENV !== "test" && process.env.LH_SYNC_LOOP !== "off") kickSyncLoop();
 		return result.ok ? json(result.status) : json({ error: result.error }, result.status);
 	}
-	if (body.op === "check") return json(await contactServer());
+	if (body.op === "check") {
+		const status = await contactServer();
+		announceCloudState();
+		return json(status);
+	}
 	// One round with the server, now (Phase 6's "Sync now"). The timed rounds are loop.ts.
 	if (body.op === "sync") return json({ round: await runSyncRound(), status: cloudStatus() });
 	if (body.op === "unpair") {
@@ -84,6 +88,8 @@ export async function cloudActionResponse(request: Request): Promise<Response> {
 	}
 	if (body.op === "dismiss-notice") {
 		if (isSessionId(body.chatId) && typeof body.at === "number") desktopSync().dismissNotice(body.chatId, body.at);
+		// Another open window of this app closes its box too.
+		announceCloudState();
 		return json({ notices: desktopSync().notices() });
 	}
 	return json({ error: "Unknown action." }, 400);
