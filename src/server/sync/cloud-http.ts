@@ -17,6 +17,7 @@
  * The server never pairs itself: pair, check and sync answer 404 there.
  */
 
+import { emit } from "../../core/events.ts";
 import { CLOUD_HOLDER, isSessionId } from "../../core/sync/sessions.ts";
 import { json, readBody, serverModeEnabled } from "../server-auth.ts";
 import { cloudStatus, contactServer, pairWithServer } from "./client.ts";
@@ -67,6 +68,8 @@ export async function cloudActionResponse(request: Request): Promise<Response> {
 		const result = await pairWithServer({ server: body.server, code: body.code, name: body.name });
 		// The same server as before: a fresh backup comes before the next sync.
 		if (result.ok && before && before.server === result.status.server) desktopSync().rejoin();
+		// Every open window of this app learns that sync is in use now.
+		if (result.ok) emit("cloud-changed", {});
 		// Paired: from now on this app syncs by itself (loop.ts). Not in tests, which drive rounds by hand.
 		if (result.ok && process.env.NODE_ENV !== "test" && process.env.LH_SYNC_LOOP !== "off") kickSyncLoop();
 		return result.ok ? json(result.status) : json({ error: result.error }, result.status);
@@ -74,7 +77,11 @@ export async function cloudActionResponse(request: Request): Promise<Response> {
 	if (body.op === "check") return json(await contactServer());
 	// One round with the server, now (Phase 6's "Sync now"). The timed rounds are loop.ts.
 	if (body.op === "sync") return json({ round: await runSyncRound(), status: cloudStatus() });
-	if (body.op === "unpair") return json(await unpairThisDesktop());
+	if (body.op === "unpair") {
+		const result = await unpairThisDesktop();
+		emit("cloud-changed", {});
+		return json(result);
+	}
 	if (body.op === "dismiss-notice") {
 		if (isSessionId(body.chatId) && typeof body.at === "number") desktopSync().dismissNotice(body.chatId, body.at);
 		return json({ notices: desktopSync().notices() });

@@ -29,6 +29,7 @@ import { SideTutorDictate } from "@/components/side-tutor-dictation";
 import { useSideDictationOwned } from "@/components/side-tutor-dictation-state";
 import { resizeTutorRect, storedTutorSize, TUTOR_EDGE, TUTOR_RESIZE_EDGES, type TutorRect, type TutorResizeEdge, type TutorSize } from "@/components/side-tutor-window";
 import {
+	HELD_TEXT,
 	SIDE_TUTOR_MAX_QUESTION_CHARS,
 	type SideTutorEntry,
 	type SideTutorThread,
@@ -145,9 +146,17 @@ function clampPos(pos: Pos, width: number, height = 64): Pos {
 	};
 }
 
-export function SideTutor({ chatId, dictation }: { chatId: string; /** The page's dictation run, for the tutor's Dictate button. */ dictation?: Dictation }) {
+export function SideTutor({ chatId, dictation, held = false }: {
+	chatId: string;
+	/** The page's dictation run, for the tutor's Dictate button. */
+	dictation?: Dictation;
+	/** Cloud sync (Phase 6): another device holds this session. The tutor can't
+	 *  be asked until it is taken over: its window closes to a greyed bubble. */
+	held?: boolean;
+}) {
 	const [mounted, setMounted] = useState(false);
-	const [open, setOpen] = useState(true);
+	const [openWanted, setOpen] = useState(true);
+	const open = openWanted && !held;
 	const [pos, setPos] = useState<Pos>({ left: 0, top: DEFAULT_TOP });
 	/** The size it was resized to; null until then (the frame's own size). */
 	const [size, setSize] = useState<TutorSize | null>(null);
@@ -409,7 +418,9 @@ export function SideTutor({ chatId, dictation }: { chatId: string; /** The page'
 		// its place against the question bar exactly, while the lesson scrolls
 		// and while a question opens or folds. With no room above an opened
 		// question it sits under the top bar, as far right as here.
-		const onDock = !phone && anchor.place === "above-dock" && anchor.dock !== null;
+		// On a held session there is no question bar to sit above (the dock is
+		// hidden): the greyed bubble keeps to the lesson's bottom right.
+		const onDock = !phone && !held && anchor.place === "above-dock" && anchor.dock !== null;
 		const bubble = (
 			<button
 				type="button"
@@ -420,8 +431,12 @@ export function SideTutor({ chatId, dictation }: { chatId: string; /** The page'
 				data-phone="tutor-bubble"
 				data-place={anchor.place}
 				data-phone-place={phone ? anchor.place : undefined}
+				data-held={held ? "" : undefined}
+				aria-disabled={held || undefined}
+				title={held ? HELD_TEXT.blocked : undefined}
 				onClick={(e) => {
 					blurAfterPointerClick(e);
+					if (held) return;
 					setOpenPersist(true);
 				}}
 				onKeyDown={(e) => e.stopPropagation()}
@@ -432,10 +447,13 @@ export function SideTutor({ chatId, dictation }: { chatId: string; /** The page'
 							: {}
 						: onDock
 							? { right: BUBBLE_EDGE_GAP, bottom: `calc(100% + ${BUBBLE_BAR_GAP}px)`, WebkitAppRegion: "no-drag" }
-							: { right: anchor.right + BUBBLE_EDGE_GAP, top: BUBBLE_TOP, WebkitAppRegion: "no-drag" }) as React.CSSProperties
+							: held
+								? { right: anchor.right + BUBBLE_EDGE_GAP, bottom: BUBBLE_BAR_GAP, WebkitAppRegion: "no-drag" }
+								: { right: anchor.right + BUBBLE_EDGE_GAP, top: BUBBLE_TOP, WebkitAppRegion: "no-drag" }) as React.CSSProperties
 				}
 				className={cn(
-					"z-30 flex size-13 items-center justify-center rounded-full border border-border bg-card/85 text-muted-foreground shadow-[0_6px_18px_rgb(0_0_0/0.35)] backdrop-blur transition-colors hover:bg-accent hover:text-foreground",
+					"z-30 flex size-13 items-center justify-center rounded-full border border-border bg-card/85 text-muted-foreground shadow-[0_6px_18px_rgb(0_0_0/0.35)] backdrop-blur transition-colors",
+					held ? "cursor-default opacity-40" : "hover:bg-accent hover:text-foreground",
 					// The dock lets clicks through to the lesson; the bubble takes its own.
 					onDock ? "pointer-events-auto absolute" : "fixed",
 				)}

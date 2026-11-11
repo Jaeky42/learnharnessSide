@@ -53,6 +53,9 @@ import {
 import { PlanBlock, PlanPopup, latestTree } from "@/components/plan-block";
 import { PlanMarginalia, planExists } from "@/components/plan-window";
 import { SideTutor } from "@/components/side-tutor";
+import { SessionStrip } from "@/components/cloud/session-strip";
+import { useSessionHolder } from "@/components/cloud/cloud-state";
+import { HELD_TEXT } from "@/src/core";
 import { NotesDrawer, useNotesDrawerOpen } from "@/components/notes/notes-drawer";
 import { MermaidOverlay, SessionMermaidContext } from "@/components/session-overlay";
 import { AbortTurnDialog, type AbortMode } from "@/components/abort-turn-dialog";
@@ -288,6 +291,9 @@ export function Chat({
 	// its 2.5s poll is only a backstop.
 	const [titleText, setTitleText] = useState(title);
 	const [renaming, setRenaming] = useState(false);
+	// Cloud sync (Phase 6): another device holds this session, so it is
+	// read-only here until it is taken over. Always false where sync isn't in use.
+	const heldElsewhere = useSessionHolder(chatId) !== null;
 	const [titleDraft, setTitleDraft] = useState("");
 	const titleInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -330,12 +336,14 @@ export function Chat({
 	// F2 opens the title rename (the chat header owns the editing state).
 	useEffect(() => {
 		const onRename = () => {
+			// A session another device holds can't be renamed here (cloud sync Phase 6).
+			if (heldElsewhere) return;
 			setTitleDraft(titleText);
 			setRenaming(true);
 		};
 		window.addEventListener("lh:kbd-rename-session", onRename);
 		return () => window.removeEventListener("lh:kbd-rename-session", onRename);
-	}, [titleText]);
+	}, [titleText, heldElsewhere]);
 
 	// The OTHER rename surface (wave 6: the sidebar's inline rename): its
 	// commit dispatches the same lh:chat-renamed event this header's rename
@@ -1304,7 +1312,7 @@ export function Chat({
 		<div className="flex h-dvh">
 			{/* The side-tutor window (fixed overlay): quick questions answered by a
 			    second agent that reads the lesson but never writes into it. */}
-			{kind !== "practice" && <SideTutor chatId={chatId} dictation={dictation} />}
+			{kind !== "practice" && <SideTutor chatId={chatId} dictation={dictation} held={heldElsewhere} />}
 			<div className="flex min-w-0 flex-1 flex-col">
 				{/* The top bar is its own block (owner, top-fade round 4): in flow
 				    above the scroller on the plain page background — no gradient. Its
@@ -1359,18 +1367,22 @@ export function Chat({
 					) : (
 					<>
 						<Hint
-							// F2 renames (registry) — surfaced on the hover.
-							label="Rename session"
-							action="rename-session"
+							// F2 renames (registry) — surfaced on the hover. A session
+							// another device holds can't be renamed here (cloud sync Phase 6).
+							label={heldElsewhere ? HELD_TEXT.blocked : "Rename session"}
+							action={heldElsewhere ? undefined : "rename-session"}
 							side="bottom"
 						>
 <button
 							type="button"
+							aria-disabled={heldElsewhere || undefined}
+							data-held={heldElsewhere ? "" : undefined}
 														onClick={() => {
+								if (heldElsewhere) return;
 								setTitleDraft(titleText);
 								setRenaming(true);
 							}}
-							className="lh-no-drag -mx-1.5 min-w-4 shrink cursor-text truncate rounded-md px-1.5 text-left font-title text-3xl tracking-tight transition-colors hover:bg-accent"
+							className={`lh-no-drag -mx-1.5 min-w-4 shrink truncate rounded-md px-1.5 text-left font-title text-3xl tracking-tight transition-colors ${heldElsewhere ? "cursor-default" : "cursor-text hover:bg-accent"}`}
 						>
 							{titleText}
 							</button>
@@ -1439,6 +1451,9 @@ export function Chat({
 						<PhaseChip phase={phases.at(-1) ?? "probe"} />
 					)}
 				</TopBar>
+				{/* Cloud sync (Phase 6): "Held by …" and Take over, when another
+				    device holds this session. Nothing where sync isn't in use. */}
+				<SessionStrip chatId={chatId} title={titleText} />
 
 				<SessionFind scopeRef={sessionFindScopeRef} scrollContextRef={scrollContextRef} />
 				<div ref={sessionFindScopeRef} className="relative flex min-h-0 flex-1">
@@ -1734,6 +1749,10 @@ export function Chat({
 				    anchored to the dock block's top edge, so it rides every
 				    height morph (typing, a question growing the band, the
 				    fold) and NEVER overlaps the composer. */}
+				{/* Cloud sync (Phase 6): on a session another device holds there is
+				    no message box; it fades out, and back in after a take-over
+				    (app/cloud.css). The wrapper has no box of its own. */}
+				<div className="lh-held-dock" data-held={heldElsewhere ? "" : undefined} inert={heldElsewhere}>
 				<DockOverlay
 					pending={pending}
 					initialQuestionDraft={pending ? questionDraft(pending.key)?.form : undefined}
@@ -1819,6 +1838,7 @@ export function Chat({
 						submitAnswer(pending.tool, pending.toolCallId, reading ? { ...output, readingThinking: reading } : output, pending.key);
 					}}
 				/>
+				</div>
 				</Conversation>
 
 				{/* The session-scoped focuses (chrome-melt wave, 2026-09-19): mounted

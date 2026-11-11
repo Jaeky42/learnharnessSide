@@ -76,3 +76,75 @@ export function recentlyText(at: number, now: number): string | null {
 	if (minutes < 60) return minutes === 1 ? "1 minute ago" : `${minutes} minutes ago`;
 	return null;
 }
+
+// ─── A session held by another device (slice 2) ──────────────────────────────
+
+/** What the server is called in "Held by …" (owner's choice). */
+export const WEB_APP_NAME = "the web app";
+/** The holder id the engine uses for the server itself (CLOUD_HOLDER in sessions.ts). */
+const CLOUD_HOLDER_ID = "cloud";
+
+/** A session's holder as the screens know it. `online` and `lastSeenAt` are known on the server's site only. */
+export interface SessionHolder {
+	id: string;
+	name: string | null;
+	online?: boolean;
+	lastSeenAt?: number | null;
+}
+
+/** "Desktop", "the web app", or "another device" for a PC whose name isn't known. */
+export function holderName(holder: Pick<SessionHolder, "id" | "name">): string {
+	if (holder.id === CLOUD_HOLDER_ID) return WEB_APP_NAME;
+	return holder.name?.trim() || "another device";
+}
+
+/** The same at the start of a sentence: "The web app is finishing a reply." */
+export function holderNameAtStart(holder: Pick<SessionHolder, "id" | "name">): string {
+	const name = holderName(holder);
+	return holder.id === CLOUD_HOLDER_ID || !holder.name?.trim() ? name.charAt(0).toUpperCase() + name.slice(1) : name;
+}
+
+/** The session list's second line, and the strip's first words. */
+export const heldByText = (holder: Pick<SessionHolder, "id" | "name">): string => `Held by ${holderName(holder)}`;
+
+/**
+ * The strip's line. The server's site adds whether the holder is online or
+ * since when it has been offline (`since` is that time, already worded);
+ * a desktop app knows only the name.
+ */
+export function heldStripText(holder: SessionHolder, since: string | null): string {
+	const base = heldByText(holder);
+	if (holder.online === undefined) return base;
+	if (holder.online) return `${base} · online`;
+	return since ? `${base} · offline since ${since}` : `${base} · offline`;
+}
+
+export const HELD_TEXT = {
+	takeOver: "Take over",
+	cancel: "Cancel",
+	failed: "Couldn't take it over. Try again.",
+	/** The tooltip of the controls that can't work until the session is taken over. */
+	blocked: "Take this session over first",
+	takeOverAnyway: "Take over anyway",
+} as const;
+
+export const askingText = (holder: Pick<SessionHolder, "id" | "name">): string => `Asking ${holderName(holder)} to hand it over…`;
+export const finishingText = (holder: Pick<SessionHolder, "id" | "name">): string => `${holderNameAtStart(holder)} is finishing a reply. This session moves here when it's done.`;
+
+/** Why a PC can't take a session over right now, or null when it can. */
+export function cannotTakeOverText(syncState: string | null | undefined): string | null {
+	if (syncState === "offline") return "This PC can't reach the server, so it can't be taken over right now.";
+	if (syncState === "paused") return "Sync is paused, so it can't be taken over right now.";
+	if (syncState === "needs-pairing") return "This PC is no longer paired, so it can't be taken over right now.";
+	return null;
+}
+
+/** The take-over warning box. `since` is when the holder was last heard from, already worded, or null. */
+export function takeOverWarning(title: string, holder: Pick<SessionHolder, "id" | "name">, since: string | null): { title: string; body: string } {
+	const name = holderNameAtStart(holder);
+	const offline = since ? `${name} has been offline since ${since}, and` : `${name} is offline and`;
+	return {
+		title: `Take over “${title}”?`,
+		body: `${offline} may have turns that never reached the server. If you take over, those turns are discarded when ${holderName(holder)} is back online.`,
+	};
+}

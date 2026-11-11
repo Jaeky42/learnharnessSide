@@ -70,6 +70,12 @@ export interface AuthorityState {
 	sessions: Record<string, AuthoritySession>;
 	/** When each desktop was last heard from. */
 	seen: Record<string, number>;
+	/**
+	 * Each desktop's name as last known. A PC removed on the server's site can
+	 * still hold sessions; "Held by Desktop" needs its name after the login
+	 * file has forgotten it (Phase 6).
+	 */
+	names?: Record<string, string>;
 }
 
 export function isAuthorityState(value: unknown): value is AuthorityState {
@@ -162,6 +168,22 @@ export function createAuthority(deps: AuthorityDeps): Authority {
 	function hear(state: AuthorityState, deviceId: string, now: number): void {
 		heard.set(deviceId, now);
 		if (now - (state.seen[deviceId] ?? 0) >= SEEN_SAVE_MS) state.seen[deviceId] = now;
+		// Remembered only when it changes, so an idle pair still writes nothing.
+		const name = deps.deviceName(deviceId);
+		if (name !== null && state.names?.[deviceId] !== name) state.names = { ...state.names, [deviceId]: name };
+		if (name !== null) remembered.set(deviceId, name);
+	}
+	/** Names as last recorded, for a desktop the login file no longer lists. */
+	const remembered = new Map<string, string>();
+	let namesLoaded = false;
+	function nameOf(deviceId: string): string | null {
+		const current = deps.deviceName(deviceId);
+		if (current !== null) return current;
+		if (!namesLoaded) {
+			for (const [id, name] of Object.entries(deps.state.read()?.names ?? {})) if (!remembered.has(id)) remembered.set(id, name);
+			namesLoaded = true;
+		}
+		return remembered.get(deviceId) ?? null;
 	}
 	const lastHeard = (state: AuthorityState, deviceId: string): number | null => {
 		const at = Math.max(heard.get(deviceId) ?? 0, state.seen[deviceId] ?? 0);
@@ -192,7 +214,7 @@ export function createAuthority(deps: AuthorityDeps): Authority {
 			id,
 			version: entry.version,
 			holder: entry.holder,
-			holderName: entry.holder === CLOUD_HOLDER ? null : deps.deviceName(entry.holder),
+			holderName: entry.holder === CLOUD_HOLDER ? null : nameOf(entry.holder),
 			deleted: entry.deletedAt !== undefined,
 		};
 	}
@@ -243,7 +265,7 @@ export function createAuthority(deps: AuthorityDeps): Authority {
 		const seenAt = lastHeard(state, entry.holder);
 		return {
 			id: entry.holder,
-			name: deps.deviceName(entry.holder),
+			name: nameOf(entry.holder),
 			online: seenAt !== null && deps.now() - seenAt < ONLINE_WINDOW_MS,
 			lastSeenAt: seenAt,
 			word: entry.report?.word ?? "all-sent",
@@ -346,7 +368,7 @@ export function createAuthority(deps: AuthorityDeps): Authority {
 		holderOf(chatId) {
 			const entry = deps.state.read()?.sessions[chatId];
 			if (!entry || entry.deletedAt !== undefined || entry.holder === CLOUD_HOLDER) return null;
-			return { id: entry.holder, name: deps.deviceName(entry.holder) };
+			return { id: entry.holder, name: nameOf(entry.holder) };
 		},
 
 		scan() {

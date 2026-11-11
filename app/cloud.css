@@ -1,0 +1,52 @@
+/*
+ * Cloud sync screens (side-tutor fork, Phase 6; docs/cloud-sync.md).
+ * Fork-owned, like phone.css. Unlayered, so these rules beat Tailwind's
+ * layered utilities without !important.
+ *
+ * THE STRIP under a lesson's top bar ("Held by …", the waiting lines, the
+ * offline heads-up). Owner's choice from three demos: it fades and slides
+ * open over 200 ms with the message box's own easing, and closes the same
+ * way, so the lesson glides and nothing jumps. Its words cross-fade when
+ * they change in place. The message box fades over 150 ms.
+ */
+.lh-strip {
+	display: grid;
+	grid-template-rows: 0fr;
+	opacity: 0;
+	transition: grid-template-rows 200ms cubic-bezier(0.2, 0.8, 0.2, 1), opacity 200ms ease;
+}
+.lh-strip[data-open] {
+	grid-template-rows: 1fr;
+	opacity: 1;
+}
+.lh-strip > div {
+	min-height: 0;
+	overflow: hidden;
+}
+.lh-strip-words {
+	animation: lh-strip-words-in 150ms ease;
+}
+@keyframes lh-strip-words-in {
+	from { opacity: 0; }
+}
+
+/* The message box (the whole dock) on a session another device holds. */
+.lh-held-dock {
+	transition: opacity 150ms ease, visibility 0s linear 0s;
+}
+.lh-held-dock[data-held] {
+	opacity: 0;
+	visibility: hidden;
+	transition: opacity 150ms ease, visibility 0s linear 150ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.lh-strip,
+	.lh-held-dock,
+	.lh-held-dock[data-held] {
+		transition: none;
+	}
+	.lh-strip-words {
+		animation: none;
+	}
+}

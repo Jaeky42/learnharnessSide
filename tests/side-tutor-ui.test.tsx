@@ -307,6 +307,30 @@ describe("minimized", () => {
 	});
 });
 
+describe("on a session another device holds (cloud sync)", () => {
+	it("the window closes to a greyed bubble that can't be pressed, and comes back after a take-over", async () => {
+		const host = await mountTutor();
+		assert.ok(host.querySelector("[data-testid='side-tutor']"), "open, as the learner left it");
+		const { SideTutor } = await import("../components/side-tutor.tsx");
+		const root = roots.at(-1)!.root;
+		await act(async () => root.render(<SideTutor chatId="chat_1" held />));
+		await act(async () => new Promise((r) => setTimeout(r, 20)));
+		assert.equal(document.querySelector("[data-testid='side-tutor']"), null, "no window while it is held elsewhere");
+		const bubble = document.querySelector("[data-testid='side-tutor-toggle']") as HTMLElement;
+		assert.ok(bubble);
+		assert.equal(bubble.getAttribute("data-held"), "");
+		assert.equal(bubble.getAttribute("aria-disabled"), "true");
+		assert.equal(bubble.getAttribute("title"), "Take this session over first");
+		assert.match(bubble.getAttribute("class") ?? "", /opacity-40/);
+		await act(async () => bubble.click());
+		assert.equal(document.querySelector("[data-testid='side-tutor']"), null, "a press does nothing");
+		// Taken over: the tutor is as the learner left it.
+		await act(async () => root.render(<SideTutor chatId="chat_1" />));
+		await act(async () => new Promise((r) => setTimeout(r, 20)));
+		assert.ok(document.querySelector("[data-testid='side-tutor']"));
+	});
+});
+
 describe("moving and resizing (computer)", () => {
 	const frameOf = (host: HTMLElement) => host.querySelector("[data-testid='side-tutor-frame']") as HTMLElement;
 	const zone = (host: HTMLElement, edge: string) => host.querySelector(`[data-testid='side-tutor-resize-${edge}']`) as HTMLElement;

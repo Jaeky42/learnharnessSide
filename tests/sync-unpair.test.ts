@@ -116,7 +116,7 @@ function world() {
 		});
 		return { dataDir, sync, deviceId, discarded, backups: () => backups, setOnline: (value: boolean) => { online = value; } };
 	}
-	return { root, serverDir, authority, desktop, pass: (ms: number) => { clock += ms; }, now: () => clock };
+	return { root, serverDir, authority, desktop, pass: (ms: number) => { clock += ms; }, now: () => clock, forgetName: (id: string) => { delete names[id]; } };
 }
 
 const quiet = { ok: true, fetched: [], sent: [], removed: [], lost: [], handed: [] };
@@ -171,6 +171,18 @@ describe("unpairing on the PC", () => {
 		assert.deepEqual(w.authority.presence(LAPTOP), { online: false, lastSeenAt: null }, "never heard from");
 		w.authority.releaseDevice(PC);
 		assert.deepEqual(w.authority.presence(PC), { online: false, lastSeenAt: null });
+	});
+
+	it("a PC removed on the server's site keeps its name on the sessions it still holds", async () => {
+		const { w } = await synced();
+		assert.equal(w.authority.held()["chat_circuits"]?.name, "Desktop");
+		// Remove on the server's site: the login file no longer lists the PC.
+		w.forgetName(PC);
+		assert.equal(w.authority.held()["chat_circuits"]?.name, "Desktop", "\"Held by Desktop\" still has a name to show");
+		assert.deepEqual(w.authority.holderOf("chat_circuits"), { id: PC, name: "Desktop" });
+		// Also after the server restarts: the name is in its record.
+		const record = JSON.parse(fs.readFileSync(path.join(w.serverDir, "sync", "authority.json"), "utf-8")) as { names?: Record<string, string> };
+		assert.deepEqual(record.names, { [PC]: "Desktop" });
 	});
 
 	it("a server nobody ever synced with has nothing to release, and writes nothing", () => {

@@ -52,6 +52,11 @@ export interface ServerEvents {
 	 *  the chat; the client mirrors it by disabling the composer/dock
 	 *  submit. */
 	"compaction-changed": { chatId: string; running: boolean };
+	/** Cloud sync (side-tutor fork, Phase 6): this copy's sync state or the
+	 *  sessions held elsewhere changed (paired, unpaired, offline, back, a
+	 *  take-over). Open pages ask /api/cloud again. Never sent where nothing
+	 *  is paired. */
+	"cloud-changed": Record<string, never>;
 }
 
 export type ServerEventType = keyof ServerEvents;
@@ -69,6 +74,7 @@ export const SERVER_EVENT_TYPES = [
 	"subscriptions-changed",
 	"record-changed",
 	"compaction-changed",
+	"cloud-changed",
 ] as const satisfies readonly ServerEventType[];
 
 /** One notification: the type discriminates the payload. */
