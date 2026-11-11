@@ -1,6 +1,6 @@
 # Cloud sync: approved plan
 
-Status: **Phases 1–3 built (server mode, sign-in on the server, phone layouts); the rest is planned.** Work happens on a separate branch. It merges into `side-tutor` only once the whole feature works and the owner approves the merge, because every push to `side-tutor` publishes a release. Change these decisions only with the owner's approval.
+Status: **Phases 1–3 done (server mode, sign-in on the server, phone layouts); Phase 4 is next; the rest is planned.** Work happens on a separate branch. It merges into `side-tutor` only once the whole feature works and the owner approves the merge, because every push to `side-tutor` publishes a release. Change these decisions only with the owner's approval.
 
 Goal: keep learning progress on several devices. The Windows desktop app stays fully usable, works offline, and keeps the Obsidian connection. A phone uses LearnHarness from the browser.
 
@@ -264,7 +264,7 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
    - ✅ `ob sync-config` has `--excluded-folders` (comma-separated, empty to clear). It also has `--configs` (which `.obsidian` setting categories sync; may close the `.obsidian` gap), `--conflict-strategy merge|conflict` (an owner decision for Phase 4), `--file-types` and `--device-name`.
 1. ✅ **Server mode.** Dockerfile, the `LH_DATA_DIR` volume, the password login gate in `proxy.ts`, Caddy (HTTPS), the server image workflow, and automatic server updates. Running on the permanent VPS: HTTPS via Caddy, setup and password, locked from outside, and the nightly timer installed.
 2. ✅ **Sign-in on the server.** The ChatGPT paste box, plus the Claude sign-in button and Disconnect. Verified on the VPS: Claude Code installed itself onto the volume, and both ChatGPT and Claude connected from Settings.
-3. ✅ **Phone layouts.** Every view, the side tutor bubble and sheet, the full-screen notes drawer, Settings, press and hold, and the home-screen app. Two real-phone rounds done; a final short pass is left (see the Handoff).
+3. ✅ **Phone layouts.** Every view, the side tutor bubble and sheet, the full-screen notes drawer, Settings, press and hold, and the home-screen app. Two real-phone rounds; the owner declared Phase 3 complete.
 4. **Vault on the server.** The `ob sync` process, setup, and the automatic excluded-folders list.
 5. **Sync engine.** The lease API, session sync with take-over and desktop copies, graph line and operation sync, per-key settings merges, and the sync protocol version check.
    - Built as wrapper stores at the composition root (`src/server/stores.ts`) over the `core/ports.ts` interfaces, so upstream store code stays untouched and rebasing onto upstream stays cheap.
@@ -278,13 +278,7 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 - **Branch:** `claude/pensive-goldberg-7dty2m`. All cloud sync work lives here.
   - Pushes build only the server image (`:dev`), never a desktop release.
   - **Never push to `side-tutor`** until the owner approves merging the whole feature.
-- **Phase 3 (phone layouts) is built and pushed, with two real-phone rounds done** (see "Real-phone checks" above). What's left before Phase 4:
-  1. **Confirm the last fixes on the phone** (pushed last, not yet seen by the owner):
-     - the home-screen app's top inset tuned from +40 to +26 points (`--lh-safe-top`): the top bar should sit higher and stay sharp. If its top edge looks soft, go back up a few points;
-     - the model list staying above the keyboard in the home-screen app (`phoneTopPlacement`, and `standaloneGap` off while the keyboard is up);
-     - Fable listed as `claude-code · fable`, at the bottom with the other Claude models, and answering a message (it depends on the owner's Claude plan).
-  2. **A final short pass on parts not re-checked in round 2:** the notes drawer (list, then note, "‹ Notes"), the side tutor sheet, press and hold on sessions and notes, pinch zoom in the plan and diagrams, and the home graph's search icon.
-  3. **Then close Phase 3:** mark it done here, and refresh the owner's phone-guide checklist (an Artifact page the owner has).
+- **Phase 3 (phone layouts) is complete** (the owner's call, after two real-phone rounds; see "Real-phone checks" above). The last fixes pushed before that call (the home-screen app's top inset at +26 points, phone menus pinned by their top, Fable as `fable`) weren't reported on individually; if the owner mentions one of them, start from its bullet in "Phone layouts".
 - **Open by design:** the Safari-tab bleed stays marked as an experiment (it works on the owner's phone); a tablet layout is not built.
 - **Also on this branch (not phone work):** Claude Fable in the Claude Code model list and the Claude-models-last menu order (see `docs/side-tutor.md`, "Claude Code: Fable in the model list"). It reaches the desktop app only with the merge.
 - **Known CI flake:** `tests/notes-import-route.test.ts` (first test, "out-of-order completion remains supported") depends on timer order and fails now and then on GitHub's runners. It isn't related to this work: re-run the failed job. A separate task to make it deterministic was offered to the owner.
@@ -312,7 +306,7 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 
 ### Next: Phase 4, the vault on the server
 
-- Start once the Phase 3 items in "State" are confirmed on the owner's phone.
+- Phase 3 is closed; start Phase 4 with its open questions.
 - The open questions for Phase 4 are listed below. Ask them one at a time, with pictures.
 - **Sample data for UI screenshots:** copy `tests/fixtures/golden-data` to a scratch `LH_DATA_DIR`. Truncating a copy of the teaching chat right after a `quiz` tool call gives a session with an open question. Phone screenshots: Playwright `devices["iPhone 13"]`; real touch (press and hold, pinch) through CDP `Input.dispatchTouchEvent`.
 
