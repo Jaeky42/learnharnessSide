@@ -815,6 +815,20 @@ The sync protocol version stays at 1: nothing has been paired anywhere yet.
   - the learner's own Unpair: no chip and no strip.
 - **Not seen in a browser:** SYNC PAUSED (two copies of one build always speak the same protocol version); it is covered by the unit tests.
 
+#### The wrap-up run
+
+One run between two built copies with the loop on, through the real screens, nobody pressing "Sync now", with a computer-size page of each copy and a phone-size page of the server:
+
+- before pairing, 12 seconds on a lesson: no request to `/api/cloud` from either side, no chip, no strip, no `sync/` folder;
+- Pair pressed in Settings → Cloud: both sessions identical on the server 0.4 s later;
+- Take over tapped on the phone: moved after 4.7 s, and the PC's open lesson showed "Held by the web app" by itself; taken back on the PC in 0.2 s, and the phone's strip returned by itself;
+- 30 idle seconds with three pages open: the PC wrote no file; the server wrote `sync/authority.json` once (its once-a-minute save of "last heard from");
+- the server stopped: chip and heads-up after 37 s; started again: both gone 37 s later;
+- the PC stopped with three unsent messages, the session taken over on the server, the PC started: the discard box, with the lesson behind it showing the server's version;
+- Unpair this PC: no chip, no strip, the message box back, and the server listing no desktop app.
+
+**How long the chip stays after the connection is back:** until the PC's next retry, and the retries slow down while offline (10 s, 20 s, 40 s … up to every 5 minutes; Phase 5, decision 11). After a long spell offline that can be 5 minutes. **Sync now** in Settings → Cloud, where the chip leads, ends the wait at once. The owner has been told; no change was asked for.
+
 #### Still to do
 
 - The owner's real PC with the real server: only after the merge into `side-tutor`, which needs the owner's approval and a pairing guide.
@@ -866,4 +880,12 @@ The sync protocol version stays at 1: nothing has been paired anywhere yet.
   - To play "the server is away", stop only the copy on the server's port (find it by `PORT=` in `/proc/<pid>/environ`) and start it again with the same folders.
   - With a page of the desktop copy open on the home screen, the graph view settles new concepts and saves their places a few seconds after a sync; the places are equal on both sides one round later, not at once.
   - A local `next build` rewrites `next-env.d.ts` and `AGENTS.md`; put both back before committing (`git checkout -- AGENTS.md next-env.d.ts`).
+- **Browser runs of the sync screens (Phase 6):**
+  - Stop a copy with `kill -9`, as Windows does to the app's server. A plain `kill` lets it run on for a while, still syncing, so the other side never sees it go offline.
+  - The server counts a PC as offline 30 seconds after it last heard from it; wait at least that long before expecting "offline since …" or the warning box.
+  - The warning box needs the holder's last word to be "unsent" or "busy". A PC that was idle when it stopped said "all sent", and the session then moves with no box; set `report.word` in the server's `sync/authority.json` to see the box.
+  - A discard: stop the PC copy, add messages to its chat file by hand (a user message and an assistant message each; a record that ends on a user message makes the page try to continue the turn), take the session over on the server, start the PC copy.
+  - The setup code works once, so a second script run against the same data folders isn't signed in on the server copy. Start each run from fresh folders, or pass the first context's `storageState()` on.
+  - The live channel (`/api/events`) sends nothing until its first event or its 25-second ping, so the page's "open" can be that late. Don't wait on it in a script, and don't hang anything urgent on `useServerResync` alone.
+  - A lesson's first messages come from the server-side render (`initialMessages`), not from a fetch.
 - **Desktop must not change:** server-only UI keys off `isServerMode()` (the `lh_server` cookie) with no extra requests. `tests/claude-code-status-ui.test.tsx` pins the desktop's exact request list.
