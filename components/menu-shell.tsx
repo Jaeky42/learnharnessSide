@@ -2,7 +2,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
-import { isPhoneNow } from "@/components/phone/use-phone";
+import { isPhoneNow, isTouchPhoneNow } from "@/components/phone/use-phone";
 
 /**
  * THE shared menu shell (menu standardization, fix wave chunk B): one
@@ -63,6 +63,36 @@ export interface MenuPlacement {
 	side: MenuSide;
 	style: Record<string, string | number>;
 	maxHeight: number;
+}
+
+/** PHONE (cloud sync Phase 3): the part of the screen a menu can use. On an
+ *  iPhone the keyboard covers the page without changing innerHeight, so a
+ *  menu placed from innerHeight ended up behind the keyboard (owner's
+ *  iPhone); this is the visible height phone-viewport.tsx keeps in --lh-vvh. */
+function phoneVisibleHeight(): number {
+	const vvh = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--lh-vvh"));
+	return Number.isFinite(vvh) && vvh > 0 ? Math.min(vvh, window.visualViewport?.height ?? vvh) : (window.visualViewport?.height ?? window.innerHeight);
+}
+
+/** PHONE: while the iPhone keyboard is up the body is shifted down
+ *  (phone-viewport.tsx) and is the frame for fixed elements, so an anchor is
+ *  measured from the body's top instead of the screen's. */
+function phoneAnchorRect(r: DOMRect): { top: number; bottom: number; left: number; right: number } {
+	const body = document.body;
+	const shift = body.dataset.lhKeyboard !== undefined ? body.getBoundingClientRect().top : 0;
+	return { top: r.top - shift, bottom: r.bottom - shift, left: r.left, right: r.right };
+}
+
+/** PHONE: an upward menu is pinned by `bottom`, which counts from the bottom
+ *  of its fixed frame: the shifted body while the keyboard is up, otherwise
+ *  the full layout height, which the iPhone keyboard covers without
+ *  shrinking. Move it up by the covered part so it sits above the keyboard. */
+function phoneFrameBottom(p: MenuPlacement, visible: number): MenuPlacement {
+	const bottom = p.style.bottom;
+	if (typeof bottom !== "number") return p;
+	const body = document.body;
+	const frame = body.dataset.lhKeyboard !== undefined ? body.getBoundingClientRect().height : window.innerHeight;
+	return { ...p, style: { ...p.style, bottom: bottom + Math.max(0, frame - visible) } };
 }
 
 /** Pure: the placement decision — anchored rect + viewport + the menu's
@@ -161,7 +191,10 @@ export function MenuShell({
 		const el = menuRef.current;
 		if (!el) return;
 		const input = el.querySelector<HTMLElement>("input");
-		(input ?? el).focus();
+		// PHONE: a touch phone lands on the menu body, not the search, so the
+		// on-screen keyboard doesn't pop up over the list (owner's iPhone);
+		// tapping the search still opens it.
+		(isTouchPhoneNow() ? el : (input ?? el)).focus();
 	}, [placed]);
 
 	// The standard arrow machine for menus WITHOUT a search (owner: when a
@@ -211,14 +244,16 @@ export function MenuShell({
 		const place = () => {
 			const el = anchor();
 			if (!el || !menuRef.current) return;
+			const phone = isPhoneNow();
+			const visible = phone ? phoneVisibleHeight() : window.innerHeight;
 			const p = computeMenuPlacement(
-				el.getBoundingClientRect(),
-				{ width: window.innerWidth, height: window.innerHeight },
+				phone ? phoneAnchorRect(el.getBoundingClientRect()) : el.getBoundingClientRect(),
+				{ width: window.innerWidth, height: visible },
 				menuRef.current.scrollHeight,
 				preferredSide,
 				align,
 			);
-			setPlaced(isPhoneNow() ? clampMenuToScreen(p, menuRef.current.offsetWidth, window.innerWidth) : p);
+			setPlaced(phone ? phoneFrameBottom(clampMenuToScreen(p, menuRef.current.offsetWidth, window.innerWidth), visible) : p);
 		};
 		place();
 		const rePlace = () => {
@@ -227,10 +262,13 @@ export function MenuShell({
 		};
 		window.addEventListener("scroll", rePlace, true);
 		window.addEventListener("resize", rePlace);
+		// PHONE: the iPhone keyboard changes only the visual viewport.
+		window.visualViewport?.addEventListener("resize", rePlace);
 		return () => {
 			cancelAnimationFrame(raf);
 			window.removeEventListener("scroll", rePlace, true);
 			window.removeEventListener("resize", rePlace);
+			window.visualViewport?.removeEventListener("resize", rePlace);
 		};
 	}, [anchorRef, anchorTestid, preferredSide, align]);
 

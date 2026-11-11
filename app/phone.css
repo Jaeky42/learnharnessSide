@@ -30,7 +30,7 @@
 		transform: translateX(-100%);
 		visibility: hidden;
 		transition: transform 200ms ease, visibility 0s linear 200ms;
-		padding-top: env(safe-area-inset-top, 0px);
+		padding-top: var(--lh-safe-top, env(safe-area-inset-top, 0px));
 		padding-bottom: env(safe-area-inset-bottom, 0px);
 		padding-left: env(safe-area-inset-left, 0px);
 		background: var(--background);
@@ -88,22 +88,6 @@
 		to { transform: none; }
 	}
 
-	/* ── Clock cover (home-screen app only; components/phone/phone-runtime.tsx)
-	   A pinned, solid, full-width strip behind the clock, so iOS 26+ uses its
-	   colour instead of blurring the top of the app (owner's choice,
-	   experimental). Under the drawer (40), its dim (39) and every overlay;
-	   above the page. */
-	html:not(.lh-electron) [data-phone="clock-cover"] {
-		position: fixed;
-		top: 0;
-		left: 0;
-		right: 0;
-		height: env(safe-area-inset-top, 0px);
-		z-index: 30;
-		background: var(--background);
-		pointer-events: none;
-	}
-
 	/* ── Notes drawer: slides in from the right and fills the screen ───── */
 	html:not(.lh-electron) [data-phone="notes"] {
 		position: fixed;
@@ -113,7 +97,7 @@
 		bottom: auto;
 		height: var(--lh-vvh, 100dvh);
 		border-left: 0;
-		padding-top: env(safe-area-inset-top, 0px);
+		padding-top: var(--lh-safe-top, env(safe-area-inset-top, 0px));
 		padding-bottom: env(safe-area-inset-bottom, 0px);
 		padding-left: env(safe-area-inset-left, 0px);
 		padding-right: env(safe-area-inset-right, 0px);
@@ -205,6 +189,19 @@
 	html:not(.lh-electron) body {
 		min-height: var(--lh-vvh, 100dvh);
 	}
+	/* Every top edge clears the clock by --lh-safe-top. In the home-screen
+	   app it's 40 points more: since iOS 26 the iPhone blurs the top of a
+	   home-screen web app that runs under the clock, about 40 points below
+	   it, which softened the top bar (owner's iPhone). No setting turns the
+	   blur off and a solid strip behind the clock didn't stop it, so the
+	   controls move below it (owner's choice). body[data-lh-standalone] is
+	   set by components/phone/phone-viewport.tsx. */
+	html:not(.lh-electron) body {
+		--lh-safe-top: env(safe-area-inset-top, 0px);
+	}
+	html:not(.lh-electron) body[data-lh-standalone] {
+		--lh-safe-top: calc(env(safe-area-inset-top, 0px) + 40px);
+	}
 	/* While the iPhone keyboard is up, the app follows the visible area
 	   (components/phone/phone-viewport.tsx). The transform also makes the
 	   body the frame for fixed overlays, so they move with it. */
@@ -245,8 +242,8 @@
 	/* ── Top bar: one row, title first, icon chips ─────────────────── */
 	html:not(.lh-electron) [data-phone="topbar"] {
 		gap: 0.5rem;
-		padding-top: env(safe-area-inset-top, 0px);
-		height: calc(3.75rem + env(safe-area-inset-top, 0px));
+		padding-top: var(--lh-safe-top, env(safe-area-inset-top, 0px));
+		height: calc(3.75rem + var(--lh-safe-top, env(safe-area-inset-top, 0px)));
 		padding-left: max(0.75rem, env(safe-area-inset-left, 0px));
 		padding-right: max(0.75rem, env(safe-area-inset-right, 0px));
 	}
@@ -329,7 +326,7 @@
 		background: var(--accent);
 	}
 	html:not(.lh-electron) [data-phone="tutor-bubble"][data-phone-place="top"] {
-		top: calc(3.75rem + 0.75rem + env(safe-area-inset-top, 0px));
+		top: calc(3.75rem + 0.75rem + var(--lh-safe-top, env(safe-area-inset-top, 0px)));
 	}
 	html:not(.lh-electron) [data-phone="tutor-bubble"] > svg {
 		width: 1.5rem;
@@ -446,7 +443,7 @@
 	   Icon-only buttons; search opens a full-width field and the other
 	   controls step aside while it's open. */
 	html:not(.lh-electron) [data-phone="graph-chrome"] {
-		top: calc(0.5rem + env(safe-area-inset-top, 0px));
+		top: calc(0.5rem + var(--lh-safe-top, env(safe-area-inset-top, 0px)));
 		right: max(0.5rem, env(safe-area-inset-right, 0px));
 	}
 	html:not(.lh-electron) [data-phone="graph-chrome"] :is([data-testid="open-chain-table"], [data-testid="import-notes"]) {
@@ -582,7 +579,7 @@
 	/* Home and new-session: the corner ☰ clears the clock in the home-screen
 	   app, which draws under it. */
 	html:not(.lh-electron) [data-phone="corner-header"] {
-		padding-top: calc(0.5rem + env(safe-area-inset-top, 0px));
+		padding-top: calc(0.5rem + var(--lh-safe-top, env(safe-area-inset-top, 0px)));
 		padding-left: max(0.75rem, env(safe-area-inset-left, 0px));
 	}
 }

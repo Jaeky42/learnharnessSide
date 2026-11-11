@@ -134,6 +134,7 @@ export function PhoneViewport() {
 			root.style.removeProperty("--lh-vvh");
 			body.style.removeProperty("--lh-vv-top");
 			delete body.dataset.lhKeyboard;
+			delete body.dataset.lhStandalone;
 			if (body.dataset.lhBleed !== undefined) {
 				delete body.dataset.lhBleed;
 				body.style.removeProperty("--lh-bleed");
@@ -157,6 +158,9 @@ export function PhoneViewport() {
 			// Safari's new height has arrived: the keyboard is gone.
 			if (closing && fit.height >= window.innerHeight - 1) endClosing();
 			const standalone = standaloneNow();
+			// The home-screen app's top edges sit lower (app/phone.css, --lh-safe-top).
+			if (standalone) body.dataset.lhStandalone = "";
+			else delete body.dataset.lhStandalone;
 			const gap = standaloneGap({ standalone, innerWidth: window.innerWidth, innerHeight: window.innerHeight, screenWidth: window.screen.width, screenHeight: window.screen.height, safeTop: standalone ? safeAreaTop() : 0 });
 			root.style.setProperty("--lh-vvh", `${layoutHeight(fit.height, window.innerHeight, closing) + gap}px`);
 			const bleed = bleedFor({ userAgent: navigator.userAgent, standalone, keyboard: keyboardUp(fit, window.innerHeight, typing) });
