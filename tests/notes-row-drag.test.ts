@@ -226,6 +226,67 @@ describe("where a drag lands", () => {
 		assert.equal(dropFolder(p, home), null);
 	});
 
+	it("the bottom note of the bottom folder is pulled down and out of it (the owner's ask)", () => {
+		// "yes" is the last folder and Magnetism its last note: the last row.
+		const list = rows("Inbox/", "yes/", "yes/Electricity.md", "yes/Magnetism.md");
+		const p = plan(list, "yes/Magnetism.md");
+		assert.equal(p.homeGap, 3);
+		// Its centre starts at 140. A small move down keeps it in its folder…
+		const nudged = last(follow(p, range(140, 156)));
+		assert.deepEqual([nudged.gap, nudged.level.parent], [3, "yes"]);
+		assert.equal(dropFolder(p, nudged), null);
+		// …half a row down takes it out of every folder.
+		const out = last(follow(p, range(140, 162)));
+		assert.deepEqual([out.gap, out.level], [3, { parent: "", depth: 0 }]);
+		assert.equal(dropFolder(p, out), "");
+		// The line has room for it: one row below the list's end.
+		assert.equal(clampLine(p, 900, 0, 600), 160);
+		// A finger resting right at that point doesn't flip it in and out.
+		assert.deepEqual([...new Set(follow(p, [161, 158, 161, 157, 160, 156], out).map((a) => a.level.parent))], [""]);
+		// Pulled clearly back up, it is in its folder again.
+		const back = last(follow(p, range(162, 140), out));
+		assert.equal(dropFolder(p, back), null);
+	});
+
+	it("the same for an only note, for a folder inside the last folder, and when the list can't show more room", () => {
+		const only = plan(rows("Inbox/", "yes/", "yes/Electricity.md"), "yes/Electricity.md");
+		assert.equal(dropFolder(only, last(follow(only, range(100, 122)))), "");
+		// A folder with its notes, last in "yes": half of its own row is enough.
+		const nested = plan(rows("yes/", "yes/A.md", "yes/sub/", "yes/sub/B.md"), "yes/sub");
+		assert.equal(nested.blockHeight, 80);
+		const pulled = last(follow(nested, range(100, 122)));
+		assert.deepEqual([pulled.gap, pulled.level.parent], [2, ""]);
+		assert.equal(dropFolder(nested, pulled), "");
+		// The list ends at the bottom of what's visible, so the line can't move
+		// lower; pulling on still moves the point the rules read to the line's
+		// bottom edge, and that is enough.
+		const held = clampLine(only, 500, 0, 120);
+		assert.equal(held, 80);
+		const probe = lineProbe(only, 500, held);
+		assert.equal(probe, 120);
+		assert.equal(dropFolder(only, aimDrag(only, probe, only.homeGap, null, () => true)), "");
+	});
+
+	it("from a folder inside a folder it steps out one folder at a time", () => {
+		const p = plan(rows("yes/", "yes/sub/", "yes/sub/B.md"), "yes/sub/B.md");
+		assert.deepEqual(gapLevels(p, p.homeGap).map((l) => l.parent), ["yes/sub", "yes", ""]);
+		// Its centre starts at 100: half a row down is "yes", a little more is outside.
+		assert.equal(last(follow(p, range(100, 118))).level.parent, "yes/sub");
+		const one = last(follow(p, range(100, 122)));
+		assert.deepEqual(one.level, { parent: "yes", depth: 1 });
+		assert.equal(dropFolder(p, one), "yes");
+		const two = last(follow(p, range(100, 136)));
+		assert.deepEqual(two.level, { parent: "", depth: 0 });
+		// Each step holds while the finger rests near its border.
+		assert.deepEqual([...new Set(follow(p, [121, 118, 121, 117], one).map((a) => a.level.parent))], ["yes"]);
+		assert.deepEqual([...new Set(follow(p, [131, 128, 131, 127], two).map((a) => a.level.parent))], [""]);
+	});
+
+	it("a note that is already outside every folder stays put when pulled below the list", () => {
+		const p = plan(rows("yes/", "yes/A.md", "Loose.md"), "Loose.md");
+		assert.equal(dropFolder(p, last(follow(p, range(100, 140)))), null);
+	});
+
 	it("below the last row is the end of the list, outside every folder", () => {
 		const list = rows("yes/", "yes/A.md", "yes/B.md", "Loose.md");
 		const p = plan(list, "yes/A.md");
@@ -282,8 +343,9 @@ describe("limits", () => {
 		assert.equal(clampLine(p, 10, 50, 600), 50);
 	});
 
-	it("nor below the end of the list or the visible bottom", () => {
-		assert.equal(clampLine(p, 900, 0, 600), 200);
+	it("nor below the visible bottom, or more than one row past the end of the list", () => {
+		// The list is 240 px with the note in it; one more row of room below it.
+		assert.equal(clampLine(p, 900, 0, 600), 240);
 		assert.equal(clampLine(p, 900, 0, 150), 110);
 		assert.equal(clampLine(p, 120, 0, 600), 120);
 	});

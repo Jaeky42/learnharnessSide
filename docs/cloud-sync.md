@@ -296,7 +296,7 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
     - Nothing changes while the page is pinch-zoomed (`visualViewport.scale` above 1).
     - Android shrinks the layout itself (`interactive-widget=resizes-content` in the root layout's viewport).
     - Anything that positions a fixed element from `getBoundingClientRect()` measures relative to the body (`use-dock-anchor.ts` does).
-  - `use-dock-anchor.ts`: the tutor bubble's position, measured from the top (an iPhone keyboard covers the bottom edge).
+  - `use-dock-anchor.ts`: the tutor bubble's position, measured from the top (an iPhone keyboard covers the bottom edge). The computer's minimized tutor uses it too (owner's ask, after Phase 4), so it also reports how far the lesson's right edge is from the window's; the phone ignores that.
   - `enter-key.ts`, `enter-hint.tsx`, `long-press.ts`, `use-pinch-zoom.ts`, `use-dock-touch-scroll.ts`, `window-lock.ts`.
 - **Wiring:** `sidebar.tsx` (drawer state, backdrop, press-and-hold on rows), `top-bar.tsx`, `chat.tsx` (dock hook, practice hint, dock drag), `side-tutor.tsx`, `notes/notes-drawer.tsx`, `notes/notes-tree.tsx`, `settings/settings-dialog.tsx` (a link to a section opens on it; plain Settings opens on the list), `graph-view.tsx` (search icon), `stats-bar.tsx`, `menu-shell.tsx`, `session-overlay.tsx` and `plan-block.tsx` (pinch), and the Enter handlers in `composer.tsx`, `question-dock.tsx`, `practice-dock.tsx`, `reading-thinking.tsx`.
 - **Tests:** `tests/phone-layout.test.ts` checks that every rule in `phone.css` is phone-only and browser-only, and covers the Enter rule, the bubble position, the hold slop, edge scrolling and menu clamping. `tests/phone-hold-drag.test.ts` drives press and hold and hold-then-move with scripted pointer and touch events. `tests/notes-row-drag.test.ts` covers where a drag lands. `tests/server-auth.test.ts` pins the open manifest and icon paths.
@@ -394,7 +394,7 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
   - a commit and push to the branch;
   - a "what to try on your server" list.
 
-### Notes drawer additions (asked by the owner after Phase 4): built; the redone drag is waiting for the iPhone check
+### Notes drawer and side tutor additions (asked by the owner after Phase 4)
 
 - **What:** the folder menu's "New note" / "New folder" wording, Delete for notes and folders, and dragging on a phone, then dragging redone for phone and computer. Each plan and its wording were approved by the owner. The decisions are recorded where they belong:
   - the menus, Delete and the dragging design: "Notes drawer" in `docs/side-tutor.md`;
@@ -409,8 +409,11 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
   - Unit tests: the store and the routes, the confirm wording, the menus and the confirm box, the dragging rules, the touch rules, and a clear-out during a sync stop against the real `ob`.
   - A Playwright run in server mode with the stand-in Obsidian, at phone size with real touch events (CDP `Input.dispatchTouchEvent`: touchStart, wait 750 ms, touchMove in steps, touchEnd): the line lifting and following the finger, rows parting, the indent following the folder, a folder lighting on its middle with the rows back in place, the upper limit and pushing past it to above Inbox, the drop and the slide to the sorted place, a gap among a folder's notes, putting a row straight back, a folder dragged as one piece into another, a refused move sliding back, and edge scrolling.
   - The same at desktop width with the mouse: a click still opens a note, press-and-move drags, Esc puts it back, and the menus are untouched. Earlier runs covered Delete: the confirm boxes, the open note with unsaved typing (it closes and isn't written back), a deleted home folder, and the deletions reaching the stand-in Obsidian with sync never paused.
-- **The redone drag hasn't been tried on the owner's iPhone yet.** Starting the drag is the same as in round 1. New and unseen on iOS: the row moving under the finger and the other rows sliding (CSS `translate` and `transform` with transitions), and the list scrolling under the line.
-  - If something is off there, the numbers to tune are at the top of `row-drag.ts` (`EDGE_BAND`, `INTO_DWELL_MS`, `LEVEL_STICK`) and `row-drag-dom.ts` (`PART_MS`, `SETTLE_MS`, `SLIDE_MS`, `INTO_TUCK`).
+- **The redone drag is confirmed on the owner's iPhone** ("the dragging looks great").
+  - The numbers to tune, should that change, are at the top of `row-drag.ts` (`EDGE_BAND`, `INTO_DWELL_MS`, `LEVEL_STICK`) and `row-drag-dom.ts` (`PART_MS`, `SETTLE_MS`, `SLIDE_MS`, `INTO_TUCK`).
+- **A third round, asked for with that confirmation** (see `docs/side-tutor.md`): the bottom row can be pulled down out of the bottom folder; on a computer the minimized side tutor is the phone's round bubble at the lesson's bottom right; and the tutor window says only "Stuck on a term or a step? Ask here."
+  - Checked in a browser at phone size (touch) and at computer width (mouse). Not yet seen by the owner.
+  - **The owner asked for these not to be pushed yet**: more features are coming for one bigger push. Until then the commits exist only in the session that made them.
 - **Wording and behaviour added without being asked, for the owner to review:** the message `Deleted “Electricity”.` after a delete, and the message line showing on the phone's list screen.
 
 ### Next: Phase 5, the sync engine

@@ -29,6 +29,12 @@ import {
 	type SideTutorWireEvent,
 } from "@/src/core";
 
+/** The minimized bubble on a computer: its gap from the lesson's right edge,
+ *  and its place under the top bar while an opened question leaves no room
+ *  above the dock (the phone's own values are in app/phone.css). */
+const BUBBLE_EDGE_GAP = 16;
+const BUBBLE_TOP = 72;
+
 const OPEN_KEY = "lh:side-tutor:open";
 const POS_KEY = "lh:side-tutor:pos";
 /** Default size/anchor: under the 60px top bar, against the right edge. */
@@ -85,14 +91,17 @@ export function SideTutor({ chatId }: { chatId: string }) {
 	const scrollRef = useRef<HTMLDivElement>(null);
 	const inputRef = useRef<HTMLTextAreaElement>(null);
 	const dragRef = useRef<{ x: number; y: number; start: Pos } | null>(null);
-	/** Last known panel width — the minimized pill lines up with its right edge. */
+	/** Last known panel width, for keeping the dragged window on screen. */
 	const widthRef = useRef(DEFAULT_WIDTH);
 	const fetchAbortRef = useRef<AbortController | null>(null);
 	// PHONE (cloud sync Phase 3): a bubble above the message box that opens a
 	// bottom sheet. It always starts closed there, can't be dragged or
 	// resized, and never touches the desktop's saved open state or position.
 	const phone = useIsPhone();
-	const anchor = useDockAnchor(phone);
+	// Minimized, the tutor is the same round bubble on a computer (owner's
+	// ask): at the lesson's bottom right, just above the question, wherever
+	// the open window was dragged to.
+	const anchor = useDockAnchor(true);
 
 	// Client-only preferences (no SSR mismatch).
 	useEffect(() => {
@@ -274,9 +283,11 @@ export function SideTutor({ chatId }: { chatId: string }) {
 			<button
 				type="button"
 				data-testid="side-tutor-toggle"
-				// PHONE hooks (app/phone.css): a round bubble above the dock, or in
-				// the top-right corner while an opened question fills the screen.
+				// A round bubble at the lesson's bottom right, just above the dock,
+				// or in the top-right corner while an opened question leaves no
+				// room there. PHONE: app/phone.css sizes and places it sideways.
 				data-phone="tutor-bubble"
+				data-place={anchor.place}
 				data-phone-place={phone ? anchor.place : undefined}
 				onClick={(e) => {
 					blurAfterPointerClick(e);
@@ -288,14 +299,17 @@ export function SideTutor({ chatId }: { chatId: string }) {
 						? anchor.place === "above-dock"
 							? { top: anchor.top }
 							: {}
-						: { right: Math.max(EDGE, window.innerWidth - pos.left - widthRef.current), top: pos.top, WebkitAppRegion: "no-drag" }) as React.CSSProperties
+						: { right: anchor.right + BUBBLE_EDGE_GAP, top: anchor.place === "above-dock" ? anchor.top : BUBBLE_TOP, WebkitAppRegion: "no-drag" }) as React.CSSProperties
 				}
-				className="fixed z-30 flex items-center gap-1.5 whitespace-nowrap rounded-full border border-border bg-background/95 px-3 py-1.5 text-xs text-muted-foreground shadow-md backdrop-blur transition-colors hover:text-foreground"
+				className="fixed z-30 flex size-13 items-center justify-center rounded-full border border-border bg-card/85 text-muted-foreground shadow-[0_6px_18px_rgb(0_0_0/0.35)] backdrop-blur transition-colors hover:bg-accent hover:text-foreground"
 				aria-label="Open the side tutor"
 			>
-				<MessageCircleQuestionIcon className="size-4" />
-				<span data-phone="hide">Ask on the side</span>
-				{busy && <BrailleSpinner className="h-3" label="Answering" />}
+				<MessageCircleQuestionIcon className="size-6" />
+				{busy && (
+					<span className="absolute -right-0.5 -top-0.5 rounded-full bg-background px-1 py-0.5 text-[0.625rem] leading-none text-foreground">
+						<BrailleSpinner className="h-3" label="Answering" />
+					</span>
+				)}
 			</button>
 		);
 	}
@@ -321,10 +335,8 @@ export function SideTutor({ chatId }: { chatId: string }) {
 				onPointerCancel={onDragEnd}
 			>
 				<GripHorizontalIcon data-phone="hide" className="size-3.5 text-muted-foreground/60" />
-				<div className="min-w-0 flex-1">
-					<div className="text-sm font-medium leading-tight">Side tutor</div>
-					<div className="truncate text-[11px] leading-tight text-muted-foreground">Sees the lesson · stays out of it</div>
-				</div>
+				{/* No title and no tagline (owner's ask): the bar is the handle and its buttons. */}
+				<div className="min-w-0 flex-1" />
 				<button
 					type="button"
 					onClick={(e) => {
@@ -354,10 +366,8 @@ export function SideTutor({ chatId }: { chatId: string }) {
 
 			<div ref={scrollRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-3 text-sm">
 				{entries.length === 0 && !live && (
-					<p className="text-xs leading-relaxed text-muted-foreground">
-						Stuck on a term or a step? Ask here. The side tutor can read the lesson, but your questions never enter
-						it — the teacher&apos;s context stays clean. It won&apos;t give away the answer to an open check.
-					</p>
+					// The only words in the empty window (owner's ask).
+					<p className="text-xs leading-relaxed text-muted-foreground">Stuck on a term or a step? Ask here.</p>
 				)}
 				{entries.map((entry) => (
 					<Exchange
@@ -391,7 +401,6 @@ export function SideTutor({ chatId }: { chatId: string }) {
 						}
 					}}
 					rows={1}
-					placeholder={busy ? "Answering…" : "Ask a quick question…"}
 					className="lh-prose field-sizing-content max-h-28 min-h-9 flex-1 resize-none rounded-md border border-input bg-transparent px-2.5 py-2 text-sm outline-none placeholder:text-muted-foreground focus-visible:border-ring"
 					aria-label="Ask the side tutor"
 				/>

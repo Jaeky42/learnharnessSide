@@ -1,11 +1,18 @@
 "use client";
 
 /**
- * Where the side tutor's phone bubble sits (cloud sync Phase 3): just above
- * the dock (the message box / question area, marked data-phone="dock"),
- * following it as it grows and folds. While an opened question leaves no
- * room above the dock, the bubble moves to the top-right corner under the
- * top bar instead, so the tutor stays reachable while answering.
+ * Where the minimized side tutor's bubble sits: just above the dock (the
+ * message box / question area, marked data-phone="dock"), following it as
+ * it grows and folds. While an opened question leaves no room above the
+ * dock, the bubble moves to the top-right corner under the top bar instead,
+ * so the tutor stays reachable while answering.
+ *
+ * Built for the phone (cloud sync Phase 3); the computer's minimized tutor
+ * uses it too since the owner asked for the same bubble there. On a
+ * computer the lesson doesn't reach the window's right edge when the notes
+ * drawer is open, so the hook also says how far the lesson's right edge is
+ * from the window's (`right`). The phone ignores that: its CSS places the
+ * bubble sideways.
  *
  * The position is a distance from the TOP of the screen: on an iPhone the
  * on-screen keyboard covers the bottom edge, so "from the bottom" would put
@@ -30,12 +37,16 @@ export function dockAnchor(dockTop: number | null): DockAnchor {
 	return { place: "above-dock", top };
 }
 
-function same(a: DockAnchor, b: DockAnchor): boolean {
-	return a.place === b.place && (a.place === "top" || (b.place === "above-dock" && a.top === b.top));
+/** The bubble's place, plus the lesson's right edge measured from the
+ *  window's right edge (0 while the lesson reaches it, or isn't known). */
+export type PlacedAnchor = DockAnchor & { right: number };
+
+function same(a: PlacedAnchor, b: PlacedAnchor): boolean {
+	return a.right === b.right && a.place === b.place && (a.place === "top" || (b.place === "above-dock" && a.top === b.top));
 }
 
-export function useDockAnchor(active: boolean): DockAnchor {
-	const [anchor, setAnchor] = useState<DockAnchor>({ place: "top" });
+export function useDockAnchor(active: boolean): PlacedAnchor {
+	const [anchor, setAnchor] = useState<PlacedAnchor>({ place: "top", right: 0 });
 	useEffect(() => {
 		if (!active) return;
 		let frame = 0;
@@ -52,7 +63,8 @@ export function useDockAnchor(active: boolean): DockAnchor {
 			// keyboard is up, when the body is shifted (phone-viewport.tsx) and
 			// becomes the frame.
 			const bodyTop = document.body.dataset.lhKeyboard !== undefined ? document.body.getBoundingClientRect().top : 0;
-			const next = dockAnchor(dock ? dock.getBoundingClientRect().top - bodyTop : null);
+			const box = dock?.getBoundingClientRect() ?? null;
+			const next: PlacedAnchor = { ...dockAnchor(box ? box.top - bodyTop : null), right: box ? Math.max(0, Math.round(window.innerWidth - box.right)) : 0 };
 			setAnchor((prev) => (same(prev, next) ? prev : next));
 		};
 		const schedule = () => {

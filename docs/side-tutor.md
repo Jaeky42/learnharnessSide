@@ -28,6 +28,10 @@ Branch `side-tutor`, based on upstream amosblomqvist/learnharness @ da08cb5 (v0.
 ## Side tutor
 
 - A floating, draggable, resizable window over **teaching** sessions (not practice) for quick questions. Esc shrinks it.
+- **Minimized, it is a round bubble with no words** (owner's ask; it was a pill reading "Ask on the side" at the window's place). It sits at the lesson's bottom right, just above the message box or the open question, the same bubble as on a phone. While an opened question leaves no room above it, the bubble sits under the top bar at the right.
+  - The open window can still be dragged anywhere and opens again where it was left; only the bubble has a fixed place.
+  - Its place comes from `components/phone/use-dock-anchor.ts` (the dock's top, and the lesson's right edge, which isn't the window's while the notes drawer is open).
+- **The window says one sentence** while it is empty: "Stuck on a term or a step? Ask here." It has no title, no tagline and no hint in the typing box (owner's asks). The top bar is the drag handle and the two buttons (clear, minimize).
 - A second agent answers, using the session's model and credentials at **medium** thinking (`SIDE_TUTOR_THINKING` in `src/server/side-tutor.ts`).
 - It sees a fresh lesson snapshot on every question: transcript, plan, phase, answers already revealed, and the open question **without** its answer key. It's told not to reveal open-question answers.
 - **Isolation:** the thread is stored in `<data>/side-tutor/<chatId>.json`, never in the chat record. The main teacher's context, compaction and graph extraction never see it. Its cost isn't added to the session meter. Deleting a session deletes its thread.
@@ -38,7 +42,7 @@ Branch `side-tutor`, based on upstream amosblomqvist/learnharness @ da08cb5 (v0.
   - `src/server/side-tutor.ts`
   - `app/api/chats/[id]/side-tutor/route.ts`
   - `components/side-tutor.tsx`
-- **Tests:** `tests/side-tutor.test.ts`.
+- **Tests:** `tests/side-tutor.test.ts`; the window's words and the bubble's place: `tests/side-tutor-ui.test.tsx`.
 - **Known limit:** a teacher reply that's still streaming isn't visible until it finishes.
 - **On a phone** (browser narrower than 640 px): a bubble above the message box opens the tutor as a bottom sheet. See "Phone layouts" in `docs/cloud-sync.md`.
 
@@ -73,6 +77,7 @@ The learner's own notes beside the lesson, stored as Markdown in their Obsidian 
   - Under a folder's last row the gap could mean that folder or the level outside it: it means the one ahead of the line, and turning back clearly switches to the other.
   - **Nothing changes** when the line is put back among its own neighbours. Then, after a refused move (the reason shows in the message line) and on Esc, everything slides back.
   - **Limits:** the line stays inside the list (on a phone the divider under "Topics" is the upper limit). Pushing on against a limit reaches the first or last place. Near the list's top or bottom edge the list scrolls.
+  - **Out of the bottom folder** (owner's ask): the line has one row of room below the list's end. Pulling the last row down by half a row takes it out of the folder it is in, and the line un-indents; from a folder inside a folder it steps out one folder at a time. Where the list fills its box and there is no room, pulling on against the limit does the same.
   - **Starting it:** on a computer, press a row and move (a press that doesn't move is still a click). On a phone, hold, then move (see "On a phone").
   - **Gone, by the owner's ask:** a box over the heading for "outside every folder", the lit area under the list, and a floating label with the item's name.
   - Search results can't be dragged.

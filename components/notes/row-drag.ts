@@ -153,7 +153,23 @@ function levelFor(plan: DragPlan, gap: number, probe: number, prev: DragAim | nu
 	if (levels.length === 1) return levels[0]!;
 	// Over the row above: join it. Over the row below: join that one.
 	if (probe < top) return levels[0]!;
-	if (probe > top + plan.blockHeight) return levels[levels.length - 1]!;
+	if (plan.rest[gap] && probe > top + plan.blockHeight) return levels[levels.length - 1]!;
+	// At the end of the list there is no row below to join. Pulled down by
+	// half a row from its place there, the line leaves the last folder: this
+	// is how the bottom note of the bottom folder is dragged out of it
+	// (owner's ask). From a folder inside a folder it steps out one folder at
+	// a time over the next half row. A step holds until it is clearly undone.
+	if (!plan.rest[gap]) {
+		const pulled = (probe - top) / plan.headHeight; // 0.5 at rest in its own place
+		const outer = levels.length - 1;
+		const share = 0.5 / outer;
+		const stepAt = (v: number) => (v >= 1 ? 1 + Math.min(outer - 1, Math.floor((v - 1) / share + 1e-9)) : 0);
+		const stick = LEVEL_STICK * Math.min(1, share * 2);
+		const was = prev !== null && prev.gap === gap && prev.over === null ? levels.findIndex((l) => l.parent === prev.level.parent) : -1;
+		let index = stepAt(pulled);
+		if (was >= 1 && index !== was && stepAt(pulled + (index < was ? stick : -stick)) === was) index = was;
+		if (index >= 1) return levels[index]!;
+	}
 	// In its own old place the line keeps its own folder.
 	if (gap === plan.homeGap) {
 		const home = levels.find((l) => l.parent === plan.home.parent);
@@ -241,10 +257,13 @@ export function dropFolder(plan: DragPlan, aim: DragAim): string | null {
 }
 
 /** Keeps the line inside the list: not above its visible top (on a phone,
- *  the divider under the heading), not below its end or its visible bottom. */
+ *  the divider under the heading), and not below its visible bottom or more
+ *  than one row past its end. That one row is the room to pull the last
+ *  item down and out of the last folder. */
 export function clampLine(plan: DragPlan, lineTop: number, visibleTop: number, visibleBottom: number): number {
 	const min = Math.max(0, visibleTop);
-	const max = Math.max(min, Math.min(plan.restHeight + plan.blockHeight, visibleBottom) - plan.blockHeight);
+	const end = plan.restHeight + plan.blockHeight + plan.headHeight;
+	const max = Math.max(min, Math.min(end, visibleBottom) - plan.blockHeight);
 	return Math.min(max, Math.max(min, lineTop));
 }
 
