@@ -1,6 +1,6 @@
 # Cloud sync: approved plan
 
-Status: **Phases 1–4 done (server mode, sign-in on the server, phone layouts, the Obsidian vault on the server). Phase 5 (the sync engine) is built, all six slices: a paired desktop and the server keep sessions, the graph, settings and folders in step. Phase 6 (the screens) is built, all three slices: Settings → Cloud on the desktop app (pairing, sync state, Unpair) and on the server's site (paired desktop apps, pairing codes); a held session ("Held by …", the strip, Take over, the warning box, greyed controls); and the desktop's own notices (the sync chip, the offline heads-up, the discard box). It has run between two built copies only; the owner's real PC meets the real server after the merge.** Work happens on a separate branch. It merges into `side-tutor` only once the whole feature works and the owner approves the merge, because every push to `side-tutor` publishes a release. Change these decisions only with the owner's approval.
+Status: **Phases 1–4 done (server mode, sign-in on the server, phone layouts, the Obsidian vault on the server). Phase 5 (the sync engine) is built, all six slices: a paired desktop and the server keep sessions, the graph, settings and folders in step. Phase 6 (the screens) is built, all three slices: Settings → Cloud on the desktop app (pairing, sync state, Unpair) and on the server's site (paired desktop apps, pairing codes); a held session ("Held by …", the strip, Take over, the warning box, greyed controls); and the desktop's own notices (the sync chip, the offline heads-up, the discard box). It has run between two built copies only; the owner's real PC meets the real server after the merge.** **Merged into `side-tutor` with the owner's approval, and released to the desktop app as 0.5.6.** The owner's real PC hasn't been paired with the real server yet; that is the next thing to hear about. Change these decisions only with the owner's approval.
 
 Goal: keep learning progress on several devices. The Windows desktop app stays fully usable, works offline, and keeps the Obsidian connection. A phone uses LearnHarness from the browser.
 
@@ -359,11 +359,26 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
    - ✅ Slice 1: Settings → Cloud on both sides (pairing, sync state, Sync now, Unpair this PC; paired desktop apps and pairing codes on the server), with four engine changes.
    - ✅ Slice 2: a held session (the list line, the strip, Take over, the warning box, greyed controls).
    - ✅ Slice 3: the desktop's own notices (the sync chip, the offline strip, the discard box).
-7. **Tests and docs.** Lease, take-over and graph operation tests; an end-to-end test with two servers and one cloud; and an update of this file from "planned" to built.
+7. **Tests and docs** (not done; the owner merged without it). Lease, take-over and graph operation tests; an end-to-end test with two servers and one cloud; and an update of this file from "planned" to built.
 
 ## Handoff: where things stand and how to continue
 
-### State (Phases 0–5 done; notes drawer additions built)
+### After the merge (read this first)
+
+- **Merged:** `side-tutor` was fast-forwarded to the cloud sync branch at `a2d2b7e` with the owner's word ("merge"), and the Windows workflow published **release 0.5.6** from it. The desktop app now has everything in this file and in `docs/side-tutor.md`.
+- **Checked on Windows before it went out:** the Windows workflow was started by hand on the cloud sync branch (a dry run: no release) and passed, with the sync and cloud tests added to it. Before that the sync code had only run on Linux.
+- **Not seen yet:** the owner's real PC paired with the real server. The owner has a step-by-step pairing guide (an Artifact page). If they report a problem, ask what the screen shows and what Settings → Cloud reads on the PC; never ask for a pairing code, a password or the server's address.
+- **Which branch changes what, from now on:**
+  - a push to `side-tutor` publishes a desktop release (and builds the server image `:latest`). It still needs the owner's approval every time;
+  - the owner's server follows `LH_CHANNEL=dev`, which is built from `claude/pensive-goldberg-7dty2m`. A change the server should get must be pushed there; a change both should get goes to both branches, kept at the same commit.
+  - Moving the server to `latest`, so one branch feeds both, is the owner's call and hasn't been asked.
+- **The two sides must speak the same sync protocol version** (1 today). A change that raises it has to reach the server and the desktop together, or sync pauses until both are updated.
+- **Restoring a first-sync backup** (`%APPDATA%\LearnHarness\backups` on the PC, `/data/backups` on the server) has no written guide. Putting old files back while paired would sync the old state everywhere: unpair first, and write the steps for the situation at hand.
+- **Not done:** Phase 7 (one automated test with two desktops and a server syncing everything together; a tidy of this file). The owner chose to merge without it.
+
+### State before the merge (Phases 0–5 done; notes drawer additions built)
+
+Kept as written while the work was on its own branch; where it says "until the merge", that has now happened.
 
 - **Branch:** `claude/pensive-goldberg-7dty2m`. All cloud sync work lives here.
   - Pushes build only the server image (`:dev`), never a desktop release.
@@ -831,7 +846,7 @@ One run between two built copies with the loop on, through the real screens, nob
 
 #### Still to do
 
-- The owner's real PC with the real server: only after the merge into `side-tutor`, which needs the owner's approval and a pairing guide.
+- The owner's real PC with the real server: the merge is done (release 0.5.6) and the owner has the pairing guide; not yet reported on.
 - Phase 7 (not started; the owner starts it).
 
 ### Later phases: decisions still open (ask when you get there)
