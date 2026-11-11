@@ -296,6 +296,20 @@ describe("gate", () => {
 		for (const html of [pages.loginPageHtml(), pages.setupPageHtml()]) assert.match(html, /<link rel="icon" href="\/favicon\.ico" sizes="any">/);
 	});
 
+	it("the site is named LearnHarness, one word, wherever a browser shows a name", async () => {
+		// The tab, the history and the address bar's suggestions show the page
+		// title (owner's ask: it read "Learning Harness").
+		const layout = fs.readFileSync(path.join(import.meta.dirname, "..", "app", "layout.tsx"), "utf8");
+		assert.match(layout, /export const metadata: Metadata = \{[^}]*?\n\ttitle: "LearnHarness",/);
+		assert.doesNotMatch(layout, /Learning Harness"/);
+		// The home-screen app, and the pages before the login.
+		const { default: manifest } = await import("../app/manifest.ts");
+		assert.deepEqual([manifest().name, manifest().short_name], ["LearnHarness", "LearnHarness"]);
+		assert.match(layout, /appleWebApp: \{[^}]*title: "LearnHarness"/);
+		const pages = await import("../src/server/server-auth-pages.ts");
+		for (const html of [pages.loginPageHtml(), pages.setupPageHtml()]) assert.match(html, /<title>[^<]* · LearnHarness<\/title>/);
+	});
+
 	it("after setup: no cookie → /login; a valid cookie passes; an expired one doesn't", () => {
 		const t0 = Date.now();
 		const base = { ...core.emptyServerAuthState(), password: core.hashPassword("longenough") };

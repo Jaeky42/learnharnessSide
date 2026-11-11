@@ -16,7 +16,10 @@ const ui = JetBrains_Mono({ subsets: ["latin"], variable: "--font-jetbrains" });
 const prose = Source_Sans_3({ subsets: ["latin"], variable: "--font-sans3" });
 
 export const metadata: Metadata = {
-	title: "Learning Harness",
+	// The name a browser shows for the site: on the tab, in its history and in
+	// the address bar's suggestions. One word, as everywhere else (owner's ask;
+	// upstream's two-word title was the only place that differed).
+	title: "LearnHarness",
 	description: "A teacher agent with a memory — sessions, quizzes, and a knowledge graph of what you know.",
 	// PHONE (cloud sync Phase 3): the home-screen app on an iPhone — its
 	// name and icon (app/manifest.ts covers Android). black-translucent lets

@@ -279,6 +279,7 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 - No service worker and no offline mode.
 - The login and setup pages link the manifest and the icon too; their security policy allows the same-site manifest and icon (`manifest-src 'self'; img-src 'self'`).
 - Icons are rendered from `build/icon-flat.svg` by `scripts/make-pwa-icons.mjs` into `public/icons/`: the icon as drawn (192, 512), a maskable 512 for Android, and a 180 apple-touch-icon. The full-bleed versions use the icon's own background, #141414.
+- **The site's name in a browser** (owner's ask): the page title is "LearnHarness", one word, as in the manifest and on the login pages. It read "Learning Harness" (upstream's title), which is what a tab, the history and the address bar's suggestions showed. The title is shared with the desktop app, whose window is already named LearnHarness.
 - **Browser-tab icon** (owner's ask: Chrome showed its globe, because the site had only the home-screen icons): the same script writes `app/favicon.ico` (the logo at 16, 32 and 48 px). Next serves it at `/favicon.ico` and links it from every page; the login and setup pages link it themselves. It is open without the login, like the other icons.
 - On an iPhone the status bar is `black-translucent`: the app draws under the clock and pads every top edge (see the session list above).
 
@@ -418,18 +419,19 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
   - the tutor window's words are "Tutor", "Stuck on a term or a step? Ask here." and "Ask a follow-up…" (the owner first asked for less text, then gave these three);
   - the tutor has its own Dictate button with a small live waveform;
   - the site has a browser-tab icon (the logo).
-- **State of that round:** pushed (the owner first asked to hold it for a bigger batch, then said to push). The owner has seen screenshots of each piece but **has not yet tried any of it on the server**.
+- **State of that round:** pushed (the owner first asked to hold it for a bigger batch, then said to push), and on the owner's server since; see the fourth round for what they reported.
   - Checked in a browser at phone size (touch) and at computer width (mouse).
   - **The tutor's dictation has never met a real microphone or Deepgram**: it was run with Chromium's made-up microphone and a stand-in for Deepgram's socket in the page. It reuses the lesson's dictation run unchanged, so the likeliest surprises are in the hand-over (who gets the words, the lesson's bar staying idle), not in the audio.
   - The 20 px above the bar is a reading of "a little higher up"; the owner may want it tuned (`BUBBLE_BAR_GAP` and `BUBBLE_EDGE_GAP` in `components/side-tutor.tsx`).
   - The "what to try" page was last updated for the redone drag; it doesn't cover this round.
 - **A fourth round, the tutor window's look and resizing** (decisions in `docs/side-tutor.md`, "The window's look" and "Moving and resizing on a computer"): the middle of the window is closer to black and more see-through, Dictate and Send are as tall as the typing box, the hint "Ask a follow-up…" is a little smaller, and on a computer the window resizes from its left, right and bottom sides and its bottom corners, with the size remembered.
-  - **State:** pushed (the owner held it back while tuning from screenshots, then said to push). The owner **has not yet tried any of it on the server**.
-  - The owner has seen before-and-after screenshots (computer and phone). The shade is the owner's pick (black at 60%; 70% was too black). The hint's size (14 px) is a reading of "slightly smaller".
+  - **State:** pushed, and **tried by the owner on the server: "all the changes worked"**. One thing was hard: finding the resize zones, which were mostly outside the window. They now sit on its edges and are larger ("Moving and resizing on a computer" in `docs/side-tutor.md`); that fix is pushed and not yet tried by the owner.
+  - The owner didn't say which pieces they tried, so the tutor's dictation with a real microphone is still not confirmed one way or the other.
+  - Before that, the owner had seen before-and-after screenshots (computer and phone). The shade is the owner's pick (black at 60%; 70% was too black). The hint's size (14 px) is a reading of "slightly smaller".
   - The owner asked why the phone's sheet wasn't see-through: the dim behind it covered the whole screen. It now covers only the lesson above the sheet. Shown as a screenshot; not confirmed on the iPhone, where the blur behind a sheet that slides in is the thing to look at.
   - Checked in a browser at both sizes: the box and the buttons measure the same at reading sizes from 14 to 22 px, the box keeps its height when typing starts, and dictation still lands its words in the tutor's box.
   - Resizing was driven with a real mouse in the browser: the pointer over each zone and over the top bar, each side and corner, the limits, the remembered size after minimizing and after a reload, and a smaller app window. The owner approved the plan (a picture of the zones) and chose "remember the size"; they have seen a picture of the zones, tinted for the picture only.
-  - That browser draws no scrollbar track (overlay scrollbars), so the one thing not seen is the conversation's scrollbar on Windows next to the right resize strip: the strip reaches 1 px into it.
+  - Playwright hides scrollbars by default; launch with `ignoreDefaultArgs: ["--hide-scrollbars"]` to get real ones. The run of the larger zones did, and dragged the conversation's scrollbar thumb beside the right strip.
 - **The owner said more features are coming.** Ask what they are; nothing is queued.
 - **Wording and behaviour added without being asked, for the owner to review:** the message `Deleted “Electricity”.` after a delete, and the message line showing on the phone's list screen.
 
