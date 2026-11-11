@@ -31,7 +31,13 @@ Branch `side-tutor`, based on upstream amosblomqvist/learnharness @ da08cb5 (v0.
 - **Moving and resizing on a computer** (owner's ask; it was the browser's own grip in the bottom right corner):
   - **The top bar moves the window.** Nothing at the top resizes it: not the top edge, not the top corners, not the sides beside the top bar.
   - **The left side, the right side, the bottom side and the two bottom corners resize it.** A side changes the width, the bottom the height, a corner both. The top never moves in a resize; dragging the left side keeps the right edge where it was.
-  - **Nothing is drawn.** The pointer turns into resize arrows over those edges. The zones are strips over the window's edges, 6 px outside it and 2 px inside, so they take nothing from Send in the corner and one pixel from the conversation's scrollbar. The side strips start under the top bar.
+  - **Nothing is drawn.** The pointer turns into resize arrows over those edges.
+  - **The zones sit on the window's edges** (owner's ask after trying it: at first they were 6 px outside the window and only 2 px inside, and hard to find):
+    - each strip is 12 px thick, 8 px inside the window's edge and 4 px outside it;
+    - a corner is an L that runs 28 px along both of its edges, so it is found from either side. Its inner square is cut away (`clip-path`), which leaves the typing box's and Send's own corners alone;
+    - the side strips start under the top bar.
+  - **Those 8 px are the window's own empty rim**, so no strip covers anything to press: the typing row's padding, and the conversation's left padding.
+    - On the right the conversation's scrollbar used to sit against the edge. On a computer the scrolling part now ends 8 px short of it, and gives the words those 8 px back from its right padding, so the words are where they were and only the scrollbar moved in. A short conversation, with no scrollbar, looks as before.
   - **Limits:** no smaller than 288 × 224 px (as before), and no further than 8 px from the app window's edges, the margin a dragged window keeps.
   - **The size is remembered** (owner's choice), like the position: after minimizing and after a reload (`lh:side-tutor:size` in the browser's storage, beside `lh:side-tutor:pos`). In a smaller app window a big remembered size is held inside it and comes back when there is room.
   - Resizing doesn't take the focus from the typing box or select text.

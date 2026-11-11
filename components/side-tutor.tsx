@@ -87,18 +87,28 @@ const WINDOW_SIZE = "h-[min(30rem,calc(100dvh-6rem))] min-h-56 w-[22rem] min-w-7
 const FRAME_MAX_HEIGHT = "max-h-[calc(100dvh-1rem)]";
 
 /**
- * Where each resize zone is, and its pointer. Nothing is drawn: the zones are
- * strips over the window's edges, 6 px outside it and 2 px inside, so they
- * take almost nothing from what is in the window (the conversation's 8 px
- * scrollbar, Send in the corner). The side strips start under the top bar
- * (40 px), which is for moving the window.
+ * Where each resize zone is, and its pointer. Nothing is drawn. The zones sit
+ * ON the window's edges (owner's ask: mostly outside it, they were hard to
+ * find): each strip is 12 px thick, 8 px inside the window's edge and 4 px
+ * outside it. Those 8 px are the window's own empty rim (the padding round
+ * the typing row and the conversation), so no strip covers anything to press.
+ *
+ * - The side strips start under the top bar (40 px), which is for moving.
+ * - A corner is an L: it runs 28 px along both of its edges, so it is found
+ *   from either side. Its inner square is cut away (CORNER_SHAPE), leaving
+ *   the typing box's and Send's own corners alone.
  */
 const RESIZE_ZONES: Record<TutorResizeEdge, string> = {
-	left: "top-10 bottom-2 -left-1.5 w-2 cursor-ew-resize",
-	right: "top-10 bottom-2 -right-1.5 w-2 cursor-ew-resize",
-	bottom: "-bottom-1.5 left-2 right-2 h-2 cursor-ns-resize",
-	"bottom-left": "-bottom-1.5 -left-1.5 size-3.5 cursor-nesw-resize",
-	"bottom-right": "-bottom-1.5 -right-1.5 size-3.5 cursor-nwse-resize",
+	left: "top-10 bottom-7 -left-1 w-3 cursor-ew-resize",
+	right: "top-10 bottom-7 -right-1 w-3 cursor-ew-resize",
+	bottom: "-bottom-1 left-7 right-7 h-3 cursor-ns-resize",
+	"bottom-left": "-bottom-1 -left-1 size-8 cursor-nesw-resize",
+	"bottom-right": "-bottom-1 -right-1 size-8 cursor-nwse-resize",
+};
+/** The corners' L shapes, in their 32 px boxes: two arms as thick as the strips. */
+const CORNER_SHAPE: Partial<Record<TutorResizeEdge, string>> = {
+	"bottom-left": "polygon(0 0, 12px 0, 12px 20px, 32px 20px, 32px 32px, 0 32px)",
+	"bottom-right": "polygon(20px 0, 32px 0, 32px 32px, 0 32px, 0 20px, 20px 20px)",
 };
 
 type Pos = { left: number; top: number };
@@ -500,7 +510,11 @@ export function SideTutor({ chatId, dictation }: { chatId: string; /** The page'
 				</button>
 			</div>
 
-			<div ref={scrollRef} data-testid="side-tutor-body" className={cn("min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-3 text-sm", BODY_BG)}>
+			<div data-testid="side-tutor-body" className={cn("flex min-h-0 flex-1 flex-col text-sm", BODY_BG)}>
+			{/* On a computer the scrolling part stops 8 px short of the window's
+			    right edge, so its scrollbar isn't under the resize strip there.
+			    The words keep their place: the 8 px come off the right padding. */}
+			<div ref={scrollRef} data-testid="side-tutor-scroll" className={cn("min-h-0 flex-1 space-y-3 overflow-y-auto py-3", phone ? "px-3" : "mr-2 pl-3 pr-1")}>
 				{entries.length === 0 && !live && (
 					// The empty window's one sentence (owner's ask).
 					<p className="text-xs leading-relaxed text-muted-foreground">Stuck on a term or a step? Ask here.</p>
@@ -520,6 +534,7 @@ export function SideTutor({ chatId, dictation }: { chatId: string; /** The page'
 						<BrailleSpinner className="h-3" label="Answering" /> Finishing an earlier answer…
 					</div>
 				)}
+			</div>
 			</div>
 
 			{notice && <div className={cn("border-t border-border px-3 py-1.5 text-xs text-destructive", BAR_BG)}>{notice}</div>}
@@ -587,7 +602,7 @@ export function SideTutor({ chatId, dictation }: { chatId: string; /** The page'
 					onPointerMove={onResizeMove}
 					onPointerUp={onResizeEnd}
 					onPointerCancel={onResizeEnd}
-					style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
+					style={{ WebkitAppRegion: "no-drag", ...(CORNER_SHAPE[edge] ? { clipPath: CORNER_SHAPE[edge] } : {}) } as React.CSSProperties}
 					className={cn("absolute touch-none", RESIZE_ZONES[edge])}
 				/>
 			))}

@@ -345,6 +345,31 @@ describe("moving and resizing (computer)", () => {
 		assert.ok(classes(zone(host, "bottom-right")).includes("cursor-nwse-resize"));
 		// The side strips start under the top bar, which is for moving the window.
 		for (const edge of ["left", "right"]) assert.ok(classes(zone(host, edge)).includes("top-10"), edge);
+		// The strips sit ON the window's edges (owner's ask: mostly outside it,
+		// they were hard to find): 12 px thick, 4 px of it outside the edge and
+		// 8 px inside, over the window's own empty rim.
+		for (const [edge, out, thick] of [["left", "-left-1", "w-3"], ["right", "-right-1", "w-3"], ["bottom", "-bottom-1", "h-3"]] as const) {
+			assert.ok(classes(zone(host, edge)).includes(out) && classes(zone(host, edge)).includes(thick), edge);
+		}
+		// A corner is an L, 32 px along each arm from its outer tip, with its
+		// inner square cut away so the typing box and Send keep their corners.
+		for (const edge of ["bottom-left", "bottom-right"]) {
+			assert.ok(classes(zone(host, edge)).includes("size-8") && classes(zone(host, edge)).includes("-bottom-1"), edge);
+			assert.match(styleOf(zone(host, edge)), /clip-path:\s*polygon\(/, edge);
+		}
+		assert.match(styleOf(zone(host, "bottom-left")), /polygon\(0 0, 12px 0, 12px 20px, 32px 20px, 32px 32px, 0 32px\)/);
+		assert.match(styleOf(zone(host, "bottom-right")), /polygon\(20px 0, 32px 0, 32px 32px, 0 32px, 0 20px, 20px 20px\)/);
+		// The strips where the corners end: 28 px along the window's edges.
+		for (const edge of ["left", "right"]) assert.ok(classes(zone(host, edge)).includes("bottom-7"), edge);
+		assert.ok(classes(zone(host, "bottom")).includes("left-7") && classes(zone(host, "bottom")).includes("right-7"));
+		for (const edge of ["left", "right", "bottom"]) assert.doesNotMatch(styleOf(zone(host, edge)), /clip-path/, edge);
+		// The conversation's scrollbar stays clear of the right strip: the
+		// scrolling part ends 8 px short of the edge, and gives the words
+		// those 8 px back from its right padding.
+		const scroll = panel.querySelector("[data-testid='side-tutor-scroll']") as HTMLElement;
+		assert.equal(scroll.parentElement, panel.querySelector("[data-testid='side-tutor-body']"));
+		for (const c of ["mr-2", "pl-3", "pr-1", "overflow-y-auto"]) assert.ok(classes(scroll).includes(c), c);
+		assert.ok(!classes(scroll).includes("px-3"));
 		// Nothing is drawn, and nothing is read out.
 		for (const el of [...frame.children].slice(1)) {
 			assert.equal(el.getAttribute("aria-hidden"), "true");
@@ -442,6 +467,13 @@ describe("moving and resizing (computer)", () => {
 			// The sheet is its own fixed box, placed and sized by app/phone.css.
 			assert.ok(classes(sheet).includes("fixed"));
 			assert.equal(styleOf(sheet), "");
+			// Its conversation runs the full width, with the same space on both sides.
+			const scroll = sheet.querySelector("[data-testid='side-tutor-scroll']") as HTMLElement;
+			assert.ok(classes(scroll).includes("px-3") && !classes(scroll).includes("mr-2"));
+			// app/phone.css sets the text size on the sheet's second part; the
+			// scrolling part inside it must not set one of its own.
+			assert.equal(scroll.parentElement, sheet.children[1]);
+			assert.deepEqual(classes(scroll).filter((c) => /^text-/.test(c)), []);
 		} finally {
 			delete (dom.window as unknown as Record<string, unknown>).matchMedia;
 		}
