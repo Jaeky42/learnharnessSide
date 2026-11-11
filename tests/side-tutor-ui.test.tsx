@@ -36,9 +36,17 @@ Object.assign(globalThis, {
 	requestAnimationFrame: (callback: FrameRequestCallback) => setTimeout(() => callback(0), 0),
 	cancelAnimationFrame: (id: ReturnType<typeof setTimeout>) => clearTimeout(id),
 });
-// No layout here: give every element the window's default size.
-Object.defineProperty(dom.window.HTMLElement.prototype, "offsetWidth", { configurable: true, get: () => 352 });
-Object.defineProperty(dom.window.HTMLElement.prototype, "offsetHeight", { configurable: true, get: () => 480 });
+// No layout here: every element has the window's default size, unless it or
+// the box it fills (the window fills its frame) was given a size.
+function measured(el: Element, prop: "width" | "height", fallback: number): number {
+	for (const box of [el, el.parentElement]) {
+		const found = new RegExp(`(?:^|;)\\s*${prop}:\\s*([\\d.]+)px`).exec(box?.getAttribute("style") ?? "");
+		if (found) return Number(found[1]);
+	}
+	return fallback;
+}
+Object.defineProperty(dom.window.HTMLElement.prototype, "offsetWidth", { configurable: true, get(this: Element) { return measured(this, "width", 352); } });
+Object.defineProperty(dom.window.HTMLElement.prototype, "offsetHeight", { configurable: true, get(this: Element) { return measured(this, "height", 480); } });
 const originalFetch = globalThis.fetch;
 const roots: { root: Root; host: HTMLElement }[] = [];
 
@@ -293,8 +301,149 @@ describe("minimized", () => {
 		const bubble = await minimize(host);
 		await act(async () => bubble.click());
 		assert.equal(document.querySelector("[data-testid='side-tutor-toggle']"), null);
+		const frame = host.querySelector("[data-testid='side-tutor-frame']") as HTMLElement;
+		assert.match(styleOf(frame), /left:\s*300px/);
+		assert.match(styleOf(frame), /top:\s*90px/);
+	});
+});
+
+describe("moving and resizing (computer)", () => {
+	const frameOf = (host: HTMLElement) => host.querySelector("[data-testid='side-tutor-frame']") as HTMLElement;
+	const zone = (host: HTMLElement, edge: string) => host.querySelector(`[data-testid='side-tutor-resize-${edge}']`) as HTMLElement;
+	const classes = (el: Element) => (el.getAttribute("class") ?? "").split(/\s+/);
+	const px = (el: HTMLElement, prop: string) => Number(new RegExp(`(?:^|;)\\s*${prop}:\\s*(-?[\\d.]+)px`).exec(styleOf(el))?.[1] ?? Number.NaN);
+	/** A pointer event React will hear, at a place on screen. */
+	const pointer = (el: Element, type: string, x: number, y: number) =>
+		act(async () => {
+			const event = new dom.window.Event(type, { bubbles: true, cancelable: true });
+			Object.assign(event, { clientX: x, clientY: y, pointerId: 1, button: 0 });
+			el.dispatchEvent(event);
+		});
+	/** Press an element, move the pointer by (dx, dy) in two steps, and let go. */
+	const drag = async (el: Element, dx: number, dy: number) => {
+		await pointer(el, "pointerdown", 500, 400);
+		await pointer(el, "pointermove", 500 + dx / 2, 400 + dy / 2);
+		await pointer(el, "pointermove", 500 + dx, 400 + dy);
+		await pointer(el, "pointerup", 500 + dx, 400 + dy);
+	};
+	// The test's window is 1280 x 800, and every element measures 352 x 480.
+	const at = (left: number, top: number) => storage.set("lh:side-tutor:pos", JSON.stringify({ left, top }));
+
+	it("has five resize zones around the window: the sides, the bottom and the bottom corners; none at the top", async () => {
+		const host = await mountTutor();
+		const frame = frameOf(host);
 		const panel = host.querySelector("[data-testid='side-tutor']") as HTMLElement;
-		assert.match(styleOf(panel), /left:\s*300px/);
-		assert.match(styleOf(panel), /top:\s*90px/);
+		assert.equal(panel.parentElement, frame);
+		// The zones are beside the window, not in it: its parts are still its only children.
+		assert.equal(panel.children.length, 3);
+		assert.deepEqual([...frame.children].slice(1).map((el) => el.getAttribute("data-testid")), ["side-tutor-resize-left", "side-tutor-resize-right", "side-tutor-resize-bottom", "side-tutor-resize-bottom-left", "side-tutor-resize-bottom-right"]);
+		// Each shows the pointer for its direction.
+		assert.ok(classes(zone(host, "left")).includes("cursor-ew-resize"));
+		assert.ok(classes(zone(host, "right")).includes("cursor-ew-resize"));
+		assert.ok(classes(zone(host, "bottom")).includes("cursor-ns-resize"));
+		assert.ok(classes(zone(host, "bottom-left")).includes("cursor-nesw-resize"));
+		assert.ok(classes(zone(host, "bottom-right")).includes("cursor-nwse-resize"));
+		// The side strips start under the top bar, which is for moving the window.
+		for (const edge of ["left", "right"]) assert.ok(classes(zone(host, edge)).includes("top-10"), edge);
+		// Nothing is drawn, and nothing is read out.
+		for (const el of [...frame.children].slice(1)) {
+			assert.equal(el.getAttribute("aria-hidden"), "true");
+			assert.deepEqual(classes(el).filter((c) => /^(bg|border|ring|shadow)-/.test(c)), []);
+		}
+		// The browser's own corner grip is gone.
+		assert.ok(!classes(panel).includes("resize") && !classes(frame).includes("resize"));
+	});
+
+	it("the right side makes it wider and the bottom taller; the top left corner stays", async () => {
+		at(400, 100);
+		const host = await mountTutor();
+		const frame = frameOf(host);
+		// Until it is resized, the size is the frame's own.
+		assert.doesNotMatch(styleOf(frame), /width:|height:/);
+		await drag(zone(host, "right"), 80, 33);
+		assert.deepEqual([px(frame, "left"), px(frame, "top"), px(frame, "width"), px(frame, "height")], [400, 100, 432, 480]);
+		await drag(zone(host, "bottom"), 55, 60);
+		assert.deepEqual([px(frame, "left"), px(frame, "top"), px(frame, "width"), px(frame, "height")], [400, 100, 432, 540]);
+	});
+
+	it("the left side moves the left edge and keeps the right edge", async () => {
+		at(400, 100);
+		const host = await mountTutor();
+		const frame = frameOf(host);
+		await drag(zone(host, "left"), -120, 50);
+		assert.deepEqual([px(frame, "left"), px(frame, "top"), px(frame, "width"), px(frame, "height")], [280, 100, 472, 480]);
+		assert.equal(px(frame, "left") + px(frame, "width"), 400 + 352);
+	});
+
+	it("a bottom corner changes the width and the height together", async () => {
+		at(400, 100);
+		const host = await mountTutor();
+		const frame = frameOf(host);
+		await drag(zone(host, "bottom-left"), -48, 40);
+		assert.deepEqual([px(frame, "left"), px(frame, "top"), px(frame, "width"), px(frame, "height")], [352, 100, 400, 520]);
+	});
+
+	it("stops at the smallest window and at the app window's edges", async () => {
+		at(400, 100);
+		const host = await mountTutor();
+		const frame = frameOf(host);
+		await drag(zone(host, "bottom-right"), -2000, -2000);
+		assert.deepEqual([px(frame, "left"), px(frame, "top"), px(frame, "width"), px(frame, "height")], [400, 100, 288, 224]);
+		await drag(zone(host, "bottom-right"), 5000, 5000);
+		assert.deepEqual([px(frame, "left") + px(frame, "width"), px(frame, "top") + px(frame, "height")], [1280 - 8, 800 - 8]);
+	});
+
+	it("remembers the size: after minimizing, and after a reload", async () => {
+		at(400, 100);
+		const host = await mountTutor();
+		await drag(zone(host, "bottom-right"), 100, 50);
+		assert.deepEqual(JSON.parse(storage.get("lh:side-tutor:size") ?? "null"), { width: 452, height: 530 });
+		const bubble = await minimize(host);
+		await act(async () => bubble.click());
+		assert.deepEqual([px(frameOf(host), "width"), px(frameOf(host), "height")], [452, 530]);
+		// A reload: a new window reads what was stored.
+		const again = await mountTutor();
+		assert.deepEqual([px(frameOf(again), "left"), px(frameOf(again), "top"), px(frameOf(again), "width"), px(frameOf(again), "height")], [400, 100, 452, 530]);
+	});
+
+	it("remembers where a resize from the left put the window", async () => {
+		at(400, 100);
+		const host = await mountTutor();
+		await drag(zone(host, "left"), -100, 0);
+		assert.deepEqual(JSON.parse(storage.get("lh:side-tutor:pos") ?? "null"), { left: 300, top: 100 });
+		assert.deepEqual(JSON.parse(storage.get("lh:side-tutor:size") ?? "null"), { width: 452, height: 480 });
+	});
+
+	it("the top bar still moves the window, and changes no size", async () => {
+		at(400, 100);
+		const host = await mountTutor();
+		const frame = frameOf(host);
+		const bar = (host.querySelector("[data-testid='side-tutor']") as HTMLElement).firstElementChild as HTMLElement;
+		Object.assign(bar, { setPointerCapture() {}, releasePointerCapture() {} });
+		await drag(bar, 70, -40);
+		assert.deepEqual([px(frame, "left"), px(frame, "top")], [470, 60]);
+		assert.doesNotMatch(styleOf(frame), /width:|height:/);
+		assert.equal(storage.get("lh:side-tutor:size"), undefined);
+	});
+
+	it("on a phone there is no frame box and nothing to resize", async () => {
+		Object.assign(dom.window, { matchMedia: (query: string) => ({ matches: query.includes("max-width"), addEventListener() {}, removeEventListener() {} }) });
+		try {
+			storage.set("lh:side-tutor:size", JSON.stringify({ width: 600, height: 600 }));
+			const host = await mountTutor();
+			// A phone starts with the tutor closed: open the sheet.
+			await act(async () => (document.querySelector("[data-testid='side-tutor-toggle']") as HTMLElement).click());
+			const frame = frameOf(host);
+			const sheet = host.querySelector("[data-testid='side-tutor']") as HTMLElement;
+			assert.deepEqual(classes(frame), ["contents"]);
+			assert.equal(styleOf(frame), "");
+			assert.equal(frame.children.length, 1, "only the sheet");
+			assert.equal(host.querySelectorAll("[data-testid^='side-tutor-resize-']").length, 0);
+			// The sheet is its own fixed box, placed and sized by app/phone.css.
+			assert.ok(classes(sheet).includes("fixed"));
+			assert.equal(styleOf(sheet), "");
+		} finally {
+			delete (dom.window as unknown as Record<string, unknown>).matchMedia;
+		}
 	});
 });

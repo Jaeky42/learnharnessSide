@@ -1,8 +1,9 @@
 "use client";
 
 /**
- * THE SIDE-TUTOR WINDOW — a small, persistent, draggable panel that floats
- * over a teaching session. The learner asks quick questions here; a second
+ * THE SIDE-TUTOR WINDOW — a small, persistent panel that floats over a
+ * teaching session. Its top bar moves it; its left, right and bottom sides
+ * and its two bottom corners resize it (side-tutor-window.ts). The learner asks quick questions here; a second
  * agent answers with read-only sight of the lesson (server: src/server/
  * side-tutor.ts). Nothing typed here enters the lesson's transcript, so
  * the main teacher's context window never grows from it.
@@ -26,6 +27,7 @@ import { plainEnterSends } from "@/components/phone/enter-key";
 import { joinDictation, type Dictation } from "@/components/dictation";
 import { SideTutorDictate } from "@/components/side-tutor-dictation";
 import { useSideDictationOwned } from "@/components/side-tutor-dictation-state";
+import { resizeTutorRect, storedTutorSize, TUTOR_EDGE, TUTOR_RESIZE_EDGES, type TutorRect, type TutorResizeEdge, type TutorSize } from "@/components/side-tutor-window";
 import {
 	SIDE_TUTOR_MAX_QUESTION_CHARS,
 	type SideTutorEntry,
@@ -70,11 +72,34 @@ const TYPING_ROW_VARS = {
 
 const OPEN_KEY = "lh:side-tutor:open";
 const POS_KEY = "lh:side-tutor:pos";
+/** The size the window was last dragged to (owner's choice: remembered, like its position). */
+const SIZE_KEY = "lh:side-tutor:size";
 /** Default size/anchor: under the 60px top bar, against the right edge. */
 const DEFAULT_WIDTH = 352;
 const DEFAULT_TOP = 72;
 const DEFAULT_RIGHT_GAP = 16;
-const EDGE = 8;
+const EDGE = TUTOR_EDGE;
+
+/** The window's size until it is resized (the phone's sheet is sized by app/phone.css). */
+const WINDOW_SIZE = "h-[min(30rem,calc(100dvh-6rem))] min-h-56 w-[22rem] min-w-72 max-w-[calc(100vw-1rem)]";
+/** On a computer the height has a limit too, like the width: a size
+ *  remembered from a big app window still fits a small one. */
+const FRAME_MAX_HEIGHT = "max-h-[calc(100dvh-1rem)]";
+
+/**
+ * Where each resize zone is, and its pointer. Nothing is drawn: the zones are
+ * strips over the window's edges, 6 px outside it and 2 px inside, so they
+ * take almost nothing from what is in the window (the conversation's 8 px
+ * scrollbar, Send in the corner). The side strips start under the top bar
+ * (40 px), which is for moving the window.
+ */
+const RESIZE_ZONES: Record<TutorResizeEdge, string> = {
+	left: "top-10 bottom-2 -left-1.5 w-2 cursor-ew-resize",
+	right: "top-10 bottom-2 -right-1.5 w-2 cursor-ew-resize",
+	bottom: "-bottom-1.5 left-2 right-2 h-2 cursor-ns-resize",
+	"bottom-left": "-bottom-1.5 -left-1.5 size-3.5 cursor-nesw-resize",
+	"bottom-right": "-bottom-1.5 -right-1.5 size-3.5 cursor-nwse-resize",
+};
 
 type Pos = { left: number; top: number };
 
@@ -114,6 +139,8 @@ export function SideTutor({ chatId, dictation }: { chatId: string; /** The page'
 	const [mounted, setMounted] = useState(false);
 	const [open, setOpen] = useState(true);
 	const [pos, setPos] = useState<Pos>({ left: 0, top: DEFAULT_TOP });
+	/** The size it was resized to; null until then (the frame's own size). */
+	const [size, setSize] = useState<TutorSize | null>(null);
 	const [entries, setEntries] = useState<SideTutorEntry[]>([]);
 	const [live, setLive] = useState<{ question: string; text: string } | null>(null);
 	const [remoteRunning, setRemoteRunning] = useState(false);
@@ -131,6 +158,7 @@ export function SideTutor({ chatId, dictation }: { chatId: string; /** The page'
 	const [notice, setNotice] = useState<string | null>(null);
 
 	const panelRef = useRef<HTMLDivElement>(null);
+	const resizeRef = useRef<{ edge: TutorResizeEdge; x: number; y: number; start: TutorRect } | null>(null);
 	const scrollRef = useRef<HTMLDivElement>(null);
 	const inputRef = useRef<HTMLTextAreaElement>(null);
 	const dragRef = useRef<{ x: number; y: number; start: Pos } | null>(null);
@@ -149,7 +177,9 @@ export function SideTutor({ chatId, dictation }: { chatId: string; /** The page'
 	// Client-only preferences (no SSR mismatch).
 	useEffect(() => {
 		setOpen(isPhoneNow() ? false : readStored(OPEN_KEY, true));
-		setPos(clampPos(readStored(POS_KEY, defaultPos()), DEFAULT_WIDTH));
+		const stored = storedTutorSize(readStored<unknown>(SIZE_KEY, null));
+		setSize(stored);
+		setPos(clampPos(readStored(POS_KEY, defaultPos()), Math.min(stored?.width ?? DEFAULT_WIDTH, window.innerWidth - 2 * EDGE)));
 		setMounted(true);
 	}, []);
 
@@ -315,6 +345,38 @@ export function SideTutor({ chatId, dictation }: { chatId: string; /** The page'
 		});
 	};
 
+	// ── resizing by the sides and the bottom corners (computer only) ──────
+	const onResizeStart = (edge: TutorResizeEdge) => (e: React.PointerEvent) => {
+		const el = panelRef.current;
+		if (phone || !el || e.button > 0) return;
+		e.preventDefault(); // no text selection, and the typing box keeps its focus
+		(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+		// From the size it really has: a remembered size can be held smaller by a small app window.
+		resizeRef.current = { edge, x: e.clientX, y: e.clientY, start: { left: pos.left, top: pos.top, width: el.offsetWidth, height: el.offsetHeight } };
+	};
+	const onResizeMove = (e: React.PointerEvent) => {
+		const r = resizeRef.current;
+		if (!r) return;
+		const next = resizeTutorRect(r.start, r.edge, e.clientX - r.x, e.clientY - r.y, { width: window.innerWidth, height: window.innerHeight });
+		widthRef.current = next.width;
+		setPos({ left: next.left, top: next.top });
+		setSize({ width: next.width, height: next.height });
+	};
+	const onResizeEnd = (e: React.PointerEvent) => {
+		if (!resizeRef.current) return;
+		resizeRef.current = null;
+		(e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId);
+		// Read back through the setters: the last move's values, not this render's.
+		setSize((s) => {
+			if (s) writeStored(SIZE_KEY, s);
+			return s;
+		});
+		setPos((p) => {
+			writeStored(POS_KEY, p);
+			return p;
+		});
+	};
+
 	if (!mounted) return null;
 
 	const onPanelKeyDown = (e: React.KeyboardEvent) => {
@@ -383,6 +445,14 @@ export function SideTutor({ chatId, dictation }: { chatId: string; /** The page'
 	return (
 		<>
 		{phone && <div data-phone="backdrop" data-phone-layer="sheet" aria-hidden="true" onClick={() => setOpenPersist(false)} />}
+		{/* The frame: on a computer it holds the window's place and size, and
+		    the resize zones around the window. On a phone it is no box at all
+		    (the sheet is placed by app/phone.css). */}
+		<div
+			data-testid="side-tutor-frame"
+			style={(phone ? {} : { left: pos.left, top: pos.top, ...(size ? { width: size.width, height: size.height } : {}), WebkitAppRegion: "no-drag" }) as React.CSSProperties}
+			className={phone ? "contents" : cn("fixed z-30", WINDOW_SIZE, FRAME_MAX_HEIGHT)}
+		>
 		<div
 			ref={panelRef}
 			data-testid="side-tutor"
@@ -390,8 +460,8 @@ export function SideTutor({ chatId, dictation }: { chatId: string; /** The page'
 			role="complementary"
 			aria-label="Side tutor"
 			onKeyDown={onPanelKeyDown}
-			style={(phone ? {} : { left: pos.left, top: pos.top, WebkitAppRegion: "no-drag" }) as React.CSSProperties}
-			className="fixed z-30 flex h-[min(30rem,calc(100dvh-6rem))] min-h-56 w-[22rem] min-w-72 max-w-[calc(100vw-1rem)] resize flex-col overflow-hidden rounded-xl border border-border shadow-xl backdrop-blur"
+			style={(phone ? {} : { WebkitAppRegion: "no-drag" }) as React.CSSProperties}
+			className={cn("flex flex-col overflow-hidden rounded-xl border border-border shadow-xl backdrop-blur", phone ? cn("fixed z-30", WINDOW_SIZE) : "size-full")}
 		>
 			<div
 				className={cn("flex cursor-grab touch-none items-center gap-2 border-b border-border px-3 py-2 select-none active:cursor-grabbing", BAR_BG)}
@@ -503,6 +573,24 @@ export function SideTutor({ chatId, dictation }: { chatId: string; /** The page'
 					</button>
 				)}
 			</div>
+		</div>
+		{/* The resize zones (owner's ask): the left, right and bottom sides and
+		    the two bottom corners. They sit over the window's edges, outside
+		    its clipped box. */}
+		{!phone &&
+			TUTOR_RESIZE_EDGES.map((edge) => (
+				<div
+					key={edge}
+					data-testid={`side-tutor-resize-${edge}`}
+					aria-hidden="true"
+					onPointerDown={onResizeStart(edge)}
+					onPointerMove={onResizeMove}
+					onPointerUp={onResizeEnd}
+					onPointerCancel={onResizeEnd}
+					style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
+					className={cn("absolute touch-none", RESIZE_ZONES[edge])}
+				/>
+			))}
 		</div>
 		</>
 	);

@@ -27,12 +27,20 @@ Branch `side-tutor`, based on upstream amosblomqvist/learnharness @ da08cb5 (v0.
 
 ## Side tutor
 
-- A floating, draggable, resizable window over **teaching** sessions (not practice) for quick questions. Esc shrinks it.
+- A floating window over **teaching** sessions (not practice) for quick questions. Esc shrinks it.
+- **Moving and resizing on a computer** (owner's ask; it was the browser's own grip in the bottom right corner):
+  - **The top bar moves the window.** Nothing at the top resizes it: not the top edge, not the top corners, not the sides beside the top bar.
+  - **The left side, the right side, the bottom side and the two bottom corners resize it.** A side changes the width, the bottom the height, a corner both. The top never moves in a resize; dragging the left side keeps the right edge where it was.
+  - **Nothing is drawn.** The pointer turns into resize arrows over those edges. The zones are strips over the window's edges, 6 px outside it and 2 px inside, so they take nothing from Send in the corner and one pixel from the conversation's scrollbar. The side strips start under the top bar.
+  - **Limits:** no smaller than 288 × 224 px (as before), and no further than 8 px from the app window's edges, the margin a dragged window keeps.
+  - **The size is remembered** (owner's choice), like the position: after minimizing and after a reload (`lh:side-tutor:size` in the browser's storage, beside `lh:side-tutor:pos`). In a smaller app window a big remembered size is held inside it and comes back when there is room.
+  - Resizing doesn't take the focus from the typing box or select text.
+  - **How:** a frame holds the window's place and size, with the window filling it and the five zones beside it (the window clips its own rounded box, so the zones can't be inside it). On a phone the frame is no box at all (`display: contents`) and there are no zones.
 - **Minimized, it is a round bubble with no words** (owner's ask; it was a pill reading "Ask on the side" at the window's place), the same bubble as on a phone.
   - **On a computer it sits at the lesson's bottom right**: 16 px in from the lesson's right edge and 20 px above the question bar (the message box, an open question, or a question's folded bar). On a wide lesson that is off to the side of the bar's end; on a narrow one, above it. The owner's placing, after two tries: 12 px above the whole dock read as too far, and 8 px above the bar's own right end as too close. It keeps that place against the bar while the lesson scrolls and a question opens or folds.
   - It is drawn **inside the dock** for that (a portal into the `data-phone="dock"` block, placed with CSS only), so it moves with the bar by itself, frame for frame, with nothing to measure. Things the dock shows above the bar (the setup button, queued messages, the jump-to-bottom arrow) are below the bubble, not under it.
   - While an opened question fills the window and leaves no room above it, the bubble waits under the top bar at the lesson's right, as on a phone (`use-dock-anchor.ts` decides; on a wide lesson that is beside the question, on a narrow one over its top corner).
-  - The open window can still be dragged anywhere and opens again where it was left; only the bubble has a fixed place.
+  - The open window can still be dragged anywhere and opens again where it was left, at the size it was left; only the bubble has a fixed place.
 - **The window's words** (owner's wording): "Tutor" in the top bar, "Stuck on a term or a step? Ask here." while it is empty, and "Ask a follow-up…" as the typing box's hint. Nothing else: no tagline, and no explanation of what the tutor can see.
 - **The window's look** (owner's asks, tuned from screenshots):
   - **The middle**, where the conversation is, is closer to black and more see-through than the rest: black at 60%, over the window's blur of the lesson behind it (`BODY_BG` in `components/side-tutor.tsx`). The bars (the top bar, the message line, the typing row) keep the app's background at 95% (`BAR_BG`). The window has no background of its own; one behind the middle would close it up.
@@ -58,8 +66,9 @@ Branch `side-tutor`, based on upstream amosblomqvist/learnharness @ da08cb5 (v0.
   - `src/server/side-tutor.ts`
   - `app/api/chats/[id]/side-tutor/route.ts`
   - `components/side-tutor.tsx`
+  - `components/side-tutor-window.ts` (which edges resize the window, and how far)
   - `components/side-tutor-dictation.tsx` and `side-tutor-dictation-state.ts` (the Dictate button; three small hooks in `components/dictation.tsx` and the lesson-side checks in `components/chat.tsx`)
-- **Tests:** `tests/side-tutor.test.ts`; the window's words and look, its Dictate button and the bubble's place: `tests/side-tutor-ui.test.tsx`; the phone sheet's background and text size: `tests/phone-layout.test.ts`.
+- **Tests:** `tests/side-tutor.test.ts`; the window's words and look, its Dictate button, moving and resizing, and the bubble's place: `tests/side-tutor-ui.test.tsx`; the resize rules: `tests/side-tutor-window.test.ts`; the phone sheet's background and text size: `tests/phone-layout.test.ts`.
 - **Known limit:** a teacher reply that's still streaming isn't visible until it finishes.
 - **On a phone** (browser narrower than 640 px): a bubble above the message box opens the tutor as a bottom sheet. See "Phone layouts" in `docs/cloud-sync.md`.
 
