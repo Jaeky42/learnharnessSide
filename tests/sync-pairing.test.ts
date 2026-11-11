@@ -490,7 +490,7 @@ describe("where nothing is paired, nothing happens", () => {
 
 	it("the cloud server never pairs itself", async () => {
 		const status = await asServer(() => cloudHttp.cloudStatusResponse());
-		assert.deepEqual(await status.json(), { role: "server" });
+		assert.deepEqual(await status.json(), { role: "server", held: {} });
 		const action = await asServer(() => cloudHttp.cloudActionResponse(browserPost("/api/cloud", { op: "pair", server: SERVER, code: "AAAA-AAAA", name: "x" })));
 		assert.equal(action.status, 404);
 	});

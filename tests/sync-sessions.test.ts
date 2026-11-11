@@ -175,7 +175,7 @@ describe("the first sync combines both libraries", () => {
 		const before = { ...library(desk.dataDir), ...library(w.serverDir) };
 
 		const round = await desk.sync.tick();
-		assert.deepEqual(round, { ok: true, fetched: ["chat_c1"], sent: ["chat_d1", "chat_d2"], removed: [], lost: [] });
+		assert.deepEqual(round, { ok: true, fetched: ["chat_c1"], sent: ["chat_d1", "chat_d2"], removed: [], lost: [], handed: [] });
 		assert.deepEqual(library(desk.dataDir), before, "the desktop has both libraries, byte for byte");
 		assert.deepEqual(library(w.serverDir), before, "and so has the server");
 
@@ -197,7 +197,7 @@ describe("the first sync combines both libraries", () => {
 
 		// Nothing more to do, and no second backup, ever.
 		w.tick();
-		assert.deepEqual(await desk.sync.tick(), { ok: true, fetched: [], sent: [], removed: [], lost: [] });
+		assert.deepEqual(await desk.sync.tick(), { ok: true, fetched: [], sent: [], removed: [], lost: [], handed: [] });
 		assert.equal(w.backups.server!.length, 1);
 		assert.equal(w.backups[desk.deviceId]!.length, 1);
 	});
@@ -258,7 +258,7 @@ describe("only the holder's version travels", () => {
 	it("a turn made on the holding desktop reaches the server", async () => {
 		const { w, desk } = await synced();
 		addTurn(desk.dataDir, "chat_d1", "two");
-		assert.deepEqual(await desk.sync.tick(), { ok: true, fetched: [], sent: ["chat_d1"], removed: [], lost: [] });
+		assert.deepEqual(await desk.sync.tick(), { ok: true, fetched: [], sent: ["chat_d1"], removed: [], lost: [], handed: [] });
 		assert.deepEqual(turnsOf(w.serverDir, "chat_d1"), ["one", "two"]);
 		assert.equal(w.announced.includes("server:written:chat_d1"), true, "open pages on the server are told");
 	});
@@ -266,7 +266,7 @@ describe("only the holder's version travels", () => {
 	it("a turn made on the phone reaches the desktop", async () => {
 		const { w, desk } = await synced();
 		addTurn(w.serverDir, "chat_c1", "more from the phone");
-		assert.deepEqual(await desk.sync.tick(), { ok: true, fetched: ["chat_c1"], sent: [], removed: [], lost: [] });
+		assert.deepEqual(await desk.sync.tick(), { ok: true, fetched: ["chat_c1"], sent: [], removed: [], lost: [], handed: [] });
 		assert.deepEqual(turnsOf(desk.dataDir, "chat_c1"), ["phone", "more from the phone"]);
 		assert.equal(w.announced.includes("dev_aaaaaaaaaaaaaaaa:written:chat_c1"), true);
 	});
@@ -287,14 +287,14 @@ describe("only the holder's version travels", () => {
 		const file = path.join(desk.dataDir, "chats", "chat_d1.json");
 		fs.writeFileSync(file, fs.readFileSync(file));
 		fs.utimesSync(file, new Date(), new Date(Date.now() + 5000));
-		assert.deepEqual(await desk.sync.tick(), { ok: true, fetched: [], sent: [], removed: [], lost: [] });
+		assert.deepEqual(await desk.sync.tick(), { ok: true, fetched: [], sent: [], removed: [], lost: [], handed: [] });
 		void w;
 	});
 
 	it("a second desktop gets every session read-only, and can't send one it doesn't hold", async () => {
 		const { w, desk } = await synced();
 		const laptop = w.desktop("dev_bbbbbbbbbbbbbbbb", "Laptop");
-		assert.deepEqual(await laptop.sync.tick(), { ok: true, fetched: ["chat_c1", "chat_d1"], sent: [], removed: [], lost: [] });
+		assert.deepEqual(await laptop.sync.tick(), { ok: true, fetched: ["chat_c1", "chat_d1"], sent: [], removed: [], lost: [], handed: [] });
 		assert.equal(laptop.sync.holds("chat_d1"), false);
 		assert.deepEqual(laptop.sync.holderOf("chat_d1"), { id: desk.deviceId, name: "Office PC" });
 		// Something on the laptop changes the held session anyway.
@@ -320,7 +320,7 @@ describe("only the holder's version travels", () => {
 		assert.equal(desk.sync.holds("chat_d2"), true, "offline, the desktop works on what it holds");
 		assert.equal(desk.sync.holds("chat_c1"), false, "and what it doesn't hold stays read-only");
 		w.setOnline(true);
-		assert.deepEqual(await desk.sync.tick(), { ok: true, fetched: ["chat_c2"], sent: ["chat_d2"], removed: [], lost: [] });
+		assert.deepEqual(await desk.sync.tick(), { ok: true, fetched: ["chat_c2"], sent: ["chat_d2"], removed: [], lost: [], handed: [] });
 		assert.deepEqual(turnsOf(w.serverDir, "chat_d2"), ["made offline"]);
 		assert.deepEqual(w.authority.holderOf("chat_d2"), { id: desk.deviceId, name: "Office PC" });
 	});
@@ -333,7 +333,7 @@ describe("only the holder's version travels", () => {
 		assert.equal(desk.sync.holds("chat_c1"), false);
 		assert.equal(desk.sync.holds("chat_d1"), true);
 		desk.pair();
-		assert.deepEqual(await desk.sync.tick(), { ok: true, fetched: [], sent: ["chat_d1"], removed: [], lost: [] });
+		assert.deepEqual(await desk.sync.tick(), { ok: true, fetched: [], sent: ["chat_d1"], removed: [], lost: [], handed: [] });
 		assert.deepEqual(turnsOf(w.serverDir, "chat_d1"), ["one", "made while unpaired"]);
 	});
 });
@@ -349,9 +349,9 @@ describe("deleting a session", () => {
 		desk.sync; // the desktop deletes it (the app removes all four kinds of file)
 		sessionFiles(sessionDirsUnder(desk.dataDir)).remove("chat_d1");
 		w.tick();
-		assert.deepEqual(await desk.sync.tick(), { ok: true, fetched: [], sent: [], removed: ["chat_d1"], lost: [] });
+		assert.deepEqual(await desk.sync.tick(), { ok: true, fetched: [], sent: [], removed: ["chat_d1"], lost: [], handed: [] });
 		assert.deepEqual(library(w.serverDir), {});
-		assert.deepEqual(await laptop.sync.tick(), { ok: true, fetched: [], sent: [], removed: ["chat_d1"], lost: [] });
+		assert.deepEqual(await laptop.sync.tick(), { ok: true, fetched: [], sent: [], removed: ["chat_d1"], lost: [], handed: [] });
 		assert.deepEqual(library(laptop.dataDir), {});
 		assert.equal(laptop.sync.holds("chat_d1"), true, "a deleted id is nobody's");
 	});
@@ -363,7 +363,7 @@ describe("deleting a session", () => {
 		await desk.sync.tick();
 		sessionFiles(sessionDirsUnder(w.serverDir)).remove("chat_c1");
 		w.tick();
-		assert.deepEqual(await desk.sync.tick(), { ok: true, fetched: [], sent: [], removed: ["chat_c1"], lost: [] });
+		assert.deepEqual(await desk.sync.tick(), { ok: true, fetched: [], sent: [], removed: ["chat_c1"], lost: [], handed: [] });
 		assert.deepEqual(library(desk.dataDir), {});
 	});
 

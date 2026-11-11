@@ -40,6 +40,21 @@ export interface AuthoritySession {
 	deletedAt?: number;
 	/** A holding desktop's last word about this session. */
 	report?: { at: number; word: HolderWord };
+	/** Someone asked the (online) holder to hand the session over. */
+	handover?: { to: string; at: number };
+}
+
+/** A desktop counts as online while the server heard from it this recently (three missed checks). */
+export const ONLINE_WINDOW_MS = 30_000;
+/** A hand-over request nobody repeats is forgotten: the asker went away. */
+export const HANDOVER_REQUEST_MS = 60_000;
+
+/** What a device is doing for a session, and how to stop it (wired in engine.ts). */
+export interface LocalWork {
+	/** A reply is being written for this session right now. */
+	replying(chatId: string): boolean;
+	/** Stop helpers and extraction for the session; with `turn`, the reply too. */
+	stop(chatId: string, options?: { turn?: boolean }): void;
 }
 
 export interface AuthorityState {
@@ -69,6 +84,19 @@ export interface AuthorityDeps {
 	makeBackup: () => string | null;
 	/** Tell this server's open pages that a session's files changed under them. */
 	announce?: (chatId: string, what: "written" | "removed") => void;
+	/** The server's own work on its sessions (a desktop may ask for one of them). */
+	localWork?: LocalWork;
+}
+
+/** A session this server may not change, for "Held by …". */
+export interface HeldSession {
+	id: string;
+	name: string | null;
+	/** The holder was heard from in the last 30 seconds. */
+	online: boolean;
+	lastSeenAt: number | null;
+	/** Its last word; anything but "all-sent" is evidence of unsent turns. */
+	word: HolderWord;
 }
 
 export interface AuthorityReply {
@@ -90,6 +118,16 @@ export interface Authority {
 	remove(deviceId: string, chatId: string): AuthorityReply;
 	/** Notice the server's own changes now (tests; exchange does it itself). */
 	scan(): void;
+	/**
+	 * `to` (a desktop, or CLOUD_HOLDER for the server itself) asks for a
+	 * session. The answer's `status`: "yours" / "moved" (it holds it now),
+	 * "waiting" (the holder is finishing a reply or handing over; ask again),
+	 * or "warning" (the offline holder may have unsent turns; ask again with
+	 * force to take it anyway).
+	 */
+	takeOver(to: string, chatId: string, force: boolean): AuthorityReply;
+	/** Every session this server may not change, with what is known of its holder. */
+	held(): Record<string, HeldSession>;
 }
 
 const bad = (error: string, status = 400, extra: Record<string, unknown> = {}): AuthorityReply => ({ status, body: { error, ...extra } });
@@ -158,8 +196,76 @@ export function createAuthority(deps: AuthorityDeps): Authority {
 		return changed;
 	}
 
+	function heldInfo(state: AuthorityState, entry: AuthoritySession): HeldSession {
+		const seenAt = state.seen[entry.holder] ?? null;
+		return {
+			id: entry.holder,
+			name: deps.deviceName(entry.holder),
+			online: seenAt !== null && deps.now() - seenAt < ONLINE_WINDOW_MS,
+			lastSeenAt: seenAt,
+			word: entry.report?.word ?? "all-sent",
+		};
+	}
+
+	/** Give the session to `to`. The files stay as they are; only the holder changes. */
+	function move(state: AuthorityState, chatId: string, entry: AuthoritySession, to: string): void {
+		entry.holder = to;
+		delete entry.handover;
+		if (to === CLOUD_HOLDER) delete entry.report;
+		else entry.report = { at: deps.now(), word: "all-sent" };
+		entry.seq = ++state.seq;
+		deps.state.write(state);
+		// The session list and an open view of the session learn of it.
+		deps.announce?.(chatId, "written");
+	}
+
 	return {
 		active: () => deps.state.exists(),
+
+		held() {
+			const state = deps.state.read();
+			const out: Record<string, HeldSession> = {};
+			if (!state) return out;
+			for (const [id, entry] of Object.entries(state.sessions)) {
+				if (entry.deletedAt === undefined && entry.holder !== CLOUD_HOLDER) out[id] = heldInfo(state, entry);
+			}
+			return out;
+		},
+
+		takeOver(to, chatId, force) {
+			const state = deps.state.read();
+			const entry = state?.sessions[chatId];
+			if (!state || !entry || entry.deletedAt !== undefined) return bad("No such session.", 404);
+			const now = deps.now();
+			if (to !== CLOUD_HOLDER) state.seen[to] = now;
+			if (entry.holder === to) return { status: 200, body: { status: "yours", ...changeOf(chatId, entry) } };
+
+			if (entry.holder === CLOUD_HOLDER) {
+				// The server itself holds it. A reply in progress is finished first.
+				if (deps.localWork?.replying(chatId)) return { status: 200, body: { status: "waiting", reason: "reply", ...changeOf(chatId, entry) } };
+				// Helpers and extraction stop here; the new holder starts them again.
+				deps.localWork?.stop(chatId);
+				scanInto(state);
+				move(state, chatId, entry, to);
+				return { status: 200, body: { status: "moved", ...changeOf(chatId, entry) } };
+			}
+
+			const holder = heldInfo(state, entry);
+			if (holder.online) {
+				// Ask the holder to hand over: it finishes its reply, sends what
+				// it has and lets go at its next check. No warning is needed.
+				entry.handover = { to, at: now };
+				deps.state.write(state);
+				return { status: 200, body: { status: "waiting", reason: holder.word === "busy" ? "reply" : "handing-over", heldBy: holder, ...changeOf(chatId, entry) } };
+			}
+			// The holder can't be reached. Its last word is all the server has.
+			if (holder.word !== "all-sent" && !force) {
+				deps.state.write(state);
+				return { status: 200, body: { status: "warning", heldBy: holder, ...changeOf(chatId, entry) } };
+			}
+			move(state, chatId, entry, to);
+			return { status: 200, body: { status: "moved", previous: holder, ...changeOf(chatId, entry) } };
+		},
 
 		holds(chatId) {
 			const state = deps.state.read();
@@ -197,8 +303,12 @@ export function createAuthority(deps: AuthorityDeps): Authority {
 				.filter(([, entry]) => entry.seq > cursor)
 				.sort((a, b) => a[1].seq - b[1].seq)
 				.map(([id, entry]) => changeOf(id, entry));
+			// Sessions this desktop holds that someone asked for, while the request is fresh.
+			const handovers = Object.entries(state.sessions)
+				.filter(([, entry]) => entry.holder === deviceId && entry.deletedAt === undefined && entry.handover && now - entry.handover.at < HANDOVER_REQUEST_MS)
+				.map(([id]) => id);
 			deps.state.write(state);
-			return { status: 200, body: { seq: state.seq, changes, time: now } };
+			return { status: 200, body: { seq: state.seq, changes, handovers, time: now } };
 		},
 
 		fetch(_deviceId, chatId) {
@@ -215,7 +325,8 @@ export function createAuthority(deps: AuthorityDeps): Authority {
 
 		store(deviceId, chatId, body) {
 			if (!isSessionId(chatId)) return bad("No such session.", 404);
-			const bundle: SessionBundle | null = checkBundle(chatId, (body as { bundle?: unknown } | null)?.bundle);
+			const sent = (body ?? {}) as { bundle?: unknown; word?: unknown; release?: unknown };
+			const bundle: SessionBundle | null = checkBundle(chatId, sent.bundle);
 			if (!bundle) return bad("The session's files didn't arrive whole.");
 			const state = started();
 			scanInto(state);
@@ -234,11 +345,17 @@ export function createAuthority(deps: AuthorityDeps): Authority {
 				seq: ++state.seq,
 				stamp: files.stamp(chatId),
 				digest: bundleDigest(bundle),
-				// Everything the holder had is here now.
-				report: { at: deps.now(), word: "all-sent" },
+				// Everything the holder had is here now, unless it says a reply is still being written.
+				report: { at: deps.now(), word: sent.word === "busy" ? "busy" : "all-sent" },
+				...(entry?.handover ? { handover: entry.handover } : {}),
 			};
 			state.sessions[chatId] = next;
 			state.seen[deviceId] = deps.now();
+			if (sent.release === true && next.handover) {
+				// The holder hands the session to whoever asked for it.
+				move(state, chatId, next, next.handover.to);
+				return { status: 200, body: changeOf(chatId, next) as unknown as Record<string, unknown> };
+			}
 			deps.state.write(state);
 			deps.announce?.(chatId, "written");
 			return { status: 200, body: changeOf(chatId, next) as unknown as Record<string, unknown> };

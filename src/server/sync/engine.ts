@@ -22,7 +22,7 @@ import { readCloudPairing } from "../../store/sync/pairing.ts";
 import { sessionFiles } from "../../store/sync/session-files.ts";
 import { stateFile } from "../../store/sync/state-file.ts";
 import { serverModeEnabled } from "../server-auth.ts";
-import { createAuthority, isAuthorityState, type Authority } from "./authority.ts";
+import { createAuthority, isAuthorityState, type Authority, type LocalWork } from "./authority.ts";
 import { syncRequest } from "./client.ts";
 import { createDesktopSync, isDesktopState, type DesktopSync, type TickResult } from "./desktop-sync.ts";
 
@@ -49,9 +49,23 @@ function backup(): string | null {
 	}
 }
 
-interface Engine { authority?: Authority; desktop?: DesktopSync }
+interface Engine { authority?: Authority; desktop?: DesktopSync; localWork?: LocalWork }
 const globals = globalThis as typeof globalThis & { __lhSyncEngine?: Engine };
 const engine = (): Engine => (globals.__lhSyncEngine ??= {});
+
+/**
+ * What this copy is doing for a session, and how to stop it. The real
+ * functions live with the turn and job machinery (local-work.ts), which
+ * registers them here; this module stays small because the proxy loads it.
+ */
+export function registerLocalWork(work: LocalWork): void {
+	engine().localWork = work;
+}
+
+const localWork: LocalWork = {
+	replying: (chatId) => engine().localWork?.replying(chatId) ?? false,
+	stop: (chatId, options) => engine().localWork?.stop(chatId, options),
+};
 
 export function syncAuthority(): Authority {
 	return (engine().authority ??= createAuthority({
@@ -63,6 +77,7 @@ export function syncAuthority(): Authority {
 		},
 		makeBackup: backup,
 		announce,
+		localWork,
 	}));
 }
 
@@ -80,6 +95,7 @@ export function desktopSync(): DesktopSync {
 		now: Date.now,
 		makeBackup: backup,
 		announce,
+		localWork,
 	}));
 }
 

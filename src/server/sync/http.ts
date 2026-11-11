@@ -169,3 +169,12 @@ export async function sessionBundleResponse(request: Request, chatId: string): P
 		: { status: 405, body: { error: "Method not allowed." } };
 	return json(reply.body, reply.status);
 }
+
+/** A paired desktop asks for a session another device (or the server) holds. */
+export async function sessionTakeResponse(request: Request, chatId: string): Promise<Response> {
+	const caller = syncCaller(request);
+	if (caller instanceof Response) return caller;
+	const body = (await syncBody(request)) as { force?: unknown } | undefined;
+	const reply = syncAuthority().takeOver(caller.id, chatId, body?.force === true);
+	return json(reply.body, reply.status);
+}

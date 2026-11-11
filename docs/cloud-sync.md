@@ -1,6 +1,6 @@
 # Cloud sync: approved plan
 
-Status: **Phases 1–4 done (server mode, sign-in on the server, phone layouts, the Obsidian vault on the server). Phase 5 (the sync engine) is approved and being built in slices; slices 1 and 2 of 6 are done.** Work happens on a separate branch. It merges into `side-tutor` only once the whole feature works and the owner approves the merge, because every push to `side-tutor` publishes a release. Change these decisions only with the owner's approval.
+Status: **Phases 1–4 done (server mode, sign-in on the server, phone layouts, the Obsidian vault on the server). Phase 5 (the sync engine) is approved and being built in slices; slices 1 to 3 of 6 are done.** Work happens on a separate branch. It merges into `side-tutor` only once the whole feature works and the owner approves the merge, because every push to `side-tutor` publishes a release. Change these decisions only with the owner's approval.
 
 Goal: keep learning progress on several devices. The Windows desktop app stays fully usable, works offline, and keeps the Obsidian connection. A phone uses LearnHarness from the browser.
 
@@ -439,7 +439,7 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 
 ### Next: Phase 5, the sync engine
 
-**The owner approved the Phase 5 plan page.** It is being built in six slices ("Build order" below). Built so far: slices 1 and 2 (pairing, device keys, the version check; sessions and leases); see "Phase 5: what is built".
+**The owner approved the Phase 5 plan page.** It is being built in six slices ("Build order" below). Built so far: slices 1 to 3 (pairing and the version check; sessions and leases; take-over); see "Phase 5: what is built".
 
 #### Phase 5 decisions (owner, asked one at a time)
 
@@ -521,6 +521,24 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 - **The store wrappers call the inner store's method as it is at that moment**, never a reference taken at wiring time: upstream's tests replace methods on the inner store object.
 - **Tests:** `tests/sync-sessions.test.ts` (an authority and one or two desktops over separate data folders in one process), `tests/sync-sessions-gate.test.ts` (the read-only rule at the real entry points, with this process as a paired desktop).
 - **Real run:** two copies of the built app (`next build`, `scripts/build-server.mjs`, then `.next/standalone/server.js` twice with different `PORT`, `LH_DATA_DIR` and `LH_AUTH_FILE`, one with `LH_SERVER_MODE=1`), paired and synced through browsers.
+
+**Slice 3: take-over**
+
+- **Asking for a session:** `POST /api/cloud {op:"take-over", chatId, force}` on either side. On the server it is the phone asking for itself; on a desktop it goes to `POST /api/sync/sessions/<id>/take`. The answer's `status`:
+  - `yours` / `moved`: the asker holds it now;
+  - `waiting` (`reason: "reply"` or `"handing-over"`): the holder is online and will hand over; ask again;
+  - `warning` with `heldBy` (name, last seen, last word): the offline holder may have unsent turns; ask again with `force: true` to take it anyway.
+- **The evidence rule** (`takeOver` in `src/server/sync/authority.ts`): a desktop is online while the server heard from it in the last 30 seconds. Offline, its last word decides: after `all-sent` the session moves at once with no warning; after `busy` or `unsent` it warns.
+  - The desktop's word travels with every round (`busy` while a reply is being written, `unsent` when it has changes the server lacks) and with every send (`busy` or `all-sent`).
+- **Hand-over from an online holder:** the server notes the request; the holder sees it at its next round. If it is writing a reply it carries on (and keeps saying `busy`); otherwise it stops its helpers and extraction, sends the session with `release`, and the server gives it to the asker. A request nobody repeats for a minute is forgotten.
+- **From the cloud to a desktop** there is never a warning: the server knows its own state. It waits while it is writing a reply for that session, then stops its helpers and extraction and moves it.
+- **Helpers move by restarting:** a stopped helper writes nothing more, so its record travels as `running`, and the new holder's `recoverStaleJobs` starts it again. Stopping is `fireJobAbort` without the "aborted" record that the learner's own Stop writes.
+- **No copies:** a desktop that finds another device holding a session it held stops whatever it was still doing for it (a reply too), takes the server's version in place of its own, and, if its own differed from what it last sent, keeps a notice: the session's id and title, the number of messages the learner sent there that the server never got, and the time. `GET /api/cloud` returns `notices` until `POST {op:"dismiss-notice"}`.
+  - A send that reaches the server after the take-over is refused (`lease_lost`) and handled the same way.
+- **Facts for the Phase 6 screens:** `GET /api/cloud` returns `held`: on the server every session it doesn't hold with the holder's name, `online`, `lastSeenAt` and `word`; on a desktop every session it doesn't hold with the holder's id and name. The offline heads-up needs only `sync.state` (`offline`, `needs-pairing` or `paused`) and whether the session is in `held`.
+- **Where this copy's own work is wired:** `src/server/sync/local-work.ts` gives the engine "is a reply being written" and "stop helpers and extraction" from the real turn and job modules. It is loaded by the server barrel. `engine.ts` itself stays small because `proxy.ts` loads it.
+- **Tests:** `tests/sync-takeover.test.ts` (every path above with one or two desktops), `tests/sync-local-work.test.ts` (the cloud's side against the real turn registry, job aborts and the recovery sweep).
+- **Real run:** between two built copies: an online hand-over, taking it back, and a take-over during the desktop's silence followed by the discard and its notice.
 
 #### What the investigation found (for whoever builds it)
 

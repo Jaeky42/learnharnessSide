@@ -18,6 +18,7 @@
 import { bundleDigest, checkBundle, type SessionBundle, type SessionChange } from "../../core/sync/sessions.ts";
 import type { SessionFiles } from "../../store/sync/session-files.ts";
 import type { StateFile } from "../../store/sync/state-file.ts";
+import type { LocalWork } from "./authority.ts";
 import type { SyncReply } from "./client.ts";
 
 export interface DesktopSession {
@@ -34,6 +35,15 @@ export interface DesktopSession {
 	conflict?: true;
 }
 
+/** Told to the learner after a discard (owner's rule: no copies, but never silently). */
+export interface DiscardNotice {
+	chatId: string;
+	title: string;
+	/** Messages the learner sent here that never reached the server. */
+	turns: number;
+	at: number;
+}
+
 export interface DesktopState {
 	version: 1;
 	/** The server this state belongs to; another server starts over. */
@@ -44,6 +54,8 @@ export interface DesktopState {
 	/** The server's counter up to which this desktop has asked. */
 	cursor: number;
 	sessions: Record<string, DesktopSession>;
+	/** Discards the learner hasn't been told about yet. */
+	notices?: DiscardNotice[];
 }
 
 export function isDesktopState(value: unknown): value is DesktopState {
@@ -67,10 +79,12 @@ export interface DesktopSyncDeps {
 	makeBackup: () => string | null;
 	/** Tell this app's open windows that a session's files changed under them. */
 	announce?: (chatId: string, what: "written" | "removed") => void;
+	/** This desktop's own work on its sessions. */
+	localWork?: LocalWork;
 }
 
 export type TickResult =
-	| { ok: true; fetched: string[]; sent: string[]; removed: string[]; lost: string[] }
+	| { ok: true; fetched: string[]; sent: string[]; removed: string[]; lost: string[]; handed: string[] }
 	| { ok: false; reason: "not-paired" | "offline" | "paused" | "refused" | "busy" };
 
 export interface DesktopSync {
@@ -80,6 +94,17 @@ export interface DesktopSync {
 	holds(chatId: string): boolean;
 	holderOf(chatId: string): { id: string; name: string | null } | null;
 	tick(): Promise<TickResult>;
+	/**
+	 * Ask the server for a session another device holds. Needs the server:
+	 * an offline desktop can only continue what it already held. The answer's
+	 * `status` is the server's ("yours", "moved", "waiting", "warning") or
+	 * "offline" / "not-paired" / "paused".
+	 */
+	takeOver(chatId: string, force: boolean): Promise<Record<string, unknown>>;
+	/** Every session this desktop may not change. */
+	held(): Record<string, { id: string; name: string | null }>;
+	notices(): DiscardNotice[];
+	dismissNotice(chatId: string, at: number): void;
 }
 
 const sessionPath = (id: string) => `/api/sync/sessions/${encodeURIComponent(id)}`;
@@ -113,6 +138,38 @@ export function createDesktopSync(deps: DesktopSyncDeps): DesktopSync {
 		deps.announce?.(change.id, "written");
 	}
 
+	/** How many messages the learner sent here are missing from the server's version. */
+	function unsentTurns(local: SessionBundle, remote: SessionBundle): { turns: number; title: string } {
+		type Record_ = { title?: unknown; messages?: Array<{ id?: unknown; role?: unknown }> };
+		let mine: Record_ = {}, theirs: Record_ = {};
+		try { mine = JSON.parse(local.chat) as Record_; theirs = JSON.parse(remote.chat) as Record_; } catch { /* counted as none */ }
+		const there = new Set((theirs.messages ?? []).map((m) => m.id));
+		const turns = (mine.messages ?? []).filter((m) => m.role === "user" && !there.has(m.id)).length;
+		return { turns, title: typeof mine.title === "string" ? mine.title : "" };
+	}
+
+	/**
+	 * This desktop held the session and another device holds it now. Whatever
+	 * it hadn't sent is discarded and the server's version takes its place
+	 * (owner's rule: no copies). If anything was discarded, a notice is kept.
+	 */
+	async function giveUp(state: DesktopState, change: SessionChange): Promise<boolean> {
+		const entry = state.sessions[change.id];
+		// A reply, helpers and extraction still running here for it stop now.
+		deps.localWork?.stop(change.id, { turn: true });
+		const reply = await deps.request<SessionChange & { bundle: unknown }>(sessionPath(change.id));
+		if (!reply.ok) return false;
+		const remote = checkBundle(change.id, reply.body.bundle);
+		if (!remote) return false;
+		const local = files.read(change.id);
+		if (local && entry && bundleDigest(local) !== entry.digest && bundleDigest(local) !== bundleDigest(remote)) {
+			const lost = unsentTurns(local, remote);
+			state.notices = [...(state.notices ?? []), { chatId: change.id, title: lost.title, turns: lost.turns, at: deps.now() }].slice(-50);
+		}
+		adopt(state, { ...change, version: reply.body.version, holder: reply.body.holder, holderName: reply.body.holderName }, remote, false);
+		return true;
+	}
+
 	async function fetchInto(state: DesktopState, change: SessionChange, mine: boolean): Promise<boolean> {
 		const reply = await deps.request<SessionChange & { bundle: unknown }>(sessionPath(change.id));
 		if (!reply.ok) return false;
@@ -131,12 +188,22 @@ export function createDesktopSync(deps: DesktopSyncDeps): DesktopSync {
 			state = { version: 1, server: identity.server, deviceId: identity.deviceId, startedAt: deps.now(), backup: deps.makeBackup(), cursor: 0, sessions: {} };
 			deps.state.write(state);
 		}
-		const result = { ok: true as const, fetched: [] as string[], sent: [] as string[], removed: [] as string[], lost: [] as string[] };
+		const result = { ok: true as const, fetched: [] as string[], sent: [] as string[], removed: [] as string[], lost: [] as string[], handed: [] as string[] };
+		const replying = (id: string): boolean => deps.localWork?.replying(id) === true;
 
 		// ── 1. What changed on the server ─────────────────────────────────────
-		const news = await deps.request<{ seq: number; changes: SessionChange[] }>("/api/sync/sessions", { method: "POST", body: { cursor: state.cursor, reports: {} } });
-		if (!news.ok) return { ok: false, reason: news.reason };
+		// With the question goes this desktop's word on the sessions it holds:
+		// "busy" while a reply is being written, "unsent" when it has changes the
+		// server doesn't have yet. It is the evidence a take-over warning rests on.
 		const localBefore = files.stamps();
+		const reports: Record<string, "busy" | "unsent"> = {};
+		for (const [id, entry] of Object.entries(state.sessions)) {
+			if (!entry.mine) continue;
+			if (replying(id)) reports[id] = "busy";
+			else if (localBefore.has(id) && localBefore.get(id) !== entry.stamp) reports[id] = "unsent";
+		}
+		const news = await deps.request<{ seq: number; changes: SessionChange[]; handovers?: string[] }>("/api/sync/sessions", { method: "POST", body: { cursor: state.cursor, reports } });
+		if (!news.ok) return { ok: false, reason: news.reason };
 		for (const change of news.body.changes) {
 			const entry = state.sessions[change.id];
 			if (change.deleted) {
@@ -181,6 +248,11 @@ export function createDesktopSync(deps: DesktopSyncDeps): DesktopSync {
 			if (entry.conflict) continue;
 			if (mine) {
 				// The echo of this desktop's own send, or the lease coming to it.
+				if (!entry.mine && change.version > entry.serverVersion) {
+					// It comes with a newer version than the one here: fetch that first.
+					if (await fetchInto(state, change, true)) result.fetched.push(change.id);
+					continue;
+				}
 				entry.mine = true;
 				entry.holder = change.holder;
 				entry.holderName = change.holderName;
@@ -188,10 +260,8 @@ export function createDesktopSync(deps: DesktopSyncDeps): DesktopSync {
 				continue;
 			}
 			if (entry.mine) {
-				// Another device holds it now: this desktop lost the session. What it
-				// hadn't sent is discarded (owner's rule: no copies) and the server's
-				// version takes its place.
-				if (await fetchInto(state, change, false)) result.lost.push(change.id);
+				// Another device holds it now: this desktop lost the session.
+				if (await giveUp(state, change)) result.lost.push(change.id);
 				continue;
 			}
 			if (change.version > entry.serverVersion || entry.holder !== change.holder) {
@@ -222,7 +292,7 @@ export function createDesktopSync(deps: DesktopSyncDeps): DesktopSync {
 				await fetchInto(state, { id, version: entry.serverVersion, holder: entry.holder, holderName: entry.holderName, deleted: false }, false);
 				continue;
 			}
-			const reply = await deps.request<SessionChange>(sessionPath(id), { method: "PUT", body: { baseVersion: entry?.serverVersion ?? 0, bundle } });
+			const reply = await deps.request<SessionChange>(sessionPath(id), { method: "PUT", body: { baseVersion: entry?.serverVersion ?? 0, bundle, word: replying(id) ? "busy" : "all-sent" } });
 			if (reply.ok) {
 				state.sessions[id] = { mine: true, holder: reply.body.holder, holderName: reply.body.holderName, serverVersion: reply.body.version, stamp, digest };
 				result.sent.push(id);
@@ -230,7 +300,9 @@ export function createDesktopSync(deps: DesktopSyncDeps): DesktopSync {
 			}
 			if (reply.reason === "refused" && reply.code === "lease_lost") {
 				const change = reply.body as unknown as SessionChange;
-				if (await fetchInto(state, { id, version: change.version, holder: change.holder, holderName: change.holderName, deleted: false }, false)) result.lost.push(id);
+				if (entry) {
+					if (await giveUp(state, { id, version: change.version, holder: change.holder, holderName: change.holderName, deleted: false })) result.lost.push(id);
+				}
 				continue;
 			}
 			if (reply.reason === "refused" && reply.code === "deleted") {
@@ -261,11 +333,66 @@ export function createDesktopSync(deps: DesktopSyncDeps): DesktopSync {
 				await fetchInto(state, { id, version: entry.serverVersion, holder: entry.holder, holderName: entry.holderName, deleted: false }, false);
 			}
 		}
+		// ── 4. Sessions someone asked this desktop to hand over ───────────────
+		for (const id of news.body.handovers ?? []) {
+			const entry = state.sessions[id];
+			if (!entry?.mine) continue;
+			// A reply being written is finished first; the next round hands over.
+			if (replying(id)) continue;
+			// Helpers and extraction stop here; the new holder starts them again.
+			deps.localWork?.stop(id);
+			const stamp = files.stamp(id);
+			const bundle = files.read(id);
+			if (!bundle) continue;
+			const reply = await deps.request<SessionChange>(sessionPath(id), { method: "PUT", body: { baseVersion: entry.serverVersion, bundle, word: "all-sent", release: true } });
+			if (!reply.ok) continue;
+			state.sessions[id] = {
+				mine: reply.body.holder === identity.deviceId, holder: reply.body.holder, holderName: reply.body.holderName,
+				serverVersion: reply.body.version, stamp, digest: bundleDigest(bundle),
+			};
+			if (reply.body.holder !== identity.deviceId) {
+				result.handed.push(id);
+				deps.announce?.(id, "written");
+			}
+		}
 		deps.state.write(state);
 		return result;
 	}
 
+	async function takeOver(chatId: string, force: boolean): Promise<Record<string, unknown>> {
+		const identity = deps.identity();
+		const state = current();
+		if (!identity || !state) return { status: "not-paired" };
+		const reply = await deps.request<SessionChange & { status: string }>(`${sessionPath(chatId)}/take`, { method: "POST", body: { force } });
+		if (!reply.ok) return { status: reply.reason === "refused" ? "refused" : reply.reason, ...(reply.reason === "refused" ? { error: reply.error } : {}) };
+		if (reply.body.status === "moved" || reply.body.status === "yours") {
+			// The session is this desktop's: bring the server's version here.
+			const entry = state.sessions[chatId];
+			if (!entry?.mine) {
+				const change: SessionChange = { id: chatId, version: reply.body.version, holder: reply.body.holder, holderName: reply.body.holderName, deleted: false };
+				if (!(await fetchInto(state, change, true))) return { status: "offline" };
+				deps.state.write(state);
+			}
+		}
+		return reply.body as unknown as Record<string, unknown>;
+	}
+
 	return {
+		takeOver,
+		held() {
+			const out: Record<string, { id: string; name: string | null }> = {};
+			for (const [id, entry] of Object.entries(current()?.sessions ?? {})) {
+				if (!entry.mine && !entry.conflict) out[id] = { id: entry.holder, name: entry.holderName };
+			}
+			return out;
+		},
+		notices: () => current()?.notices ?? [],
+		dismissNotice(chatId, at) {
+			const state = current();
+			if (!state?.notices) return;
+			state.notices = state.notices.filter((n) => !(n.chatId === chatId && n.at === at));
+			deps.state.write(state);
+		},
 		active: () => current() !== null,
 		holds(chatId) {
 			const entry = entryOf(chatId);
