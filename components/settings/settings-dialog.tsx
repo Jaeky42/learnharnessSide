@@ -53,6 +53,7 @@ import { KeyboardSection } from "./keyboard-section.tsx";
 import { ChatGPTUIProvider } from "./chatgpt-connection.tsx";
 import { NativeSubscriptionUIProvider } from "./subscription-connections.tsx";
 import { AccountSection, useServerAccount } from "./account-section.tsx";
+import { ObsidianSection } from "./obsidian-section.tsx";
 import { isPhoneNow, useIsPhone } from "@/components/phone/use-phone";
 import { isServerMode } from "./server-mode";
 
@@ -66,7 +67,9 @@ const SECTIONS = [
 	{ id: "graph", label: "Graph" },
 	{ id: "keyboard", label: "Keyboard", hint: "Stored on this device" },
 	{ id: "general", label: "General" },
-	// Side-tutor fork: shown only on a server-mode LearnHarness (account-section.tsx).
+	// Side-tutor fork: both shown only on a server-mode LearnHarness
+	// (obsidian-section.tsx, account-section.tsx).
+	{ id: "obsidian", label: "Obsidian" },
 	{ id: "account", label: "Account" },
 ] as const;
 type SectionId = (typeof SECTIONS)[number]["id"];
@@ -379,7 +382,7 @@ export function SettingsDialogBody({
 					data-testid="settings-nav"
 					className="flex w-44 shrink-0 flex-col gap-1 border-r border-border p-2"
 				>
-					{SECTIONS.filter((s) => (s.id !== "account" || account.devices || (phone && account.devices === undefined && isServerMode())) && !(phone && s.id === "keyboard")).map((s) => (
+					{SECTIONS.filter((s) => (s.id !== "account" || account.devices || (phone && account.devices === undefined && isServerMode())) && (s.id !== "obsidian" || isServerMode()) && !(phone && s.id === "keyboard")).map((s) => (
 						<button
 							key={s.id}
 							type="button"
@@ -441,6 +444,11 @@ export function SettingsDialogBody({
 											void write("general", { ...record.general, autoUpdate: on })
 										}
 									/>
+								</SettingsSection>
+							)}
+							{active === "obsidian" && isServerMode() && (
+								<SettingsSection title="Obsidian" testid="section-obsidian">
+									<ObsidianSection />
 								</SettingsSection>
 							)}
 							{active === "account" && account.devices && (

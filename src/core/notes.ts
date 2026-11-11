@@ -617,6 +617,9 @@ export interface NotesStatus {
 	pending: number;
 	/** Vault-relative folder pasted images go to. */
 	attachmentFolder: string;
+	/** Cloud server only (docs/cloud-sync.md, Phase 4): whether the vault is
+	 *  syncing with Obsidian. Absent on the desktop and in local use. */
+	sync?: "ok" | "stopped";
 }
 
 export interface NotesTree {

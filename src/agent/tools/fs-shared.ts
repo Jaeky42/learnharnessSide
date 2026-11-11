@@ -59,6 +59,10 @@ const SENSITIVE_HOME_PATHS = [
 	".aws",
 	".azure",
 	".config/gcloud",
+	// obsidian-headless (the cloud server's Obsidian sync, docs/cloud-sync.md):
+	// its sign-in token, the vault key and its sync state.
+	".config/obsidian-headless",
+	".obsidian-headless",
 	".kube",
 	".docker",
 	".netrc",

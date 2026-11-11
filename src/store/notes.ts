@@ -891,6 +891,15 @@ function setVault(input: string): NotesStatus {
 	return status();
 }
 
+/** The cloud server's vault was disconnected (src/server/obsidian-sync.ts):
+ *  the drawer goes back to its connect prompt. Pending edits can't exist
+ *  there (the server's vault folder is always reachable). */
+function clearVault(): void {
+	if (!readSettings().vaultPath) return;
+	writeSettings({ vaultPath: null });
+	cache().clear();
+}
+
 export const notesStore = {
 	status,
 	tree,
@@ -909,6 +918,7 @@ export const notesStore = {
 	setHome,
 	discardSession,
 	setVault,
+	clearVault,
 	flushPending,
 	inboxFolder: INBOX_FOLDER,
 };

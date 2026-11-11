@@ -32,6 +32,7 @@ ENV NODE_ENV=production \
     LH_SERVER_MODE=1 \
     LH_DATA_DIR=/data/data \
     LH_AUTH_FILE=/data/secrets/auth.json \
+    LH_VAULT_DIR=/data/vault \
     HOME=/data/home \
     PATH=/data/home/.local/bin:$PATH
 COPY --from=build /src/.next/standalone ./
@@ -41,7 +42,7 @@ COPY deploy/docker-entrypoint.sh /usr/local/bin/lh-entrypoint
 RUN printf '#!/bin/sh\nexec node /app/scripts/server-reset-password.mjs "$@"\n' > /usr/local/bin/reset-password \
  && chmod 755 /usr/local/bin/reset-password \
  && chmod 755 /usr/local/bin/lh-entrypoint \
- && mkdir -p /data/data /data/secrets /data/home \
+ && mkdir -p /data/data /data/secrets /data/home /data/vault \
  && chown -R node:node /data \
  && chmod 700 /data/secrets
 USER node

@@ -65,6 +65,7 @@ The learner's own notes beside the lesson, stored as Markdown in their Obsidian 
 - **Editor:** CodeMirror for editing (sections fold while typing), plus a Read view with formatted math, folding, clickable links and images.
 - **Where it appears:** both **teaching and practice** sessions.
 - **On a phone:** the drawer fills the screen and shows the list, then the note. Rows open their menu on press and hold, and dragging is off. See "Phone layouts" in `docs/cloud-sync.md`.
+- **On the cloud server:** the vault is connected in Settings → Obsidian instead of by a folder path, and the drawer says when the notes aren't syncing with Obsidian. See "Obsidian vault on the VPS" in `docs/cloud-sync.md`. The desktop app's drawer is unchanged.
 - **Extras:**
   - Math in Read view.
   - Pasted images go to Obsidian's `attachmentFolderPath`, or `LearnHarness/attachments` when that isn't set.

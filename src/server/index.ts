@@ -79,3 +79,4 @@ export {
 } from "./server-auth.ts";
 // Claude sign-in on the cloud server (side-tutor fork, cloud sync Phase 2).
 export { claudeLoginStatusResponse, claudeLoginControlResponse, claudeLoginOpenResponse } from "./claude-login-http.ts";
+export { obsidianStatusResponse, obsidianControlResponse } from "./obsidian-sync-http.ts";

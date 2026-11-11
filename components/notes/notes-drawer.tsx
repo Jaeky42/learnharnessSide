@@ -39,6 +39,7 @@ import {
 	nameProblem,
 	noteName,
 	NOTES_FOLDER,
+	OBSIDIAN_TEXT,
 	obsidianUrl,
 	parseSections,
 	resolveLink,
@@ -68,6 +69,8 @@ import { NoteReadView } from "./note-read-view";
 import { MoveDialog, NameDialog, SplitDialog } from "./notes-dialogs";
 import { buildTree, filterTree, itemName, NotesTreeView, type RowTarget, type TreeMenuItem } from "./notes-tree";
 import { isPhoneNow, useIsPhone } from "@/components/phone/use-phone";
+import { useSettingsDialog } from "@/components/settings/settings-dialog";
+import { useServerMode } from "@/components/settings/server-mode";
 
 const TREE_POLL_MS = 4000;
 const NOTE_POLL_MS = 2500;
@@ -159,6 +162,11 @@ export function NotesDrawer({ chatId, onClose }: { chatId: string; onClose: () =
 	// then the note with "‹ Notes" to go back. It opens on the note last
 	// open in this session, if any.
 	const phone = useIsPhone();
+	// CLOUD SERVER (cloud sync Phase 4): the vault is connected in Settings →
+	// Obsidian, never by typing a folder path. undefined until mounted, so the
+	// desktop's first frame is unchanged.
+	const onServer = useServerMode() === true;
+	const { open: openSettings } = useSettingsDialog();
 	const [phoneScreen, setPhoneScreen] = useState<"list" | "note">(() => (openPath ? "note" : "list"));
 	useEffect(() => {
 		setPhoneScreen(openPath ? "note" : "list");
@@ -670,8 +678,8 @@ export function NotesDrawer({ chatId, onClose }: { chatId: string; onClose: () =
 					type="button"
 					aria-label="Notes settings"
 					data-phone="notes-list-action"
-					title="Vault folder"
-					onClick={() => setSetupOpen((v) => !v)}
+					title={onServer ? "Obsidian settings" : "Vault folder"}
+					onClick={() => (onServer ? openSettings("obsidian") : setSetupOpen((v) => !v))}
 					className="shrink-0 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
 				>
 					<SettingsIcon className="size-3.5" />
@@ -686,7 +694,21 @@ export function NotesDrawer({ chatId, onClose }: { chatId: string; onClose: () =
 				</button>
 			</header>
 
-			{needsSetup ? (
+			{needsSetup && onServer ? (
+				<div className="flex flex-col items-start gap-3 p-4 text-sm" data-testid="notes-connect-obsidian">
+					<div>
+						<h2 className="text-sm font-semibold">Connect your Obsidian vault</h2>
+						<p className="mt-1 text-xs leading-relaxed text-muted-foreground">Your notes live in your Obsidian vault. Connect it in Settings and they’ll appear here.</p>
+					</div>
+					<button
+						type="button"
+						onClick={() => openSettings("obsidian")}
+						className="rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground transition-colors hover:bg-primary/90"
+					>
+						Open Settings
+					</button>
+				</div>
+			) : needsSetup ? (
 				<VaultSetup
 					current={status?.vaultPath ?? null}
 					onCancel={status?.configured ? () => setSetupOpen(false) : undefined}
@@ -700,6 +722,12 @@ export function NotesDrawer({ chatId, onClose }: { chatId: string; onClose: () =
 				<div className="p-4 text-xs text-muted-foreground">{treeError ?? "Loading notes…"}</div>
 			) : (
 				<>
+					{onServer && status?.sync === "stopped" && (
+						<div role="status" data-testid="notes-not-syncing" className="mx-3 mt-3 rounded-lg border border-border bg-card px-3 py-2 text-xs text-muted-foreground">
+							{OBSIDIAN_TEXT.notSyncing}{" "}
+							<button type="button" className="underline underline-offset-2 hover:text-foreground" onClick={() => openSettings("obsidian")}>Settings</button>
+						</div>
+					)}
 					{status && !status.available && (
 						<div role="status" className="mx-3 mt-3 rounded-lg border border-border bg-card px-3 py-2 text-xs text-muted-foreground">
 							Your vault folder can’t be reached right now. Edits are kept here and written to the vault when it’s back

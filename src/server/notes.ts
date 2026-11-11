@@ -21,6 +21,8 @@
  */
 
 import { notesStore, NotesError } from "../store/notes.ts";
+import { obsidianSync } from "./obsidian-sync.ts";
+import { serverModeEnabled } from "./server-auth.ts";
 import { stores } from "./stores.ts";
 
 function fail(error: unknown): Response {
@@ -51,7 +53,18 @@ async function json(req: Request): Promise<Record<string, unknown>> {
 
 export function notesTreeResponse(): Response {
 	try {
-		return Response.json(notesStore.tree(), { headers: { "Cache-Control": "no-store" } });
+		const tree = notesStore.tree();
+		// Cloud server (Phase 4): the drawer shows when Obsidian sync has stopped,
+		// and names the vault as Obsidian does (the server's folder is just
+		// "vault"; obsidian:// links address the vault by its Obsidian name).
+		if (serverModeEnabled()) {
+			const manager = obsidianSync();
+			const sync = manager.notesSync();
+			if (sync) tree.status.sync = sync;
+			const name = manager.vaultName();
+			if (name && tree.status.configured) tree.status.vaultName = name;
+		}
+		return Response.json(tree, { headers: { "Cache-Control": "no-store" } });
 	} catch (e) {
 		return fail(e);
 	}
@@ -62,6 +75,8 @@ export async function notesActionResponse(req: Request): Promise<Response> {
 	try {
 		switch (b.action) {
 			case "vault": {
+				// On the cloud server the vault folder is fixed and set by Settings → Obsidian.
+				if (serverModeEnabled()) return Response.json({ error: "Connect your Obsidian vault in Settings." }, { status: 403 });
 				const p = str(b.path);
 				if (!p) return Response.json({ error: "Enter the full path to your vault folder." }, { status: 400 });
 				return Response.json({ status: notesStore.setVault(p) });

@@ -39,6 +39,17 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run typecheck
+      # tests/obsidian-sync.test.ts drives the real Obsidian sync program
+      # (obsidian-headless) against a stand-in for Obsidian's servers. It is
+      # not a dependency of the app (the server installs it onto its volume,
+      # deploy/docker-entrypoint.sh), so it is fetched here, at the same
+      # pinned version, only for those tests.
+      - name: Fetch the pinned Obsidian sync program for its tests
+        run: |
+          version="$(sed -n 's/^OB_VERSION="\(.*\)"$/\1/p' deploy/docker-entrypoint.sh)"
+          test -n "$version"
+          npm install --prefix "$RUNNER_TEMP/ob" --no-audit --no-fund --allow-scripts=better-sqlite3 "obsidian-headless@$version"
+          echo "LH_TEST_OB_CLI=$RUNNER_TEMP/ob/node_modules/obsidian-headless/cli.js" >> "$GITHUB_ENV"
       - run: npm test
       - run: npm run lint
 
@@ -80,6 +91,17 @@ jobs:
           test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/api/settings)" = "401" || { echo "::error::an API answered without a login"; exit 1; }
           # The reset command exists and issues a new code.
           docker exec lh reset-password | grep -q "Setup code:" || { echo "::error::reset-password failed"; exit 1; }
+          # Obsidian's sync program installs itself onto the volume at the
+          # pinned version (cloud sync Phase 4), and its database add-on
+          # loads on this image's Node.
+          ob_version="$(sed -n 's/^OB_VERSION="\(.*\)"$/\1/p' deploy/docker-entrypoint.sh)"
+          for i in $(seq 1 60); do
+            [ "$(docker exec lh ob --version 2>/dev/null)" = "$ob_version" ] && break
+            sleep 3
+          done
+          test "$(docker exec lh ob --version 2>/dev/null)" = "$ob_version" || { docker exec lh cat /data/home/ob-install.log || true; echo "::error::Obsidian's sync program was not installed"; exit 1; }
+          docker exec lh node -e "new (require('/data/home/.local/lib/node_modules/obsidian-headless/node_modules/better-sqlite3'))(':memory:').close()" || { echo "::error::the sync program's database add-on does not load"; exit 1; }
+          test "$(docker exec lh sh -c 'echo $LH_VAULT_DIR')" = "/data/vault" || { echo "::error::LH_VAULT_DIR is not set"; exit 1; }
           docker rm -f lh
       - name: Publish
         if: github.event_name == 'push'
