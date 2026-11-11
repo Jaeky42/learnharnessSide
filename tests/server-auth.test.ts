@@ -285,6 +285,17 @@ describe("gate", () => {
 		for (const closed of ["/manifest.json", "/icons", "/iconsx/a.png"]) assert.notEqual(gate(closed), null, closed);
 	});
 
+	it("the site has a browser-tab icon (the logo), open without the login and linked from the login pages", async () => {
+		// Without one a browser shows its own placeholder: a globe in Chrome.
+		const ico = fs.readFileSync(path.join(import.meta.dirname, "..", "app", "favicon.ico"));
+		assert.deepEqual([ico.readUInt16LE(0), ico.readUInt16LE(2)], [0, 1], "an .ico file");
+		const sizes = Array.from({ length: ico.readUInt16LE(4) }, (_, i) => ico.readUInt8(6 + i * 16));
+		assert.deepEqual(sizes, [16, 32, 48]);
+		assert.equal(gate("/favicon.ico"), null);
+		const pages = await import("../src/server/server-auth-pages.ts");
+		for (const html of [pages.loginPageHtml(), pages.setupPageHtml()]) assert.match(html, /<link rel="icon" href="\/favicon\.ico" sizes="any">/);
+	});
+
 	it("after setup: no cookie → /login; a valid cookie passes; an expired one doesn't", () => {
 		const t0 = Date.now();
 		const base = { ...core.emptyServerAuthState(), password: core.hashPassword("longenough") };

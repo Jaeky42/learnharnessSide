@@ -278,6 +278,7 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 - No service worker and no offline mode.
 - The login and setup pages link the manifest and the icon too; their security policy allows the same-site manifest and icon (`manifest-src 'self'; img-src 'self'`).
 - Icons are rendered from `build/icon-flat.svg` by `scripts/make-pwa-icons.mjs` into `public/icons/`: the icon as drawn (192, 512), a maskable 512 for Android, and a 180 apple-touch-icon. The full-bleed versions use the icon's own background, #141414.
+- **Browser-tab icon** (owner's ask: Chrome showed its globe, because the site had only the home-screen icons): the same script writes `app/favicon.ico` (the logo at 16, 32 and 48 px). Next serves it at `/favicon.ico` and links it from every page; the login and setup pages link it themselves. It is open without the login, like the other icons.
 - On an iPhone the status bar is `black-translucent`: the app draws under the clock and pads every top edge (see the session list above).
 
 **How it's built**

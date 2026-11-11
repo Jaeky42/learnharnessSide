@@ -35,6 +35,7 @@ function page(title: string, body: string, script: string): string {
 <meta name="robots" content="noindex">
 <meta name="theme-color" content="#141414">
 <link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/favicon.ico" sizes="any">
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
