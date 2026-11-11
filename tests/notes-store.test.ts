@@ -13,6 +13,7 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "lh-notes-"));
 process.env.LH_DATA_DIR = path.join(TMP, "data");
 
 const { notesStore, hashText } = await import("../src/store/notes.ts");
+const { notesActionResponse } = await import("../src/server/notes.ts");
 
 after(() => fs.rmSync(TMP, { recursive: true, force: true }));
 
@@ -188,6 +189,144 @@ describe("moving", () => {
 		write("Taken.md", "a");
 		write("Physics/Taken.md", "b");
 		assert.throws(() => notesStore.move("Taken.md", "Physics"), /already exists/);
+	});
+});
+
+describe("deleting (for good: no undo, no trash)", () => {
+	it("deletes a note and leaves links to it as the learner wrote them", () => {
+		write("Electricity/Current.md", "Charge per second.\n");
+		write("Electricity/Circuits.md", "See [[Current]], [[LearnHarness/Electricity/Current]] and [c](Current.md).\n");
+		assert.deepEqual(notesStore.tree().notes.map((x) => x.path), ["Electricity/Circuits.md", "Electricity/Current.md"]);
+		assert.deepEqual(notesStore.remove("Electricity/Current.md"), { path: "Electricity/Current.md" });
+		assert.ok(!fs.existsSync(file("Electricity/Current.md")));
+		assert.equal(readFile("Electricity/Circuits.md"), "See [[Current]], [[LearnHarness/Electricity/Current]] and [c](Current.md).\n");
+		// The tree is fresh at once, not after its cache runs out.
+		assert.deepEqual(notesStore.tree().notes.map((x) => x.path), ["Electricity/Circuits.md"]);
+		assert.deepEqual(notesStore.tree().folders, ["Electricity"]);
+	});
+
+	it("says what a folder holds, then deletes it with everything in it", () => {
+		write("Physics/Motion.md", "x");
+		write("Physics/Waves/Sound.md", "x");
+		write("Physics/Waves/Light.MD", "x");
+		write("Physics/Waves/diagram.png", "x");
+		write("Physics/.trash/Old.md", "x");
+		fs.mkdirSync(file("Physics/Empty"), { recursive: true });
+		write("Keep.md", "x");
+		assert.deepEqual(notesStore.contents("Physics"), { notes: 3, folders: 2, files: 1 });
+		assert.deepEqual(notesStore.contents("Physics/Empty"), { notes: 0, folders: 0, files: 0 });
+		assert.deepEqual(notesStore.remove("Physics"), { path: "Physics" });
+		assert.ok(!fs.existsSync(file("Physics")));
+		assert.equal(readFile("Keep.md"), "x");
+		const t = notesStore.tree();
+		assert.deepEqual(t.folders, []);
+		assert.deepEqual(t.notes.map((x) => x.path), ["Keep.md"]);
+	});
+
+	it("refuses the notes folder itself, missing items and anything outside the notes folder", () => {
+		write("Keep.md", "x");
+		fs.mkdirSync(file("Folder"), { recursive: true });
+		assert.throws(() => notesStore.remove(""), /notes folder itself can't be deleted/);
+		assert.throws(() => notesStore.contents(""), /Invalid folder path/);
+		assert.throws(() => notesStore.remove("Gone.md"), /no longer exists/);
+		assert.throws(() => notesStore.remove("Gone"), /no longer exists/);
+		assert.throws(() => notesStore.contents("Gone"), /no longer exists/);
+		assert.throws(() => notesStore.remove("../outside.md"), /Invalid note path/);
+		assert.throws(() => notesStore.remove("../outside"), /Invalid folder path/);
+		assert.throws(() => notesStore.contents("../outside"), /Invalid folder path/);
+
+		const outside = path.join(TMP, `outside-delete-${n}`);
+		fs.mkdirSync(outside);
+		fs.writeFileSync(path.join(outside, "Precious.md"), "not a LearnHarness note");
+		fs.symlinkSync(outside, file("Linked"), process.platform === "win32" ? "junction" : "dir");
+		assert.throws(() => notesStore.remove("Linked"), /outside the notes folder/);
+		assert.throws(() => notesStore.remove("Linked/Precious.md"), /outside the notes folder/);
+		assert.throws(() => notesStore.contents("Linked"), /outside the notes folder/);
+		assert.equal(fs.readFileSync(path.join(outside, "Precious.md"), "utf-8"), "not a LearnHarness note");
+
+		assert.ok(fs.statSync(root()).isDirectory());
+		assert.equal(readFile("Keep.md"), "x");
+		assert.ok(fs.statSync(file("Folder")).isDirectory());
+	});
+
+	it("drops edits that were waiting for the vault, so a deleted note can't come back", () => {
+		const one = notesStore.create("", "Resistance", null).path;
+		const two = notesStore.create("Electricity", "Charge", null).path;
+		const kept = notesStore.create("", "Kept", null).path;
+		const hashes = [one, two, kept].map((p) => notesStore.read(p).hash);
+		const away = `${vault}-away`;
+		fs.renameSync(vault, away);
+		notesStore.save(one, "Written offline 1\n", hashes[0]!, null);
+		notesStore.save(two, "Written offline 2\n", hashes[1]!, null);
+		notesStore.save(kept, "Written offline 3\n", hashes[2]!, null);
+		assert.equal(notesStore.status().pending, 3);
+		assert.throws(() => notesStore.remove(one), /can't be reached/);
+		fs.renameSync(away, vault);
+		notesStore.remove(one);
+		notesStore.remove("Electricity");
+		assert.equal(notesStore.status().pending, 1);
+		assert.deepEqual(notesStore.tree().notes.map((x) => x.path), [kept]);
+		assert.equal(notesStore.status().pending, 0);
+		assert.ok(!fs.existsSync(file(one)));
+		assert.ok(!fs.existsSync(file("Electricity")));
+		assert.equal(notesStore.read(kept).body, "Written offline 3\n");
+	});
+
+	it("leaves a session without a home folder when that folder is deleted", () => {
+		write("Physics/Waves/Sound.md", "x");
+		write("Chemistry/Atoms.md", "x");
+		notesStore.setHome("chat_del_inner", "Physics/Waves");
+		notesStore.setHome("chat_del_outer", "Physics");
+		notesStore.setHome("chat_del_other", "Chemistry");
+		notesStore.remove("Physics");
+		assert.equal(notesStore.getHome("chat_del_inner"), null);
+		assert.equal(notesStore.getHome("chat_del_outer"), null);
+		assert.equal(notesStore.getHome("chat_del_other"), "Chemistry");
+		// Deleting a note never touches a home folder.
+		notesStore.remove("Chemistry/Atoms.md");
+		assert.equal(notesStore.getHome("chat_del_other"), "Chemistry");
+	});
+});
+
+describe("deleting over the route", () => {
+	const post = (body: Record<string, unknown>) =>
+		notesActionResponse(new Request("http://localhost/api/notes", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }));
+
+	it("says what a folder holds, deletes, and answers refusals as errors", async () => {
+		write("Physics/Motion.md", "x");
+		write("Physics/Waves/Sound.md", "x");
+		const contents = await post({ action: "contents", path: "Physics" });
+		assert.equal(contents.status, 200);
+		assert.deepEqual(await contents.json(), { notes: 2, folders: 1, files: 0 });
+		const note = await post({ action: "delete", path: "Physics/Motion.md" });
+		assert.equal(note.status, 200);
+		assert.deepEqual(await note.json(), { path: "Physics/Motion.md" });
+		assert.equal((await post({ action: "delete", path: "Physics" })).status, 200);
+		assert.ok(!fs.existsSync(file("Physics")));
+
+		const again = await post({ action: "delete", path: "Physics" });
+		assert.equal(again.status, 404);
+		assert.deepEqual(await again.json(), { error: "That item no longer exists." });
+		const top = await post({ action: "delete" });
+		assert.equal(top.status, 400);
+		assert.deepEqual(await top.json(), { error: "The notes folder itself can't be deleted." });
+		assert.equal((await post({ action: "delete", path: "../outside" })).status, 400);
+		assert.equal((await post({ action: "contents", path: "Physics" })).status, 404);
+		assert.ok(fs.statSync(root()).isDirectory());
+	});
+
+	it("deletes on the cloud server too, where the sync safety check is told (and can't fail the delete)", async () => {
+		write("Physics/Motion.md", "x");
+		const before = process.env.LH_SERVER_MODE;
+		process.env.LH_SERVER_MODE = "1";
+		try {
+			const res = await post({ action: "delete", path: "Physics/Motion.md" });
+			assert.equal(res.status, 200);
+			assert.deepEqual(await res.json(), { path: "Physics/Motion.md" });
+			assert.ok(!fs.existsSync(file("Physics/Motion.md")));
+		} finally {
+			if (before === undefined) delete process.env.LH_SERVER_MODE; else process.env.LH_SERVER_MODE = before;
+		}
 	});
 });
 

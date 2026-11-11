@@ -10,7 +10,7 @@ import { describe, it } from "node:test";
 import { isPhoneViewport, PHONE_MAX_WIDTH, PHONE_QUERY } from "../components/phone/use-phone.ts";
 import { enterSendsRule } from "../components/phone/enter-key.ts";
 import { BUBBLE_SIZE, dockAnchor } from "../components/phone/use-dock-anchor.ts";
-import { HOLD_SLOP, stillHolding } from "../components/phone/long-press.ts";
+import { edgeScrollStep, HOLD_SLOP, stillHolding } from "../components/phone/long-press.ts";
 
 const root = path.resolve(import.meta.dirname, "..");
 const css = readFileSync(path.join(root, "app/phone.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
@@ -122,6 +122,29 @@ describe("phone rules", () => {
 	it("a hold survives a small drift but not a scroll", () => {
 		assert.equal(stillHolding({ x: 100, y: 100 }, { x: 104, y: 106 }), true);
 		assert.equal(stillHolding({ x: 100, y: 100 }, { x: 100, y: 100 + HOLD_SLOP + 1 }), false);
+	});
+});
+
+describe("a dragged note scrolls the list near its edges", () => {
+	// A list from y = 100 to y = 500; the scroll zones are the top and bottom 56 px.
+	it("doesn't scroll while the finger is in the middle", () => {
+		assert.equal(edgeScrollStep(300, 100, 500), 0);
+		assert.equal(edgeScrollStep(156, 100, 500), 0);
+		assert.equal(edgeScrollStep(444, 100, 500), 0);
+	});
+	it("scrolls up near the top and down near the bottom, faster towards the edge", () => {
+		assert.equal(edgeScrollStep(128, 100, 500), -7);
+		assert.equal(edgeScrollStep(100, 100, 500), -14);
+		assert.equal(edgeScrollStep(472, 100, 500), 7);
+		assert.equal(edgeScrollStep(500, 100, 500), 14);
+	});
+	it("never goes faster than its top speed, even with the finger past the list", () => {
+		assert.equal(edgeScrollStep(20, 100, 500), -14);
+		assert.equal(edgeScrollStep(700, 100, 500), 14);
+	});
+	it("leaves a list too short for two scroll zones alone", () => {
+		assert.equal(edgeScrollStep(105, 100, 200), 0);
+		assert.equal(edgeScrollStep(195, 100, 200), 0);
 	});
 });
 

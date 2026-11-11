@@ -7,6 +7,7 @@ import { describe, it } from "node:test";
 import {
 	attachmentFolderFor,
 	computeBacklinks,
+	deleteConfirmText,
 	findLinks,
 	isValidNotePath,
 	linkSuggestions,
@@ -159,5 +160,35 @@ describe("attachments folder", () => {
 		assert.equal(attachmentFolderFor("./", "LearnHarness/A/B.md"), "LearnHarness/A");
 		assert.equal(attachmentFolderFor("./img", "LearnHarness/A/B.md"), "LearnHarness/A/img");
 		assert.equal(attachmentFolderFor("Assets/Images", "LearnHarness/A/B.md"), "Assets/Images");
+	});
+});
+
+describe("delete confirm (the owner's wording)", () => {
+	const forGood = (what: string) => `This removes ${what} from your Obsidian vault for good.`;
+
+	it("a note", () => {
+		assert.deepEqual(deleteConfirmText("Electricity", null), { title: "Delete “Electricity”?", body: forGood("it") });
+	});
+
+	it("an empty folder", () => {
+		assert.deepEqual(deleteConfirmText("Physics", { notes: 0, folders: 0, files: 0 }), { title: "Delete “Physics”?", body: forGood("the folder") });
+	});
+
+	it("a folder with things in it says how much goes with it", () => {
+		const title = "Delete “Physics” and everything in it?";
+		assert.deepEqual(deleteConfirmText("Physics", { notes: 3, folders: 1, files: 0 }), { title, body: forGood("3 notes and 1 folder") });
+		assert.deepEqual(deleteConfirmText("Physics", { notes: 1, folders: 0, files: 0 }), { title, body: forGood("1 note") });
+		assert.deepEqual(deleteConfirmText("Physics", { notes: 0, folders: 2, files: 0 }), { title, body: forGood("2 folders") });
+		assert.deepEqual(deleteConfirmText("Physics", { notes: 3, folders: 1, files: 2 }), { title, body: forGood("3 notes, 1 folder and 2 other files") });
+		assert.deepEqual(deleteConfirmText("Physics", { notes: 1, folders: 0, files: 1 }), { title, body: forGood("1 note and 1 other file") });
+		assert.deepEqual(deleteConfirmText("Physics", { notes: 0, folders: 0, files: 2 }), { title, body: forGood("2 files") });
+		assert.deepEqual(deleteConfirmText("Physics", { notes: 0, folders: 0, files: 1 }), { title, body: forGood("1 file") });
+	});
+
+	it("never mentions links (the owner declined that line)", () => {
+		for (const c of [null, { notes: 0, folders: 0, files: 0 }, { notes: 2, folders: 2, files: 2 }]) {
+			const { title, body } = deleteConfirmText("X", c);
+			assert.doesNotMatch(`${title} ${body}`, /link/i);
+		}
 	});
 });

@@ -156,7 +156,8 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 
 **Keeping sync safe**
 
-- **Rule: never delete files in the server's `LearnHarness/` folder by hand**, with sync running or not. `ob` treats a missing file as a deletion and removes it from Obsidian on every device, also when it next starts. To remove something that leaked into another folder, leave it out instead; that is automatic.
+- **Deleting in the notes drawer is fine**: it is a deliberate deletion, and it syncs to Obsidian like one made on any other device (Obsidian keeps it under Settings → Sync → Deleted files). The delete route tells the manager (`notesChangedHere`), which updates the safety check's note count at once, also while `ob` isn't running. Without that, clearing out more than half the notes during a sync stop would pause sync at the next start.
+- **Rule: never delete files in the server's `LearnHarness/` folder by hand** (over SSH, outside the app), with sync running or not. `ob` treats a missing file as a deletion and removes it from Obsidian on every device, also when it next starts. To remove something that leaked into another folder, leave it out instead; that is automatic.
 - **Safety check before every start of `ob`** (owner's choice). LearnHarness keeps the number of notes under `LearnHarness/` in `<data>/obsidian-sync.json` and updates it while `ob` runs. If the folder is missing, empty, or has lost more than half its notes, sync stays **paused** and Settings says why. The fix is Disconnect, then connect again. It can't undo a delete made while sync is running.
   - The same check works when LearnHarness's own record is lost: with no count to compare, an empty notes folder pauses sync whenever `ob` still remembers a sync of the vault (its `state.db` exists). If the notes are there, the record is rebuilt from them.
 - **A fresh connect starts clean on both sides.** Before `ob sync-setup`, LearnHarness removes what `ob` still holds for that vault id or that folder (settings it can't read count too) and empties the folder. A new setup on top of an old sync memory would make `ob` find every remembered note missing and delete them all from Obsidian.
@@ -230,7 +231,14 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
   - While an opened question leaves no room above the dock, the bubble moves to the top-right corner under the top bar.
 - **Notes drawer:** slides in from the right and fills the screen.
   - **List, then note** (owner's choice from screenshots of two layouts): the topic list first; tapping a note shows it full screen, and "‹ Notes" goes back. It opens on the note last open in that session, if any. The list can't fold there; a divider line under the "Topics" heading replaces the fold arrow (owner's ask).
-  - The two resize handles are hidden. Dragging notes between folders is off (press-and-hold opens the menu; "Move to…" does the job).
+  - The two resize handles are hidden.
+  - **Dragging: hold, then move** (owner's choice over a grip on each row; built after Phase 4, it replaced "dragging is off").
+    - Press and hold opens the menu, as before. Keep the finger down and move: the menu closes, a label with the name follows the finger, and the dragged row dims.
+    - Folders light up under the finger. Letting go on one moves the item there: the same move as "Move to…", links fixed up. Letting go anywhere else cancels.
+    - An **empty box** is laid over the "Topics" heading while dragging; dropping on it moves the item out of every folder. **No words on it** (the owner first approved a "Top level" label, then asked for the box without text). It isn't shown for an item that is already at the top.
+    - The list scrolls when the finger nears its top or bottom edge.
+    - Notes and folders both drag. Search results don't. Mouse dragging on a computer is unchanged.
+  - **The message line** ("Moved …", "Deleted …", and refusals such as a name that's already taken in that folder) also shows at the bottom of the list screen. Its usual place is in the note half, which the list screen hides, so on a phone those messages were never seen. Found in the browser run of the drag and added without being asked, for the owner to review.
   - A phone always opens the drawer closed and doesn't remember it, so the desktop's saved state is untouched.
 - **Questions:** an opened question may grow to the full screen below the top bar, as on the desktop. Scrolling up folds it into the slim bar.
 - **Footer row** (context and cost, model, thinking level): all stay, on one row; the model name is kept to one line. The idle Dictate button is icon-only.
@@ -246,6 +254,8 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
   - In practice, the empty box's hint reads **"Ask anything, or tap Next problem."** on a touch phone (owner's wording); the desktop keeps "…or press Enter for the next one."
 - **Row menus:** press and hold (about half a second) a session, note or folder to open the menu that right-click opens on the desktop. Row text isn't selectable on phones.
   - Rows opt in with `data-phone-press`; one document listener (`components/phone/long-press.ts`) turns a held touch into a `contextmenu` event, so each row's existing handler runs. Lifting the finger after a hold cancels the follow-up tap (`touchend` preventDefault), so the row doesn't also open and menus that close on an outside press stay open. Android's own long-press menu event is de-duplicated.
+  - **Hold, then move** (the notes drawer's rows): rows that also carry `data-phone-drag` can be dragged with the same touch. Once the hold has opened the menu, moving the finger past the hold slop sends `HOLD_DRAG_EVENT` on the document (start, move, end or cancel, with the finger's position and the row). From the moment the hold fires, `touchmove` is prevented, so the page can't start a scroll of its own under the drag (an iPhone's scroll can't be stopped once it has started). A second finger or a new touch cancels the drag.
+    - `components/notes/notes-tree.tsx` does the rest: the label, the folder under the finger (`document.elementFromPoint` up to the nearest `data-drop-folder`), `canDropInto`, edge scrolling (`edgeScrollStep`), and the move on "end". The drop box is drawn into a slot the drawer puts inside the "Topics" heading.
 - **Dragging on the dock scrolls the lesson** (owner's ask after the real-phone check: only a thin strip above an opened question could be dragged). The dock is a sibling of the transcript, so a finger drag on it never reached the transcript; `components/phone/use-dock-touch-scroll.ts` forwards it, the touch twin of the desktop's wheel forwarding (`forwardDockWheel`): a real scroll box under the finger keeps native scrolling while it can still move that way, otherwise the drag (with a short fling) moves the transcript, which folds an opened question as scrolling does. Sideways drags and drags in text boxes are left alone.
   - **Decided on the first movement** (`dragDecision`). iPhone Safari starts its own scrolling on the first touchmove that isn't prevented. Waiting for 8 px of travel let Safari scroll the page (which has room in a Safari tab) while the lesson was also moved and the page snapped back, so scrolling from a question jumped and rubber-banded, more on quick flicks (owner's iPhone). Once Safari's own scrolling has started, the events aren't cancelable and are left to it.
   - **The throw after release** (`releaseVelocity`, `flingStep`): its speed comes from the finger's last 80 ms, capped, and nothing if the finger stopped before lifting. It used to come from the last move alone; as a finger lifts, an iPhone can report a tiny twitch backwards a millisecond later, which read as a fast throw the other way, sent the lesson back to the bottom and re-opened the question once (owner's iPhone). The throw is time-based, so it travels as far at 120 fps as at 60.
@@ -289,7 +299,7 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
   - `use-dock-anchor.ts`: the tutor bubble's position, measured from the top (an iPhone keyboard covers the bottom edge).
   - `enter-key.ts`, `enter-hint.tsx`, `long-press.ts`, `use-pinch-zoom.ts`, `use-dock-touch-scroll.ts`, `window-lock.ts`.
 - **Wiring:** `sidebar.tsx` (drawer state, backdrop, press-and-hold on rows), `top-bar.tsx`, `chat.tsx` (dock hook, practice hint, dock drag), `side-tutor.tsx`, `notes/notes-drawer.tsx`, `notes/notes-tree.tsx`, `settings/settings-dialog.tsx` (a link to a section opens on it; plain Settings opens on the list), `graph-view.tsx` (search icon), `stats-bar.tsx`, `menu-shell.tsx`, `session-overlay.tsx` and `plan-block.tsx` (pinch), and the Enter handlers in `composer.tsx`, `question-dock.tsx`, `practice-dock.tsx`, `reading-thinking.tsx`.
-- **Tests:** `tests/phone-layout.test.ts` checks that every rule in `phone.css` is phone-only and browser-only, and covers the Enter rule, the bubble position, the hold slop and menu clamping. `tests/server-auth.test.ts` pins the open manifest and icon paths.
+- **Tests:** `tests/phone-layout.test.ts` checks that every rule in `phone.css` is phone-only and browser-only, and covers the Enter rule, the bubble position, the hold slop, edge scrolling and menu clamping. `tests/phone-hold-drag.test.ts` drives press and hold and hold-then-move with scripted pointer and touch events. `tests/server-auth.test.ts` pins the open manifest and icon paths.
 - **Desktop check:** desktop screenshots (1280 and 700 wide) and a dump of every element's position and size, compared before and after. Nothing moved; the only pixel differences are the see-through footer pills, whose blur picks up whatever transcript text sits behind them.
 - **Real-phone checks (owner, iPhone, iOS 27), two rounds.** Round 1: most of it worked; fixed after it were the keyboard pushing the app up, the session list's strips, Settings' Account row popping in and the missing dictation waveform, and Settings became the centred panel. Round 2 confirmed on the phone: Settings (centred panel, fades), the dictation waveform, the keyboard opening and closing, the session list's full-height colours (Safari tab and home-screen app), 120 fps scrolling, dragging on and out of an opened question (no jumping, no pull-back), tapping the folded question while the lesson moves, the home-screen app filling the screen to the bottom, and the model picker in a Safari tab. Every fix above was found on the owner's iPhone and is described in its own bullet.
 - **Testing these without an iPhone:** Playwright `devices["iPhone 13"]` (iOS Safari user agent, so the Safari-tab bleed turns on); real touch through CDP `Input.dispatchTouchEvent`; the keyboard by replacing `window.visualViewport` with a fake whose `height` you set and fire `resize` on (an init script); the home-screen app by overriding `navigator.standalone` (Chromium has no clock strip, so `env(safe-area-inset-top)` is 0 there and `standaloneGap` stays 0). Chromium never shows iOS's rubber band, its top blur, its swallowed taps or its keyboard pan, so anything touching those needs the owner's phone; a temporary on-screen readout (`?scrolldebug=1`, since removed) was the way to see what the phone did.
@@ -347,7 +357,7 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 
 ## Handoff: where things stand and how to continue
 
-### State (Phases 0–4 done)
+### State (Phases 0–4 done; notes drawer additions built)
 
 - **Branch:** `claude/pensive-goldberg-7dty2m`. All cloud sync work lives here.
   - Pushes build only the server image (`:dev`), never a desktop release.
@@ -384,61 +394,20 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
   - a commit and push to the branch;
   - a "what to try on your server" list.
 
-### In progress: notes drawer additions (asked by the owner after Phase 4)
+### Notes drawer additions (asked by the owner after Phase 4): built, waiting for the iPhone check
 
-The owner asked for these once Phase 4 worked on the server. The plan was approved; **the code is written and committed, but not finished** (see "Still to do").
-
-**Decisions (owner-approved; wording included)**
-
-- **New folder already existed** (the folder-with-a-plus icon in the drawer's top bar, and the folder row menu). The owner hadn't seen it. Nothing to build, except the wording below.
-- **Folder row menu wording:** "New note" and "New folder", without "here". The menu is the same one for press and hold (phone) and right-click or ⋯ (computer).
-- **Delete** in the row menu of notes and folders, last and in red.
-  - **For good:** no Undo and no trash folder (owner's choice over both). With Obsidian Sync the way back is Obsidian → Settings → Sync → Deleted files.
-  - A confirm box first. A folder is deleted **with everything in it**; the box says how much.
-  - Wording (`deleteConfirmText` in `src/core/notes.ts`; the drawer's curly quotes):
-    - note: `Delete “Electricity”?` / "This removes it from your Obsidian vault for good."
-    - folder with contents: `Delete “Physics” and everything in it?` / "This removes 3 notes and 1 folder from your Obsidian vault for good." Other files are counted too ("…, 1 folder and 2 other files"; just "2 files" when there is nothing else).
-    - empty folder: `Delete “Physics”?` / "This removes the folder from your Obsidian vault for good."
-    - Buttons: Cancel, Delete (red).
-  - **No line about links** to the deleted note (the owner declined it). Links to a deleted note are left as written.
-  - The open note closes when it is deleted (or sits in the deleted folder); its unsaved typing is dropped, never saved back.
-  - A session whose home folder is deleted has no home folder again.
-  - On the server, a delete made in the drawer updates the safety check's note count at once (`notesChangedHere`), so clearing out many notes never pauses sync.
-- **Dragging on the phone: hold, then move** (owner's choice over a grip on each row). This replaces Phase 3's "dragging is off on phones".
-  - Press and hold opens the menu, as before. Keep the finger down and move: the menu closes, a label with the name follows the finger, and the dragged row dims.
-  - Folders light up under the finger; letting go on one moves the item there (the same move as "Move to…", links fixed up). Letting go anywhere else cancels.
-  - An **empty box** is laid over the "Topics" heading while dragging: dropping on it moves the item out of every folder. **No words on it** (the owner first approved a "Top level" label, then asked for the box without text).
-  - The list scrolls when the finger nears its top or bottom edge.
-  - Search results can't be dragged. Mouse dragging on a computer is unchanged.
-
-**What is built**
-
-- `src/store/notes.ts`: `remove` (a note, or a folder with everything in it; drops waiting edits and home-folder records) and `contents` (what a folder holds).
-- `src/server/notes.ts`: actions `contents` and `delete`; `src/server/obsidian-sync.ts`: `notesChangedHere`.
-- `components/notes/notes-api.ts` (`deleteItem`, `folderContents`), `notes-dialogs.tsx` (`DeleteDialog`), `notes-drawer.tsx` (`askDelete`, `doDelete`, the menu items, the drop-box slot in the heading).
-- `components/phone/long-press.ts`: after a hold on a row with `data-phone-drag`, moving the finger sends `HOLD_DRAG_EVENT` (start, move, end, cancel) and keeps the page from scrolling; `edgeScrollStep`.
-- `components/notes/notes-tree.tsx`: `canDropInto`, the phone drag (label, target under the finger via `data-drop-folder`, edge scrolling, the drop box).
-
-**Checked so far**
-
-- Type check and lint pass. The existing notes and phone tests still pass.
-- A Playwright run at phone size with real touch events (CDP `Input.dispatchTouchEvent`: touchStart, wait 750 ms, touchMove in steps, touchEnd) passed: the menu closes on the move, the label follows, a drop on a folder moves the note, a drop on the box moves it to the top level, the folder menu wording, the folder confirm wording, Cancel, and a folder delete.
-- **Not yet seen passing:** deleting a single note through the page, and the deletion reaching Obsidian. The run stopped there because the long-running dev server held a manager object from before `notesChangedHere` existed (restart the dev server after editing `src/server/obsidian-sync.ts`). The route now ignores a failure of that step.
-
-**Still to do**
-
-1. Tests:
-   - `tests/notes-store.test.ts`: `remove` (note; folder with notes, subfolders and other files; the top folder itself refused; a missing item; a path outside the notes folder; waiting edits and home-folder records dropped) and `contents`.
-   - `tests/notes-core.test.ts`: every form of `deleteConfirmText`.
-   - `tests/phone-layout.test.ts`: `edgeScrollStep`; `canDropInto` (from `notes-tree.tsx`).
-   - `tests/notes-ui.test.tsx`: the folder menu reads "New note", "New folder", …, "Delete"; the note menu ends with "Delete"; `DeleteDialog` shows the wording.
-   - `tests/obsidian-sync.test.ts`: with sync stopped, removing most notes and calling `notesChangedHere()` doesn't pause sync at the next start.
-2. A fresh browser run in server mode at phone size (the stand-in Obsidian, see "Development notes"): the whole drag and delete flow, a note delete, and the deletion arriving in the stand-in remote. Then desktop width: right-click menu, delete, mouse drag unchanged.
-3. `npm test`, typecheck, lint.
-4. Send the owner screenshots (the drag with the empty drop box, the confirm boxes).
-5. Docs: `docs/side-tutor.md` notes drawer section (Delete and its rules; the menu wording; dragging on a phone) and the "Notes drawer" bullet under "Phone layouts" here, which still says dragging is off.
-6. Commit, push, confirm the image build, and tell the owner to update the server (`cd ~/learnharnessSide/deploy && ./update.sh`), reopen the home-screen app and try the drag on the iPhone. iOS touch handling is the risky part: expect a round of fixes, as in Phase 3.
-7. Wording added without being asked, for the owner to review: the toast "Deleted “Electricity”." after a delete.
+- **What:** the folder menu's "New note" / "New folder" wording, Delete for notes and folders, and hold-then-move dragging on a phone. The plan and the wording were approved by the owner. The decisions are recorded where they belong:
+  - the menus and Delete: "Notes drawer" in `docs/side-tutor.md`;
+  - the drag and the message line on the phone's list screen: "Phone layouts" above;
+  - deletes and the sync safety check: "Keeping sync safe" above.
+- **"New folder" already existed** (the folder-with-a-plus icon in the drawer's top bar, and the folder row menu). The owner hadn't seen it; only its menu wording changed.
+- **Code:** `src/store/notes.ts` (`remove`, `contents`), `src/server/notes.ts` (actions `contents` and `delete`), `src/server/obsidian-sync.ts` (`notesChangedHere`), `components/notes/` (`notes-api.ts`, `notes-dialogs.tsx` `DeleteDialog`, `notes-drawer.tsx`, `notes-tree.tsx`), `components/phone/long-press.ts`.
+- **Tested here:**
+  - Unit tests: the store and the routes, the confirm wording, the menus and the confirm box, the touch rules, and a clear-out during a sync stop against the real `ob`.
+  - A Playwright run in server mode with the stand-in Obsidian, at phone size with real touch events (CDP `Input.dispatchTouchEvent`: touchStart, wait 750 ms, touchMove in steps, touchEnd): the menu closing on the move, the label, a folder lighting up, drops on a folder and on the box, a drop elsewhere cancelling, a folder dragged into a folder, edge scrolling, the confirm boxes, deleting a folder and a note, the message line, and the deletions arriving in the stand-in Obsidian with sync never paused.
+  - The same run at desktop width: the right-click menu, Delete from ⋯, the open note with unsaved typing (it closes and isn't written back), a deleted home folder, and mouse dragging unchanged.
+- **Not yet tried on the owner's iPhone.** iOS touch handling is the risky part, as in Phase 3: expect a round of fixes. Chromium shows none of iOS's own long-press behaviour (the text-selection callout, link previews, the rubber band). If the drag misbehaves there, start from `long-press.ts`: the hold must fire before iOS claims the touch, and `touchmove` must be prevented from the first movement after it.
+- **Wording and behaviour added without being asked, for the owner to review:** the message `Deleted “Electricity”.` after a delete, and the message line showing on the phone's list screen.
 
 ### Next: Phase 5, the sync engine
 
@@ -482,6 +451,10 @@ The owner asked for these once Phase 4 worked on the server. The plan was approv
 - **The dev server keeps server objects across code reloads.** After editing `src/server/obsidian-sync.ts`, restart `next dev`; otherwise routes call methods the old manager object doesn't have.
 - **`pkill -f` in a cloud session matches the shell that runs it** when the pattern is on its own command line. Put such commands in a script file.
 - **Colouring a border:** `app/globals.css` sets `* { border-color }` outside any layer, which beats Tailwind's `border-<colour>` utilities. Use a separate element with a background colour (see `Notice` in `obsidian-section.tsx`).
+- **Browser runs of the notes drawer:**
+  - At desktop width the side tutor's floating window opens over the notes list and swallows clicks there. Minimise it first (the button labelled "Minimize the side tutor").
+  - Playwright's `devices["iPhone 13"]` screen is 390 × 664 CSS px (Safari's bars are taken off), not 844 high.
+  - To have notes for a run, write files into the server's vault folder and wait until they show in the stand-in's `remote.json`; a later deletion then shows there as a record with `deleted: true`.
 - **The local dev server** (`next dev` on port 3100) doesn't survive between turns in a cloud session; start it with `setsid nohup … &` and check it answers before each browser run.
 - **The owner's phone screenshots are the ground truth for iPhone behaviour.** Measure them (PIL: pixel rows and columns; a full iPhone screenshot is 3 px per point, a cropped or resized one scales from the status-bar icons) before deciding what iOS does; several early guesses about Safari's bars were wrong until measured.
 - **Desktop must not change:** server-only UI keys off `isServerMode()` (the `lh_server` cookie) with no extra requests. `tests/claude-code-status-ui.test.tsx` pins the desktop's exact request list.

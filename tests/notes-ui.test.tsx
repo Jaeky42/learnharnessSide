@@ -13,12 +13,14 @@ import { afterEach, describe, it } from "node:test";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import type { NotesTree, NotesTreeNote } from "../src/core/notes.ts";
-import { buildTree, filterTree } from "../components/notes/notes-tree.tsx";
+import { buildTree, canDropInto, filterTree } from "../components/notes/notes-tree.tsx";
 import { readViewMarkdown } from "../components/notes/note-read-view.tsx";
 
 const dom = parseHTML("<html><body></body></html>");
 const storage = new Map<string, string>();
 Object.assign(dom.window, {
+	innerWidth: 390,
+	innerHeight: 844,
 	localStorage: {
 		getItem: (k: string) => storage.get(k) ?? null,
 		setItem: (k: string, v: string) => void storage.set(k, v),
@@ -73,6 +75,24 @@ describe("tree model", () => {
 		assert.deepEqual(root.folders.map((f) => f.name), ["Inbox", "Electricity"]);
 		assert.equal(root.folders[1]!.folders[0]!.notes[0]!.name, "Voltage dividers");
 		assert.deepEqual(root.notes, []);
+	});
+
+	it("a drag can end in another folder only: not where the item already is, and a folder never inside itself", () => {
+		assert.equal(canDropInto(null, "Electricity"), false);
+		// notes
+		assert.equal(canDropInto("Electricity/Ohm's law.md", "Electricity"), false);
+		assert.equal(canDropInto("Electricity/Ohm's law.md", "Electricity/Voltage"), true);
+		assert.equal(canDropInto("Electricity/Ohm's law.md", ""), true);
+		assert.equal(canDropInto("Loose.md", ""), false);
+		assert.equal(canDropInto("Loose.md", "Inbox"), true);
+		// folders
+		assert.equal(canDropInto("Electricity", "Electricity"), false);
+		assert.equal(canDropInto("Electricity", "Electricity/Voltage"), false);
+		assert.equal(canDropInto("Electricity", ""), false);
+		assert.equal(canDropInto("Electricity", "Electricity 2"), true);
+		assert.equal(canDropInto("Electricity/Voltage", "Electricity"), false);
+		assert.equal(canDropInto("Electricity/Voltage", ""), true);
+		assert.equal(canDropInto("Electricity/Voltage", "FAR"), true);
 	});
 });
 
@@ -155,6 +175,126 @@ describe("drawer", () => {
 		assert.match(text, /Linked from/);
 		assert.match(text, /Current/);
 		assert.match(text, /Saved · LearnHarness\/Electricity\/Ohm's law\.md/);
+	});
+
+	// ── Row menus and Delete (owner's wording) ──────────────────────────────
+	const menuLabels = () => [...document.querySelectorAll("[role='menu'] [role='menuitem']")].map((b) => b.textContent);
+	const menuItem = (label: string) => [...document.querySelectorAll("[role='menu'] [role='menuitem']")].find((b) => b.textContent === label) as HTMLElement;
+	const dialogButton = (label: string) => [...document.querySelectorAll("[role='dialog'] button")].find((b) => b.textContent === label) as HTMLElement;
+	const settle = () => act(async () => new Promise((r) => setTimeout(r, 20)));
+	async function openRowMenu(host: HTMLElement, testid: string, name: string) {
+		const row = [...host.querySelectorAll(`[data-testid='${testid}']`)].find((r) => (r.textContent ?? "").includes(name));
+		assert.ok(row, `no row named ${name}`);
+		const event = new dom.window.Event("contextmenu", { bubbles: true, cancelable: true });
+		Object.assign(event, { clientX: 40, clientY: 120 });
+		await act(async () => { row.dispatchEvent(event); });
+	}
+	/** A drawer over a scripted vault: Electricity (the session's home folder,
+	 *  open) with two notes, and Physics. Records every POST. */
+	async function drawerWithNotes() {
+		const posts: Record<string, unknown>[] = [];
+		const gone = new Set<string>();
+		const all = [note("Electricity/Ohm's law.md", ["chat_1"], { sections: 1 }), note("Electricity/Current.md"), note("Physics/Motion.md")];
+		const json = (v: unknown) => new Response(JSON.stringify(v), { status: 200, headers: { "Content-Type": "application/json" } });
+		globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+			const url = String(input);
+			if (url.startsWith("/api/chats/")) return json({ homeFolder: "Electricity" });
+			if (url.startsWith("/api/notes") && init?.method === "POST") {
+				const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+				posts.push(body);
+				if (body.action === "contents") return json({ notes: 3, folders: 1, files: 0 });
+				if (body.action === "delete") {
+					gone.add(String(body.path));
+					return json({ path: body.path });
+				}
+				return new Response(JSON.stringify({ error: "not scripted" }), { status: 404 });
+			}
+			if (url.startsWith("/api/notes/file")) return new Response(JSON.stringify({ error: "That note no longer exists." }), { status: 404 });
+			if (url.startsWith("/api/notes")) {
+				const left = (p: string) => ![...gone].some((g) => p === g || p.startsWith(`${g}/`));
+				return json({ status: status(), folders: ["Electricity", "Physics"].filter(left), notes: all.filter((x) => left(x.path)), backlinks: {} });
+			}
+			return new Response(JSON.stringify({ error: "not scripted" }), { status: 404 });
+		}) as typeof fetch;
+		storage.set("lh:notes-expanded", JSON.stringify(["Electricity"]));
+		const { NotesDrawer } = await import("../components/notes/notes-drawer.tsx");
+		const host = await mount(<NotesDrawer chatId="chat_1" onClose={() => {}} />);
+		await settle();
+		return { host, posts };
+	}
+
+	it("a folder's menu reads New note, New folder (no \"here\") and ends with Delete", async () => {
+		const { host } = await drawerWithNotes();
+		await openRowMenu(host, "notes-tree-folder", "Physics");
+		assert.deepEqual(menuLabels(), ["New note", "New folder", "Move to…", "Make this the session's home folder", "Delete"]);
+		assert.match(menuItem("Delete").className, /text-destructive/);
+		assert.doesNotMatch(menuItem("New note").className, /text-destructive/);
+		await act(async () => { document.dispatchEvent(new dom.window.Event("mousedown", { bubbles: true })); });
+		assert.deepEqual(menuLabels(), []);
+		await openRowMenu(host, "notes-tree-folder", "Electricity");
+		assert.deepEqual(menuLabels(), ["New note", "New folder", "Move to…", "This session's home folder", "Delete"]);
+	});
+
+	it("a note's menu ends with Delete, and Cancel deletes nothing", async () => {
+		const { host, posts } = await drawerWithNotes();
+		await openRowMenu(host, "notes-tree-note", "Ohm's law");
+		assert.deepEqual(menuLabels(), ["Open", "Move to…", "Split note…", "Open in Obsidian", "Delete"]);
+		assert.match(menuItem("Delete").className, /text-destructive/);
+		await act(async () => { menuItem("Delete").click(); });
+		assert.equal(document.querySelector("[data-testid='notes-delete-title']")?.textContent, "Delete “Ohm's law”?");
+		assert.equal(document.querySelector("[data-testid='notes-delete-body']")?.textContent, "This removes it from your Obsidian vault for good.");
+		assert.match(dialogButton("Delete").className, /bg-destructive/);
+		await act(async () => { dialogButton("Cancel").click(); });
+		assert.equal(document.querySelector("[role='dialog']"), null);
+		assert.deepEqual(posts, []);
+		assert.equal(host.querySelectorAll("[data-testid='notes-tree-note']").length, 2);
+	});
+
+	it("deleting a note asks first, then removes it and says so", async () => {
+		const { host, posts } = await drawerWithNotes();
+		await openRowMenu(host, "notes-tree-note", "Current");
+		await act(async () => { menuItem("Delete").click(); });
+		await act(async () => { dialogButton("Delete").click(); });
+		await settle();
+		assert.deepEqual(posts, [{ action: "delete", path: "Electricity/Current.md" }]);
+		assert.equal(document.querySelector("[role='dialog']"), null);
+		assert.deepEqual([...host.querySelectorAll("[data-testid='notes-tree-note']")].map((r) => r.textContent), ["Ohm's law"]);
+		assert.match(host.textContent ?? "", /Deleted “Current”\./);
+		assert.doesNotMatch(host.textContent ?? "", /Undo/);
+		// One message line, in the note half, as before.
+		assert.equal(host.querySelectorAll("[data-testid='notes-toast']").length, 1);
+		assert.ok(host.querySelector("[data-phone='notes-note'] [data-testid='notes-toast']"));
+	});
+
+	it("on a phone the message line also shows on the list screen, which hides the note half", async () => {
+		Object.assign(dom.window, { matchMedia: (query: string) => ({ matches: query.includes("max-width"), addEventListener() {}, removeEventListener() {} }) });
+		try {
+			const { host } = await drawerWithNotes();
+			assert.equal(host.querySelector("[data-phone='notes']")?.getAttribute("data-phone-screen"), "list");
+			await openRowMenu(host, "notes-tree-note", "Current");
+			await act(async () => { menuItem("Delete").click(); });
+			await act(async () => { dialogButton("Delete").click(); });
+			await settle();
+			const inList = host.querySelector("[data-phone='notes-list'] [data-testid='notes-toast']");
+			assert.match(inList?.textContent ?? "", /Deleted “Current”\./);
+		} finally {
+			delete (dom.window as unknown as Record<string, unknown>).matchMedia;
+		}
+	});
+
+	it("deleting a folder says how much goes with it", async () => {
+		const { host, posts } = await drawerWithNotes();
+		await openRowMenu(host, "notes-tree-folder", "Electricity");
+		await act(async () => { menuItem("Delete").click(); });
+		await settle();
+		assert.deepEqual(posts, [{ action: "contents", path: "Electricity" }]);
+		assert.equal(document.querySelector("[data-testid='notes-delete-title']")?.textContent, "Delete “Electricity” and everything in it?");
+		assert.equal(document.querySelector("[data-testid='notes-delete-body']")?.textContent, "This removes 3 notes and 1 folder from your Obsidian vault for good.");
+		await act(async () => { dialogButton("Delete").click(); });
+		await settle();
+		assert.deepEqual(posts[1], { action: "delete", path: "Electricity" });
+		assert.deepEqual([...host.querySelectorAll("[data-testid='notes-tree-folder']")].map((r) => r.textContent?.replace(/\d+$/, "")), ["Physics"]);
+		assert.match(host.textContent ?? "", /Deleted “Electricity”\./);
 	});
 
 	it("tells the learner when the vault is offline and how many notes are waiting", async () => {

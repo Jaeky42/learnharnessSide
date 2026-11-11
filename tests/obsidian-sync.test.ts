@@ -644,6 +644,39 @@ describe("Obsidian sync manager with the real ob program", { skip: realOb ? fals
 		await fine.shutdown();
 	});
 
+	it("doesn't take a clear-out made in the notes drawer for the notes going missing", async () => {
+		const w = world("drawer-delete");
+		w.addRemote(...SEED, ["LearnHarness/Third.md", "3\n"], ["LearnHarness/Fourth.md", "4\n"]);
+		const m = start(w);
+		await m.boot();
+		await m.signIn("learner@example.invalid", "right password", "");
+		await m.connect("vault1", "vault password");
+		await until(() => m.view().sync === "up-to-date", "the first download");
+		assert.equal(obsidianSyncFiles.readRecord(w.recordFile).notesSeen, 4);
+
+		// Sync stops; the notes stay usable in the drawer meanwhile.
+		w.editRemote((r) => { r.initError = "Your subscription to Obsidian Sync has expired"; });
+		process.kill(childPid(w), "SIGTERM");
+		await until(() => m.view().sync === "subscription", "the ended subscription to be noticed");
+
+		// The learner deletes three of the four notes there (more than half),
+		// and the drawer's delete tells the manager.
+		const deleted = ["Calculus.md", "Third.md", "Fourth.md"];
+		for (const name of deleted) fs.rmSync(w.inVault("LearnHarness", name));
+		m.notesChangedHere();
+		assert.equal(obsidianSyncFiles.readRecord(w.recordFile).notesSeen, 1);
+
+		// Sync comes back: it isn't paused, and the deletions reach Obsidian
+		// like any other deliberate deletion. Nothing else is deleted.
+		w.editRemote((r) => { r.initError = ""; });
+		await m.retry();
+		await until(() => m.view().sync === "up-to-date", "sync after the clear-out");
+		await until(() => deleted.every((name) => w.readRemote().records.some((r) => r.path === `LearnHarness/${name}` && r.deleted)), "the deletions to reach Obsidian");
+		assert.deepEqual(w.readRemote().records.filter((r) => r.deleted).map((r) => r.path).sort(), deleted.map((name) => `LearnHarness/${name}`).sort());
+		assert.equal(fs.readFileSync(w.inVault("LearnHarness", "Inbox", "Electricity.md"), "utf8"), "# Electricity\n\nNotes about circuits.\n");
+		await m.shutdown();
+	});
+
 	it("disconnects only after ob has let go of the folder, warning about unsynced changes", async () => {
 		const w = world("disconnect");
 		w.addRemote(...SEED);

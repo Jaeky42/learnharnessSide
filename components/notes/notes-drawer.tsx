@@ -607,6 +607,21 @@ export function NotesDrawer({ chatId, onClose }: { chatId: string; onClose: () =
 		];
 	};
 
+	// ─── The message line ───────────────────────────────────────────────────
+	const toastBar = toast && (
+		<div role="status" data-testid="notes-toast" className="mx-3 mb-2 flex shrink-0 items-center gap-2 rounded-lg border border-border bg-card px-3 py-1.5 text-xs">
+			<span className="flex-1 text-muted-foreground">{toast.text}</span>
+			{toast.opId && (
+				<button type="button" className="text-foreground underline" onClick={() => void undo()}>
+					Undo
+				</button>
+			)}
+			<button type="button" aria-label="Dismiss" className="text-muted-foreground hover:text-foreground" onClick={() => setToast(null)}>
+				<XIcon className="size-3" />
+			</button>
+		</div>
+	);
+
 	// ─── Derived view ───────────────────────────────────────────────────────
 	const fullTree = useMemo(() => buildTree(folders, notes), [folders, notes]);
 	const sessionTree = useMemo(() => filterTree(fullTree, (n) => n.sessions.includes(chatId)), [fullTree, chatId]);
@@ -890,6 +905,10 @@ export function NotesDrawer({ chatId, onClose }: { chatId: string; onClose: () =
 							/>
 						</>
 					)}
+					{/* PHONE: the list has its own screen there, so the message line
+					    shows on it too (its usual place is in the note half, which
+					    the list screen hides). */}
+					{phone && toastBar}
 					</div>
 
 					<div data-phone="notes-note" className="contents">
@@ -973,19 +992,7 @@ export function NotesDrawer({ chatId, onClose }: { chatId: string; onClose: () =
 						</div>
 					)}
 
-					{toast && (
-						<div role="status" className="mx-3 mb-2 flex shrink-0 items-center gap-2 rounded-lg border border-border bg-card px-3 py-1.5 text-xs">
-							<span className="flex-1 text-muted-foreground">{toast.text}</span>
-							{toast.opId && (
-								<button type="button" className="text-foreground underline" onClick={() => void undo()}>
-									Undo
-								</button>
-							)}
-							<button type="button" aria-label="Dismiss" className="text-muted-foreground hover:text-foreground" onClick={() => setToast(null)}>
-								<XIcon className="size-3" />
-							</button>
-						</div>
-					)}
+					{toastBar}
 
 					{doc && <SaveLine state={saveState} error={saveError} path={doc.path} />}
 					</div>

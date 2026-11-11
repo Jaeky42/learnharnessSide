@@ -61,10 +61,25 @@ The learner's own notes beside the lesson, stored as Markdown in their Obsidian 
   - Link suggestions are opt-in: an unlinked mention of another note's name gets a "link?" button, and nothing changes unless it's clicked.
   - Links to notes outside `LearnHarness/` open in Obsidian (`obsidian://open`).
 - **Where new notes go:** the folder selected in the tree, otherwise the session's home folder, otherwise "Skip" files the note in `LearnHarness/Inbox/`. The first folder used becomes the session's home folder, stored in `<data>/notes/sessions/<chatId>.json` and never in the chat record.
-- **Moving:** drag and drop works for notes **and folders**, and there's also "Move to…".
+- **Moving:** drag and drop works for notes **and folders**, and there's also "Move to…". On a phone the drag is "hold, then move" (see "On a phone").
+- **Row menus** (right-click or ⋯ on a computer, press and hold on a phone):
+  - a note: Open, Move to…, Split note… (when it has sections), Merge into parent (after a split), Open in Obsidian, **Delete**;
+  - a folder: **New note**, **New folder**, Move to…, the session's home folder item, **Delete**. The owner's wording: no "here" after "New note" and "New folder"; the folder you opened the menu on says where.
+- **Deleting** (owner's choices): Delete is the last item of both menus, in red.
+  - **For good:** no Undo and no trash folder. With Obsidian Sync the way back is Obsidian → Settings → Sync → Deleted files.
+  - **A confirm box first.** A folder is deleted **with everything in it**, and the box says how much. The wording (`deleteConfirmText` in `src/core/notes.ts`, with the drawer's curly quotes):
+    - a note: `Delete “Electricity”?` / "This removes it from your Obsidian vault for good."
+    - a folder with something in it: `Delete “Physics” and everything in it?` / "This removes 3 notes and 1 folder from your Obsidian vault for good." Files that aren't notes are counted too: "…, 1 folder and 2 other files", or just "2 files" when there is nothing else.
+    - an empty folder: `Delete “Physics”?` / "This removes the folder from your Obsidian vault for good."
+    - Buttons: Cancel, Delete (red).
+  - **No line about links** to the deleted note (the owner declined it). Links to a deleted note are left as written.
+  - The open note closes when it is deleted or sits in the deleted folder. Its unsaved typing is dropped, never saved back.
+  - A session whose home folder is deleted has no home folder again.
+  - The notes folder itself can't be deleted.
+  - Afterwards the drawer's message line reads `Deleted “Electricity”.` (wording added while building, for the owner to review).
 - **Editor:** CodeMirror for editing (sections fold while typing), plus a Read view with formatted math, folding, clickable links and images.
 - **Where it appears:** both **teaching and practice** sessions.
-- **On a phone:** the drawer fills the screen and shows the list, then the note. Rows open their menu on press and hold, and dragging is off. See "Phone layouts" in `docs/cloud-sync.md`.
+- **On a phone:** the drawer fills the screen and shows the list, then the note. Rows open their menu on press and hold; holding and then moving the finger drags the row into a folder. See "Phone layouts" in `docs/cloud-sync.md`.
 - **On the cloud server:** the vault is connected in Settings → Obsidian instead of by a folder path, and the drawer says when the notes aren't syncing with Obsidian. See "Obsidian vault on the VPS" in `docs/cloud-sync.md`. The desktop app's drawer is unchanged.
 - **Extras:**
   - Math in Read view.
@@ -85,28 +100,34 @@ The learner's own notes beside the lesson, stored as Markdown in their Obsidian 
 - **Related actions:** "Move section to new note" (from Read view headings), "Extract selection to new note", and "Merge into parent" (the reverse of a split; the folder folds back when only the summary is left).
 - **Undo:** split, merge and extract record undo snapshots, kept in memory for 30 minutes.
 - **Moves:** link rewriting covers path-style wiki links and relative Markdown links. Name-style `[[Name]]` links are left alone because Obsidian resolves them by name. Session home folders follow a moved folder.
+- **Delete:** `notesStore.remove` deletes the note, or the folder with everything in it. No link is changed.
+  - Edits that were waiting for an offline vault are dropped for every note that went, so a deleted note can't come back.
+  - Home-folder records that point at or into a deleted folder are removed.
+  - Refused: the notes folder itself, an item that no longer exists, and anything that resolves outside the notes folder (a folder link, for example).
+  - `notesStore.contents` counts what a folder holds for the confirm box; hidden (dot) entries aren't counted, but they go with the folder.
+  - On the cloud server the route then tells the sync manager (`notesChangedHere`), so its safety check doesn't take a clear-out made in the drawer for the notes going missing. See "Keeping sync safe" in `docs/cloud-sync.md`.
 - **Agent file tools:** `privateNotesRoots()` in `src/agent/tools/fs-shared.ts` re-reads `<data>/notes/settings.json` on every resolution or walk (agents never import the notes store). Paths are compared case-insensitively, by both their named and canonical (real) path. `resolveSourcePath` refuses with a specific message, and walks skip the folder.
 
 ### Code map
 
 - `src/core/notes.ts`: pure logic (names and paths, properties, sections, links and resolution, backlinks, link suggestions, split and merge planning, attachment folder), exported through the core barrel.
-- `src/store/notes.ts`: vault I/O, the tree with an mtime cache, save with a conflict check, create, move, split, merge, extract, undo, pending edits, attachments and asset lookup, and session home folders. Dynamic fs paths carry `/* turbopackIgnore: true */`.
+- `src/store/notes.ts`: vault I/O, the tree with an mtime cache, save with a conflict check, create, move, delete, split, merge, extract, undo, pending edits, attachments and asset lookup, and session home folders. Dynamic fs paths carry `/* turbopackIgnore: true */`.
 - `src/server/notes.ts`: HTTP responses for the routes below.
 - **Routes:**
-  - `app/api/notes` (GET tree; POST actions: vault, create, folder, move, split, merge, extract, undo)
+  - `app/api/notes` (GET tree; POST actions: vault, create, folder, contents, delete, move, split, merge, extract, undo)
   - `app/api/notes/file` (GET / PUT body)
   - `app/api/notes/attachment`
   - `app/api/notes/asset`
   - `app/api/chats/[id]/notes` (home folder)
 - **`components/notes/`:**
   - `notes-drawer.tsx`: the panel, state, saving and polling;
-  - `notes-tree.tsx`: tree model, drag and drop, row menus;
+  - `notes-tree.tsx`: tree model, drag and drop (the mouse, and the phone's hold-then-move), row menus;
   - `note-editor.tsx`: CodeMirror;
   - `note-read-view.tsx`;
-  - `notes-dialogs.tsx`: Move to, Split, name prompt;
+  - `notes-dialogs.tsx`: Move to, Split, Delete, name prompt;
   - `notes-api.ts`.
 - **Wiring:** `components/chat.tsx` (Notes chip and drawer mount), `src/core/keyboard.ts` (`toggle-notes`, `focus-notes`), and `src/server/chats.ts` (session deletion hook).
-- **Tests:** `tests/notes-core.test.ts`, `notes-store.test.ts`, `notes-privacy.test.ts`, `notes-ui.test.tsx`.
+- **Tests:** `tests/notes-core.test.ts`, `notes-store.test.ts`, `notes-privacy.test.ts`, `notes-ui.test.tsx`; the phone's hold-then-move touch rules: `tests/phone-hold-drag.test.ts`.
 
 ## Claude Code: Fable in the model list
 
