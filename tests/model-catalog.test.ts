@@ -371,7 +371,7 @@ describe("the claude-code provider (native CLI authentication, no LearnHarness k
 			const ids = modelCatalog()
 				.models.filter((m) => m.provider === "claude-code")
 				.map((m) => m.id);
-			assert.deepEqual(ids, ["claude-fable-5-2", "haiku", "opus", "sonnet"]);
+			assert.deepEqual(ids, ["fable", "haiku", "opus", "sonnet"]);
 		});
 	});
 

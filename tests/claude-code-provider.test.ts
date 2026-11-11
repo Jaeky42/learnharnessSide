@@ -18,11 +18,11 @@ function createCollection() {
 	return collection;
 }
 
-test("lists exactly the opus, sonnet and haiku aliases, plus Fable by its model id (fork)", () => {
+test("lists exactly the opus, sonnet and haiku aliases, plus the fork's fable", () => {
 	const models = createCollection().getModels(CLAUDE_CODE_PROVIDER);
 	assert.deepEqual(
 		models.map((m) => m.id),
-		["opus", "sonnet", "haiku", "claude-fable-5-2"],
+		["opus", "sonnet", "haiku", "fable"],
 	);
 	assert.deepEqual(
 		models.map((m) => m.name),
@@ -54,4 +54,10 @@ test("auth resolves as configured without any key", async () => {
 	const collection = createCollection();
 	assert.ok(await collection.checkAuth(CLAUDE_CODE_PROVIDER));
 	assert.equal((await collection.getAvailable(CLAUDE_CODE_PROVIDER)).length, 4); // opus, sonnet, haiku + the fork's Fable
+});
+
+test("fable reaches the CLI as its full model id; the aliases pass through (fork)", async () => {
+	const { claudeCliModel } = await import("../src/agent/claude-code/constants.ts");
+	assert.equal(claudeCliModel("fable"), "claude-fable-5-2");
+	for (const alias of ["opus", "sonnet", "haiku"]) assert.equal(claudeCliModel(alias), alias);
 });

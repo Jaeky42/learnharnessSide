@@ -161,7 +161,14 @@ export function PhoneViewport() {
 			// The home-screen app's top edges sit lower (app/phone.css, --lh-safe-top).
 			if (standalone) body.dataset.lhStandalone = "";
 			else delete body.dataset.lhStandalone;
-			const gap = standaloneGap({ standalone, innerWidth: window.innerWidth, innerHeight: window.innerHeight, screenWidth: window.screen.width, screenHeight: window.screen.height, safeTop: standalone ? safeAreaTop() : 0 });
+			// Only while the keyboard is down: with it up the iPhone reports the
+			// visible height correctly, and adding the strip pushed the bottom of
+			// the app (and menus anchored there) 62 points under the keyboard
+			// (owner's iPhone, home-screen app). Sized by height, not focus, so the
+			// app doesn't shrink before the keyboard arrives; while it closes the
+			// full height (layoutHeight) takes the strip again at once.
+			const keyboardBySize = keyboardUp(fit, window.innerHeight);
+			const gap = keyboardBySize && !closing ? 0 : standaloneGap({ standalone, innerWidth: window.innerWidth, innerHeight: window.innerHeight, screenWidth: window.screen.width, screenHeight: window.screen.height, safeTop: standalone ? safeAreaTop() : 0 });
 			root.style.setProperty("--lh-vvh", `${layoutHeight(fit.height, window.innerHeight, closing) + gap}px`);
 			const bleed = bleedFor({ userAgent: navigator.userAgent, standalone, keyboard: keyboardUp(fit, window.innerHeight, typing) });
 			if (bleed > 0) {

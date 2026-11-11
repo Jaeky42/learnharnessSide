@@ -31,6 +31,16 @@ function priceLabel(cost: ModelCatalogEntry["cost"]): string {
 	return `${fmt(cost.input)}/${fmt(cost.output)}`;
 }
 
+/** Fork (owner's ask): the Claude Code (CLI billing) models stay together at
+ *  the bottom, alphabetically (fable, haiku, opus, sonnet). Everything else
+ *  keeps the alphabetical-by-id order. Exported for tests. */
+export function compareModels(a: { provider: string; id: string }, b: { provider: string; id: string }): number {
+	const ac = a.provider === CLAUDE_CODE_PROVIDER;
+	const bc = b.provider === CLAUDE_CODE_PROVIDER;
+	if (ac !== bc) return ac ? 1 : -1;
+	return a.id.localeCompare(b.id);
+}
+
 /** The model dropdown body — fuzzy search + ranked list. `models ===
  *  undefined` is the catalog-loading state; an empty result list gets
  *  its own quiet line. */
@@ -72,7 +82,7 @@ export function ModelMenuList({
 				items={visionItems}
 				itemKey={(m) => `${m.provider}/${m.id}`}
 				searchTerms={(m) => [m.provider, m.id, m.name]}
-				compare={(a, b) => a.id.localeCompare(b.id)}
+				compare={compareModels}
 				prioritize={vision ? (m) => m.input.includes("image") : undefined}
 				isSelected={(m) => m.id === effectiveId && m.provider === (effectiveProvider ?? m.provider)}
 				onPick={onPick}

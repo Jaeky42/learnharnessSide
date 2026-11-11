@@ -239,3 +239,14 @@ describe("drag on the dock scrolls the lesson", async () => {
 		assert.equal(releaseVelocity([{ t: 0, y: 0 }, { t: 10, y: 400 }], 11), FLING_MAX, "capped");
 	});
 });
+
+describe("model menu order (fork)", async () => {
+	const { compareModels } = await import("../components/settings/model-menu.tsx");
+	it("keeps the Claude Code models together at the bottom, alphabetically", () => {
+		const models = [
+			{ provider: "claude-code", id: "sonnet" }, { provider: "openai-codex", id: "gpt-6-astra" }, { provider: "claude-code", id: "fable" },
+			{ provider: "claude-code", id: "haiku" }, { provider: "openrouter", id: "qwen-3" }, { provider: "claude-code", id: "opus" },
+		];
+		assert.deepEqual([...models].sort(compareModels).map((m) => m.id), ["gpt-6-astra", "qwen-3", "fable", "haiku", "opus", "sonnet"]);
+	});
+});

@@ -28,7 +28,7 @@ import { externalCliEnv } from "../../core/auth-env.ts";
 import type { LhMessage } from "../../core/native-messages.ts";
 import { ClaudeLaunchError, createClaudeLauncher } from "./launch.ts";
 import { parseCliLine, type CliBlock, type CliEvent, type CliUsage } from "./cli-events.ts";
-import { ClaudeCodeError } from "./constants.ts";
+import { ClaudeCodeError, claudeCliModel } from "./constants.ts";
 import { ContextWindowProbe } from "./context-window.ts";
 import { addLiveProcess, getLiveProcess, removeLiveProcess, type LiveProcess } from "./live-processes.ts";
 import { configurationForReuse, conversationForReuse } from "./reuse-context.ts";
@@ -674,7 +674,7 @@ async function startProcess(
 	let child: ChildProcessWithoutNullStreams | null;
 	try {
 		const args = toClaudeArgs({
-			model: model.id,
+			model: claudeCliModel(model.id),
 			effort: toEffort(options?.reasoning),
 			systemPromptFile: files.systemPromptFile,
 			mcpConfigFile: files.mcpConfigFile,

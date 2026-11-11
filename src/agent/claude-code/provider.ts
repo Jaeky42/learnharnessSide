@@ -21,10 +21,12 @@ export const CLAUDE_CODE_MODELS: readonly Model<Api>[] = [
 	{ ...SHARED_MODEL_FIELDS, id: "opus", name: "Claude Opus" },
 	{ ...SHARED_MODEL_FIELDS, id: "sonnet", name: "Claude Sonnet" },
 	{ ...SHARED_MODEL_FIELDS, id: "haiku", name: "Claude Haiku" },
-	// Fork addition (owner's ask): Fable has no CLI alias here, so the full
-	// model id is passed to `claude --model`. Whether a Claude plan can use it
-	// through Claude Code is up to Anthropic; the CLI reports it if not.
-	{ ...SHARED_MODEL_FIELDS, id: "claude-fable-5-2", name: "Claude Fable" },
+	// Fork addition (owner's ask): listed as "fable" to match the aliases
+	// above; `claude --model` gets the full model id (claudeCliModel in
+	// constants.ts).
+	// Whether a Claude plan can use it through Claude Code is up to
+	// Anthropic; the CLI reports it if not.
+	{ ...SHARED_MODEL_FIELDS, id: "fable", name: "Claude Fable" },
 ];
 
 export function createClaudeCodeProvider(streamSimple: StreamFunction<Api, SimpleStreamOptions>): Provider {
