@@ -201,6 +201,35 @@ describe("drawer", () => {
 		assert.match(text, /Saved · LearnHarness\/Electricity\/Ohm's law\.md/);
 	});
 
+	it("opened with Ctrl+Shift+N and no note open: the cursor is in the search box; the chip moves nothing", async () => {
+		const routes = {
+			"/api/notes/file": { path: "Electricity/Ohm's law.md", body: "Intro\n", hash: "h1", pending: false, sessions: ["chat_1"], parent: null },
+			"/api/notes": { status: status(), folders: ["Electricity"], notes: [note("Electricity/Ohm's law.md", ["chat_1"])], backlinks: {} },
+			"/api/chats/": { homeFolder: null },
+		};
+		const { NotesDrawer } = await import("../components/notes/notes-drawer.tsx");
+
+		// (With a note open the shortcut switches it to its editor and focuses
+		// CodeMirror, which can't mount in this DOM; a browser run covers it.)
+		scriptFetch(routes);
+		let host: HTMLElement;
+
+		// The chip opens it without touching the view.
+		storage.set("lh:notes-mode", JSON.stringify("read"));
+		storage.set("lh:notes-open-note:chat_1", JSON.stringify("Electricity/Ohm's law.md"));
+		host = await mount(<NotesDrawer chatId="chat_1" onClose={() => {}} />);
+		await act(async () => new Promise((r) => setTimeout(r, 120)));
+		assert.ok(host.querySelector("[data-testid='note-read-view']"), "opened with the chip: Read view stays");
+
+		// No note open: the search box, which is only there once the list has loaded.
+		storage.delete("lh:notes-open-note:chat_1");
+		host = await mount(<NotesDrawer chatId="chat_1" onClose={() => {}} landInEditor />);
+		await act(async () => new Promise((r) => setTimeout(r, 120)));
+		const search = host.querySelector("input[placeholder='Search notes']");
+		assert.ok(search, "the search box is on screen");
+		assert.equal(document.activeElement, search, "the cursor is in the search box");
+	});
+
 	it("rows are dragged by the list itself, not by the browser: each says what it is and how deep it sits", async () => {
 		const { host } = await drawerWithNotes();
 		const rows = [...host.querySelectorAll("[role='tree'] [role='treeitem']")];

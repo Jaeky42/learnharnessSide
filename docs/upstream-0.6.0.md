@@ -118,7 +118,7 @@ See `docs/side-tutor.md`. In short: the fork's engine (store, route, agent, prom
 
 ### Notes shortcut
 
-- **Ctrl+Shift+N** opens the drawer with the cursor in the open note's editor (the note switches to its edit view), and closes the drawer again. With no note open, the cursor lands in the notes search box. Opening with the Notes chip doesn't move the cursor. (`landInEditor` on `NotesDrawer`, set by the `toggle-notes` shortcut in `components/chat.tsx`.)
+- **Ctrl+Shift+N** opens the drawer with the cursor in the open note's editor (the note switches to its edit view), and closes the drawer again. With no note open, the cursor lands in the notes search box. (The search box exists only once the list has loaded, so the drawer waits for that; a browser run found the cursor going nowhere before.) Opening with the Notes chip doesn't move the cursor. (`landInEditor` on `NotesDrawer`, set by the `toggle-notes` shortcut in `components/chat.tsx`.)
 - **Ctrl+Shift+E is upstream's** (Drawing Pad). The fork's `focus-notes` shortcut is removed.
 
 ## Asked after it was built (owner's answers)

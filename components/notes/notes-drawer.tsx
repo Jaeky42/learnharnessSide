@@ -407,10 +407,11 @@ export function NotesDrawer({ chatId, onClose, landInEditor = false }: {
 			setMode("edit");
 			setTimeout(() => editorRef.current?.focus(), 50);
 		} else {
+			if (!tree) return; // the list, and its search box, isn't on screen yet
 			landRef.current = false;
 			setTimeout(() => searchRef.current?.focus(), 0);
 		}
-	}, [doc, openPath]);
+	}, [doc, openPath, tree]);
 
 	// ─── Actions ────────────────────────────────────────────────────────────
 	const showToast = (text: string, opId?: string, reopen?: string) => setToast({ text, opId, reopen });
