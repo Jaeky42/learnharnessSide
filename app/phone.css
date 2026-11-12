@@ -631,18 +631,39 @@
 }
 
 @media (max-width: 639.98px) {
-	/* ── Plugins (upstream 0.6.0): hidden on a phone for now (owner: "Hide
-	   the ways in, park plugin questions"; components/phone/phone-plugins.ts).
-	   The ways in: the lesson's top-bar plugin buttons (the Drawing Pad's
-	   among them), the sidebar's plugin entries (Flashcards…) and the
-	   graph's plugin buttons. */
-	html:not(.lh-electron) :is([data-testid="plugin-top-bar-actions"], [data-testid="plugin-graph-actions"], [data-testid="sidebar-actions"] > [data-plugin-action]) {
+	/* ── Plugins (upstream 0.6.0; components/phone/phone-plugins.ts). Only
+	   Flashcards' session-list entry shows on a phone (owner's plan,
+	   decision 2). Every other way in stays hidden: the lesson's top-bar
+	   plugin buttons (the Drawing Pad's among them), the graph's plugin
+	   buttons and every other plugin's session-list entry. The entry kept
+	   here is PHONE_SIDEBAR_ENTRIES (a test keeps the two equal). */
+	html:not(.lh-electron) :is([data-testid="plugin-top-bar-actions"], [data-testid="plugin-graph-actions"], [data-testid="sidebar-actions"] > [data-plugin-action]:not([data-plugin-action="flashcards/open-sidebar"])) {
 		display: none;
 	}
-	/* Teaching and Practice stay stacked, as before the merge (the grid
+	/* Teaching, Practice and Flashcards stacked in one column (the grid
 	   goes to two columns when plugin entries fill it). */
 	html:not(.lh-electron) [data-testid="sidebar-actions"] {
 		grid-template-columns: minmax(0, 1fr);
+	}
+
+	/* ── Settings → Core plugins on a phone: the switch of a core plugin
+	   that isn't phone-ready is greyed and can't be changed (it is
+	   disabled; components/settings/plugins-section.tsx). */
+	html:not(.lh-electron) [data-phone="settings"] [data-phone="plugin-locked"] > [role="switch"] {
+		opacity: 0.4;
+	}
+	/* Finger-sized on the plugin pages of Settings (Core plugins and the
+	   phone-ready plugins' own pages): the settings button is 40 px, and a
+	   switch keeps its look with a 40 × 40 touch area around it. */
+	html:not(.lh-electron) [data-phone="settings"] [data-phone="plugin-settings-link"] {
+		width: 2.5rem;
+		height: 2.5rem;
+	}
+	html:not(.lh-electron) [data-phone="settings"] :is([data-testid="section-core-plugins"], [data-testid^="section-plugin-"]) [role="switch"]::after {
+		content: "";
+		position: absolute;
+		/* From the switch's inside (30 × 16 within its 1 px border) to 40 × 40. */
+		inset: -0.75rem -0.3125rem;
 	}
 
 	/* ── Settings list: text rows, the label at the left and › at the

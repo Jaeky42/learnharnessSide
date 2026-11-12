@@ -67,7 +67,7 @@ import { ObsidianSection } from "./obsidian-section.tsx";
 import { CloudSection } from "./cloud-section.tsx";
 import { CloudServerSection } from "./cloud-server-section.tsx";
 import { isPhoneNow, useIsPhone } from "@/components/phone/use-phone";
-import { isPluginSettingsSection } from "@/components/phone/phone-plugins";
+import { isPhoneHiddenSettingsSection, isPhoneReadyPlugin } from "@/components/phone/phone-plugins";
 import { isServerMode } from "./server-mode";
 
 /** Owner (2026-09-20): hints earn their place — mechanics-explaining
@@ -173,9 +173,9 @@ export function SettingsDialogProvider({
 		interactions.invalidateOpening();
 		fadingCopy.current?.remove();
 		fadingCopy.current = null;
-		// Side-tutor fork: plugins are hidden on a phone, so a link to a
-		// plugin section opens on the section list instead.
-		if (section && isPhoneNow() && isPluginSettingsSection(section)) section = undefined;
+		// Side-tutor fork: a phone lists only some plugin sections, so a link
+		// to any other plugin section opens on the section list instead.
+		if (section && isPhoneNow() && isPhoneHiddenSettingsSection(section)) section = undefined;
 		setNavigationRequest(request => request + 1);
 		setLandOn(section ? section as SectionId : "keys");
 		setLandOnExplicit(!!section);
@@ -328,10 +328,11 @@ export function SettingsDialogBody({
 	useEffect(() => {
 		if (phoneOpensSection) setPhoneScreen("section");
 	}, [initialSection, phoneOpensSection, navigationRequest]);
-	// Side-tutor fork: no plugin rows on a phone (decision "Hide the ways in");
-	// a plugin section still open when the layout turns into the phone one
-	// goes back to the list. Links are turned away in open() above.
-	const phonePluginSection = phone && isPluginSettingsSection(active);
+	// Side-tutor fork: a phone lists only Core plugins and the phone-ready
+	// plugins' pages (phone-plugins.ts); any other plugin section still open
+	// when the layout turns into the phone one goes back to the list. Links
+	// are turned away in open() above.
+	const phonePluginSection = phone && isPhoneHiddenSettingsSection(active);
 	useEffect(() => {
 		if (!phonePluginSection) return;
 		setActive("keys");
@@ -357,9 +358,15 @@ export function SettingsDialogBody({
 		(s.id !== "account" || account.devices || (phone && account.devices === undefined && isServerMode())) &&
 		(s.id !== "obsidian" || isServerMode()) &&
 		!(phone && s.id === "keyboard"));
-	// Side-tutor fork: a phone lists no plugin rows (and so none of the
-	// dividers that set them apart below).
-	const navSections: { id: SectionId; label: string; icon?: LucideIcon }[] = phone ? [...nativeSections] : [
+	// Side-tutor fork: a phone lists Core plugins and the page of each
+	// phone-ready plugin that is on; no Community plugins row and none of the
+	// dividers that set the plugin rows apart below.
+	const navSections: { id: SectionId; label: string; icon?: LucideIcon }[] = phone ? [
+		...nativeSections,
+		{ id: "core-plugins", label: "Core plugins", icon: PlugIcon },
+		...enabledPlugins.filter(plugin => isPhoneReadyPlugin(plugin.info.id))
+			.map(plugin => ({ id: `plugin:${plugin.info.id}` as const, label: plugin.info.manifest?.name ?? plugin.info.id })),
+	] : [
 		...nativeSections,
 		{ id: "core-plugins", label: "Core plugins", icon: PlugIcon },
 		{ id: "plugins", label: "Community plugins", icon: PuzzleIcon },

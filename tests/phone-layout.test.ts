@@ -13,7 +13,12 @@ import { BUBBLE_SIZE, dockAnchor } from "../components/phone/use-dock-anchor.ts"
 import { edgeScrollStep, HOLD_SLOP, stillHolding } from "../components/phone/long-press.ts";
 
 const root = path.resolve(import.meta.dirname, "..");
-const css = readFileSync(path.join(root, "app/phone.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+/** A stylesheet without its comments. */
+const readCss = (file: string) => readFileSync(path.join(root, file), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+const css = readCss("app/phone.css");
+/** The fork's phone-only stylesheets: phone.css, and one per phone-ready
+ *  plugin (docs/phone-plugins-plan.md), which may have no rules yet. */
+const PHONE_STYLESHEETS = ["app/phone.css", "app/phone-flashcards.css", "app/phone-rich-code-blocks.css"];
 
 /** Top-level blocks of a stylesheet: { prelude, body }. */
 function blocks(src: string): { prelude: string; body: string }[] {
@@ -34,8 +39,8 @@ function blocks(src: string): { prelude: string; body: string }[] {
 			}
 		}
 	}
-	assert.equal(depth, 0, "phone.css has unbalanced braces");
-	assert.equal(src.slice(preludeStart).trim(), "", "phone.css has a rule outside every block");
+	assert.equal(depth, 0, "the stylesheet has unbalanced braces");
+	assert.equal(src.slice(preludeStart).trim(), "", "the stylesheet has a rule outside every block");
 	return out;
 }
 
@@ -57,10 +62,10 @@ function selectors(list: string): string[] {
 	return out;
 }
 
-describe("app/phone.css can't reach the desktop", () => {
-	const top = blocks(css);
+for (const file of PHONE_STYLESHEETS) describe(`${file} can't reach the desktop`, () => {
+	const top = blocks(readCss(file));
 
-	it("has rules", () => assert.ok(top.length > 0));
+	if (file === "app/phone.css") it("has rules", () => assert.ok(top.length > 0));
 
 	it("puts every block inside the phone media query", () => {
 		for (const b of top) assert.match(b.prelude, /^@media \(max-width: 639\.98px\)/, `outside the phone query: ${b.prelude}`);
@@ -82,11 +87,11 @@ describe("app/phone.css can't reach the desktop", () => {
 				}
 			}
 		}
-		assert.ok(checked > 10);
+		if (file === "app/phone.css") assert.ok(checked > 10);
 	});
 
 	it("is loaded by the root layout", () => {
-		assert.match(readFileSync(path.join(root, "app/layout.tsx"), "utf8"), /import "\.\/phone\.css";/);
+		assert.ok(readFileSync(path.join(root, "app/layout.tsx"), "utf8").includes(`import "./${path.basename(file)}";`));
 	});
 });
 
@@ -300,7 +305,7 @@ describe("model menu order (fork)", async () => {
 });
 
 describe("upstream 0.6.0 on a phone", async () => {
-	const { isPluginSettingsSection } = await import("../components/phone/phone-plugins.ts");
+	const { isPhoneHiddenSettingsSection, isPluginSettingsSection, PHONE_SIDEBAR_ENTRIES } = await import("../components/phone/phone-plugins.ts");
 	/** The declarations of the rule whose selector list contains `needle`. */
 	const ruleWith = (needle: string) => {
 		for (const media of blocks(css)) for (const rule of blocks(media.body)) if (rule.prelude.includes(needle)) return rule.body;
@@ -312,13 +317,18 @@ describe("upstream 0.6.0 on a phone", async () => {
 		return "";
 	};
 
-	it("hides every way into a plugin: the top bar's buttons, the sidebar's entries and the graph's buttons", () => {
+	it("hides every way into a plugin but Flashcards' session-list entry: the top bar's buttons, the other entries and the graph's buttons", () => {
 		const hide = ruleWith('[data-testid="plugin-top-bar-actions"]');
 		assert.match(hide, /display: none;/);
-		for (const way of ['[data-testid="plugin-graph-actions"]', '[data-testid="sidebar-actions"] > [data-plugin-action]']) {
+		const kept = PHONE_SIDEBAR_ENTRIES.map((key) => `:not([data-plugin-action="${key}"])`).join("");
+		assert.deepEqual(PHONE_SIDEBAR_ENTRIES, ["flashcards/open-sidebar"]);
+		for (const way of ['[data-testid="plugin-graph-actions"]', `[data-testid="sidebar-actions"] > [data-plugin-action]${kept})`]) {
 			assert.ok(ruleWith(way) === hide, `${way} is hidden with the others`);
 		}
-		assert.match(ruleFor('[data-testid="sidebar-actions"]'), /grid-template-columns: minmax\(0, 1fr\);/, "Teaching and Practice stay stacked");
+		// The key's shape: `<plugin id>/<placement id>`, and Flashcards' placement id.
+		assert.match(readFileSync(path.join(root, "components/plugin-chrome.tsx"), "utf8"), /key: `\$\{plugin\.info\.id\}\/\$\{placement\.id\}`/);
+		assert.match(readFileSync(path.join(root, "plugins/flashcards/src/main.js"), "utf8"), /placeAction\(\{ id: 'open-sidebar', actionId: 'open', location: 'sidebar' \}\)/);
+		assert.match(ruleFor('[data-testid="sidebar-actions"]'), /grid-template-columns: minmax\(0, 1fr\);/, "Teaching, Practice and Flashcards stay stacked");
 	});
 
 	it("the plugin sections of Settings are the management rows and every plugin's own page", () => {
@@ -326,6 +336,24 @@ describe("upstream 0.6.0 on a phone", async () => {
 		assert.equal(isPluginSettingsSection("plugins"), true);
 		assert.equal(isPluginSettingsSection("plugin:flashcards"), true);
 		for (const own of ["keys", "appearance", "general", "cloud", "account", "obsidian"]) assert.equal(isPluginSettingsSection(own), false, own);
+	});
+
+	it("a phone lists Core plugins and the phone-ready plugins' pages, and hides the other plugin sections", () => {
+		for (const listed of ["core-plugins", "plugin:flashcards", "plugin:rich-code-blocks", "keys", "account"]) assert.equal(isPhoneHiddenSettingsSection(listed), false, listed);
+		for (const hidden of ["plugins", "plugin:drawing-pad", "plugin:coding-questions", "plugin:fixture"]) assert.equal(isPhoneHiddenSettingsSection(hidden), true, hidden);
+	});
+
+	it("the plugin pages of Settings: a locked switch is greyed, the settings button and every switch's touch area are 40 px", () => {
+		assert.match(ruleWith('[data-phone="plugin-locked"] > [role="switch"]'), /opacity: 0\.4;/);
+		const link = ruleWith('[data-phone="plugin-settings-link"]');
+		assert.match(link, /width: 2\.5rem;/);
+		assert.match(link, /height: 2\.5rem;/);
+		const area = ruleWith('[role="switch"]::after');
+		assert.ok(ruleWith('[data-testid="section-core-plugins"]') === area && ruleWith('[data-testid^="section-plugin-"]') === area);
+		// The switch is 32 × 18 with a 1 px border (controls.tsx); its ::after
+		// spans its inside (30 × 16) plus the insets: 40 × 40.
+		assert.match(area, /inset: -0\.75rem -0\.3125rem;/);
+		assert.match(readFileSync(path.join(root, "components/settings/controls.tsx"), "utf8"), /"relative h-4\.5 w-8 shrink-0 rounded-full border border-border/);
 	});
 
 	it("Settings rows read as before the merge: no icon, the label at the left", () => {

@@ -1,0 +1,12 @@
+/*
+ * RICH CODE BLOCKS ON A PHONE (fork-owned, like phone.css;
+ * docs/phone-plugins-plan.md).
+ *
+ * The phone layout of the Rich code blocks plugin's drawings: shrink to fit
+ * with a button to enlarge, and the box shown while a block is drawn.
+ *
+ * The law, pinned by tests/phone-layout.test.ts: EVERY rule in this file
+ * sits inside @media (max-width: 639.98px) AND under html:not(.lh-electron),
+ * so nothing here can apply on a computer, a tablet or in the desktop app.
+ * Unlayered, like phone.css. Loaded by app/layout.tsx.
+ */

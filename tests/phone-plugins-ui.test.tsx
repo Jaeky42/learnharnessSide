@@ -1,9 +1,14 @@
 /**
- * PLUGINS ON A PHONE (fork, upstream 0.6.0 merge; components/phone/phone-plugins.ts).
- * The owner's decision "Hide the ways in, park plugin questions", and the
- * phone's Enter rule on upstream's new text boxes. The phone layout is
- * played by a scripted matchMedia; everything else is the real components.
- * The sentences here are the owner's wording.
+ * PLUGINS ON A PHONE (fork; components/phone/phone-plugins.ts and
+ * docs/phone-plugins-plan.md). Flashcards and Rich code blocks are
+ * phone-ready: Flashcards' session-list entry and page show, and Settings
+ * lists Core plugins and both plugins' own pages. Every other plugin stays
+ * hidden: its page reads "Open this on a computer.", its Settings page isn't
+ * listed, its switch on the Core plugins page is greyed and its settings
+ * button hidden. Plugin questions and problems stay parked, and the phone's
+ * Enter rule holds in upstream's new text boxes. The phone layout is played
+ * by a scripted matchMedia; everything else is the real components. The
+ * sentences here are the owner's wording.
  */
 
 import React, { act } from "react";
@@ -36,13 +41,14 @@ Object.assign(globalThis, {
 const restoreModalDom = installModalDom(dom);
 const { createRoot } = await import("react-dom/client");
 const { renderToStaticMarkup } = await import("react-dom/server");
-const { DISMISS_PLUGIN_QUESTION_TEXT, PARKED_PLUGIN_PROBLEM_TEXT, PARKED_PLUGIN_QUESTION_TEXT, PLUGIN_PAGE_PHONE_TEXT } = await import("../components/phone/phone-plugins.ts");
+const { DISMISS_PLUGIN_QUESTION_TEXT, isPhoneReadyPlugin, PARKED_PLUGIN_PROBLEM_TEXT, PARKED_PLUGIN_QUESTION_TEXT, PHONE_READY_PLUGINS, PHONE_SIDEBAR_ENTRIES, PLUGIN_PAGE_PHONE_TEXT } = await import("../components/phone/phone-plugins.ts");
 const { PhonePluginPage } = await import("../components/phone/phone-plugin-page.tsx");
 const { PhonePluginProblemDock, PhonePluginQuestionDock } = await import("../components/phone/parked-plugin-question.tsx");
 const { SettingsDialogBody, SettingsDialogProvider, useSettingsDialog } = await import("../components/settings/settings-dialog.tsx");
 const { InteractionLayersProvider } = await import("../components/interaction-layers.tsx");
 const { ServerEventsProvider } = await import("../components/server-events.tsx");
 const { createPluginWindowOwner, PluginsProvider } = await import("../components/plugins.tsx");
+const { PluginSidebarActions } = await import("../components/plugin-chrome.tsx");
 const { CitationCommentEditor } = await import("../components/citation-comment-editor.tsx");
 const { useEnterSubmits } = await import("../components/enter-submits.ts");
 const { capturePluginQuestionKey, ownPluginQuestionKeys } = await import("../components/plugin-question-keys.ts");
@@ -82,17 +88,42 @@ async function mount(node: React.ReactNode) {
 	return host;
 }
 const navIds = () => [...document.querySelectorAll('[data-testid="settings-nav"] > button')].map((b) => b.getAttribute("data-testid")!.slice("settings-nav-".length));
+/** React's own handler for an element (linkedom's click doesn't reach React here). */
+const press = async (element: Element) => {
+	const key = Object.keys(element).find((k) => k.startsWith("__reactProps$"))!;
+	await act(async () => { (element as unknown as Record<string, { onClick(): void }>)[key]!.onClick(); });
+	await settle();
+};
 
-/** One enabled community plugin with a settings page, through the real plugin manager. */
-function info(id: string): PluginInfo {
-	return { id, origin: "community", enabled: true, status: "active", revision: "one", manifest: { apiVersion: 1, id, name: `Plugin ${id}`, version: "1.0.0", minAppVersion: "0.3.7", main: "main.js" } };
+/** The four core plugins and one community plugin, each with a settings
+ *  page, through the real plugin manager. Flashcards places its session-list
+ *  entry as the real plugin does. */
+const CORE = [["flashcards", "Flashcards"], ["rich-code-blocks", "Rich code blocks"], ["drawing-pad", "Drawing Pad"], ["coding-questions", "Coding questions"]] as const;
+function info(id: string, name: string, origin: "core" | "community", enabled: boolean): PluginInfo {
+	return { id, origin, enabled, status: enabled ? "active" : "disabled", revision: "one", manifest: { apiVersion: 1, id, name, version: "1.0.0", minAppVersion: "0.3.7", main: "main.js" } };
 }
-function withPlugins(children: React.ReactNode) {
+/** The requests the manager sent to switch a plugin on or off. */
+let switched: string[] = [];
+function withPlugins(children: React.ReactNode, off: string[] = []) {
+	const settings = (label: string): PluginFrontendModule => ({ activate(ctx) { ctx.registerSettings({ rows: [{ key: "on", label, type: "toggle", value: false, onChange() {} }] }); } });
 	const modules: Record<string, PluginFrontendModule> = {
-		fixture: { activate(ctx) { ctx.registerSettings({ rows: [{ key: "on", label: "Fixture preference", type: "toggle", value: false, onChange() {} }] }); } },
+		flashcards: { activate(ctx) {
+			ctx.registerSettings({ rows: [{ key: "on", label: "Flashcards preference", type: "toggle", value: false, onChange() {} }] });
+			ctx.registerAction({ id: "open", name: "Flashcards", run() {} });
+			ctx.placeAction({ id: "open-sidebar", actionId: "open", location: "sidebar" });
+		} },
+		"rich-code-blocks": settings("Rich code blocks preference"),
+		"drawing-pad": settings("Drawing Pad preference"),
+		"coding-questions": settings("Coding questions preference"),
+		fixture: settings("Fixture preference"),
 	};
+	const infos = [...CORE.map(([id, name]) => info(id, name, "core", !off.includes(id))), info("fixture", "Plugin fixture", "community", true)];
+	switched = [];
 	window.__lhPluginWindow = createPluginWindowOwner({
-		fetch: async () => Response.json({ plugins: [info("fixture")], directory: "/fixtures/plugins", conflicts: [] }),
+		fetch: async (url, init) => {
+			if (init?.method === "PUT") switched.push(String(url));
+			return Response.json({ plugins: infos, directory: "/fixtures/plugins", conflicts: [] });
+		},
 		importModule: async (url) => modules[decodeURIComponent(url.split("/")[3]!)]!,
 		pathname: () => "/", navigate() {},
 	});
@@ -101,59 +132,155 @@ function withPlugins(children: React.ReactNode) {
 	return <InteractionLayersProvider><AppRouterContext.Provider value={router}><ServerEventsProvider connect={connect}><PluginsProvider>{children}</PluginsProvider></ServerEventsProvider></AppRouterContext.Provider></InteractionLayersProvider>;
 }
 
-describe("Settings on a phone has no plugin rows", () => {
-	it("the computer keeps the plugin rows and their dividers", async () => {
+describe("the phone-ready plugins", () => {
+	it("are Flashcards and Rich code blocks, and only Flashcards' session-list entry shows", () => {
+		assert.deepEqual(PHONE_READY_PLUGINS, ["flashcards", "rich-code-blocks"]);
+		assert.equal(isPhoneReadyPlugin("flashcards"), true);
+		assert.equal(isPhoneReadyPlugin("rich-code-blocks"), true);
+		for (const other of ["drawing-pad", "coding-questions", "ui-showcase", "fixture"]) assert.equal(isPhoneReadyPlugin(other), false, other);
+		assert.deepEqual(PHONE_SIDEBAR_ENTRIES, ["flashcards/open-sidebar"]);
+	});
+
+	it("Flashcards' session-list entry carries the key app/phone.css keeps", async () => {
+		await mount(withPlugins(<PluginSidebarActions><button type="button" data-testid="new-session">Teaching</button></PluginSidebarActions>));
+		const keys = [...document.querySelectorAll('[data-testid="sidebar-actions"] > [data-plugin-action]')].map((b) => b.getAttribute("data-plugin-action"));
+		assert.deepEqual(keys, ["flashcards/open-sidebar"]);
+	});
+});
+
+describe("Settings on a phone", () => {
+	it("the computer keeps every plugin row and their dividers", async () => {
 		await mount(withPlugins(<SettingsDialogBody onClose={() => {}} />));
-		assert.deepEqual(navIds(), ["keys", "agent", "appearance", "graph", "keyboard", "general", "cloud", "core-plugins", "plugins", "plugin:fixture"]);
+		assert.deepEqual(navIds(), ["keys", "agent", "appearance", "graph", "keyboard", "general", "cloud", "core-plugins", "plugins",
+			"plugin:flashcards", "plugin:rich-code-blocks", "plugin:drawing-pad", "plugin:coding-questions", "plugin:fixture"]);
 		assert.equal(document.querySelectorAll('[data-testid="settings-nav"] > hr').length, 2);
 	});
 
-	it("a phone lists only the app's own rows, with no divider and no Keyboard row", async () => {
+	it("a phone lists Core plugins, then Flashcards and Rich code blocks, after the app's own rows; no Community plugins row, no other plugin's page, no divider", async () => {
 		layout = "touch";
 		await mount(withPlugins(<SettingsDialogBody onClose={() => {}} />));
-		assert.deepEqual(navIds(), ["keys", "agent", "appearance", "graph", "general", "cloud"]);
+		assert.deepEqual(navIds(), ["keys", "agent", "appearance", "graph", "general", "cloud", "core-plugins", "plugin:flashcards", "plugin:rich-code-blocks"]);
 		assert.equal(document.querySelectorAll('[data-testid="settings-nav"] > hr').length, 0);
 		assert.equal(document.querySelector('[data-phone="settings"]')?.getAttribute("data-phone-screen"), "list");
-		// Each row is the label in a span; app/phone.css hides the icon, so it reads as before the merge.
-		assert.equal(document.querySelector('[data-testid="settings-nav-keys"] > span')?.textContent, "Providers");
+		// Each row is the label in a span; app/phone.css hides the icon.
+		assert.deepEqual(["keys", "core-plugins", "plugin:flashcards", "plugin:rich-code-blocks"].map((id) => document.querySelector(`[data-testid="settings-nav-${id}"] > span`)?.textContent),
+			["Providers", "Core plugins", "Flashcards", "Rich code blocks"]);
 	});
 
-	it("a link to a plugin section opens Settings on the list instead", async () => {
+	it("a phone-ready plugin's row shows only while that plugin is on", async () => {
+		layout = "touch";
+		await mount(withPlugins(<SettingsDialogBody onClose={() => {}} />, ["flashcards"]));
+		assert.deepEqual(navIds(), ["keys", "agent", "appearance", "graph", "general", "cloud", "core-plugins", "plugin:rich-code-blocks"]);
+	});
+
+	it("a link to a listed section opens it; a link to any other plugin section lands on the list", async () => {
 		layout = "touch";
 		let settings!: ReturnType<typeof useSettingsDialog>;
 		function Probe() { settings = useSettingsDialog(); return null; }
 		await mount(withPlugins(<SettingsDialogProvider><Probe /></SettingsDialogProvider>));
-		for (const section of ["plugin:fixture", "core-plugins", "plugins"]) {
-			await act(async () => settings.open(section));
-			await settle();
-			const frame = document.querySelector('[data-phone="settings"]');
-			assert.equal(frame?.getAttribute("data-phone-screen"), "list", section);
-			assert.equal(document.querySelector('[data-testid="settings-nav-keys"]')?.getAttribute("aria-current"), "true", section);
-			assert.equal(document.querySelector('[data-testid="settings-content"]')?.textContent?.includes("Fixture preference"), false, `${section}: no plugin page behind the list`);
+		const close = async () => {
 			await act(async () => document.querySelector<HTMLButtonElement>('[data-testid="settings-close"]')!.click());
 			await settle();
+		};
+		for (const section of ["plugin:drawing-pad", "plugin:coding-questions", "plugin:fixture", "plugins"]) {
+			await act(async () => settings.open(section));
+			await settle();
+			assert.equal(document.querySelector('[data-phone="settings"]')?.getAttribute("data-phone-screen"), "list", section);
+			assert.equal(document.querySelector('[data-testid="settings-nav-keys"]')?.getAttribute("aria-current"), "true", section);
+			assert.doesNotMatch(document.querySelector('[data-testid="settings-content"]')?.textContent ?? "", /preference|Community plugins/, `${section}: no plugin page behind the list`);
+			await close();
 		}
-		// Other links still open their section, as before.
+		for (const [section, text] of [["core-plugins", "Core plugins"], ["plugin:flashcards", "Flashcards preference"], ["plugin:rich-code-blocks", "Rich code blocks preference"]] as const) {
+			await act(async () => settings.open(section));
+			await settle();
+			assert.equal(document.querySelector('[data-phone="settings"]')?.getAttribute("data-phone-screen"), "section", section);
+			assert.equal(document.querySelector(`[data-testid="settings-nav-${section}"]`)?.getAttribute("aria-current"), "true", section);
+			assert.match(document.querySelector('[data-testid="settings-content"]')?.textContent ?? "", new RegExp(text), section);
+			await close();
+		}
+		// The app's own sections still open, as before.
 		await act(async () => settings.open("appearance"));
 		await settle();
 		assert.equal(document.querySelector('[data-phone="settings"]')?.getAttribute("data-phone-screen"), "section");
 	});
 
-	it("on a computer the same link still opens the plugin's page", async () => {
+	it("on a computer every plugin link still opens the plugin's page", async () => {
 		let settings!: ReturnType<typeof useSettingsDialog>;
 		function Probe() { settings = useSettingsDialog(); return null; }
 		await mount(withPlugins(<SettingsDialogProvider><Probe /></SettingsDialogProvider>));
-		await act(async () => settings.open("plugin:fixture"));
-		await settle();
-		assert.equal(document.querySelector('[data-testid="settings-nav-plugin:fixture"]')?.getAttribute("aria-current"), "true");
+		for (const id of ["drawing-pad", "fixture", "flashcards"]) {
+			await act(async () => settings.open(`plugin:${id}`));
+			await settle();
+			assert.equal(document.querySelector(`[data-testid="settings-nav-plugin:${id}"]`)?.getAttribute("aria-current"), "true", id);
+		}
+	});
+});
+
+describe("Core plugins on a phone", () => {
+	const row = (id: string) => document.querySelector(`[data-testid="plugin-${id}"]`)!;
+	const toggle = (id: string) => row(id).querySelector('[role="switch"]')!;
+	const gear = (id: string) => row(id).querySelector('[data-phone="plugin-settings-link"]');
+	async function openCorePlugins(off: string[] = []) {
+		await mount(withPlugins(<SettingsDialogBody onClose={() => {}} initialSection="core-plugins" phoneOpensSection />, off));
+		return document.querySelector('[data-testid="section-core-plugins"]')!;
+	}
+
+	it("Coding questions and Drawing Pad: greyed switches that show on or off and can't be changed, and no settings button", async () => {
+		layout = "touch";
+		await openCorePlugins(["coding-questions"]);
+		for (const [id, on] of [["drawing-pad", "true"], ["coding-questions", "false"]] as const) {
+			assert.equal(toggle(id).hasAttribute("disabled"), true, id);
+			assert.equal(toggle(id).getAttribute("aria-checked"), on, `${id} still shows whether it is on`);
+			assert.equal(toggle(id).parentElement?.getAttribute("data-phone"), "plugin-locked", `${id} is greyed (app/phone.css)`);
+			assert.equal(gear(id), null, `${id} has no settings button`);
+			await press(toggle(id));
+			assert.equal(toggle(id).getAttribute("aria-checked"), on, `${id} is unchanged`);
+		}
+		assert.deepEqual(switched, [], "nothing was switched");
+	});
+
+	it("Flashcards and Rich code blocks: working switches and settings buttons", async () => {
+		layout = "touch";
+		await openCorePlugins();
+		for (const id of ["flashcards", "rich-code-blocks"]) {
+			assert.equal(toggle(id).hasAttribute("disabled"), false, id);
+			assert.notEqual(toggle(id).parentElement?.getAttribute("data-phone"), "plugin-locked", id);
+			assert.ok(gear(id), `${id} has its settings button`);
+		}
+		await press(gear("flashcards")!);
+		assert.equal(document.querySelector('[data-testid="settings-nav-plugin:flashcards"]')?.getAttribute("aria-current"), "true");
+		assert.match(document.querySelector('[data-testid="settings-content"]')?.textContent ?? "", /Flashcards preference/);
+	});
+
+	it("a phone-ready switch still works on a phone", async () => {
+		layout = "touch";
+		await openCorePlugins();
+		await press(toggle("rich-code-blocks"));
+		assert.deepEqual(switched, ["/api/plugins/rich-code-blocks"]);
+	});
+
+	it("says nothing more than on a computer: no explaining text", async () => {
+		const computer = (await openCorePlugins()).textContent;
+		for (const { root, host } of roots.splice(0)) { await act(async () => root.unmount()); host.remove(); }
+		layout = "touch";
+		assert.equal((await openCorePlugins()).textContent, computer);
+	});
+
+	it("on a computer every switch works and every plugin that is on has its settings button", async () => {
+		await openCorePlugins();
+		for (const [id] of CORE) {
+			assert.equal(toggle(id).hasAttribute("disabled"), false, id);
+			assert.ok(gear(id), id);
+		}
+		assert.equal(document.querySelectorAll('[data-phone="plugin-locked"]').length, 0);
 	});
 });
 
 describe("a plugin page opened on a phone", () => {
 	const view = <div data-testid="the-plugin-view">plugin</div>;
-	it("shows only the sentence, under a top bar with nothing but the session-list button", async () => {
+	it("another plugin's page shows only the sentence, under a top bar with nothing but the session-list button", async () => {
 		layout = "phone";
-		const host = await mount(<PhonePluginPage>{view}</PhonePluginPage>);
+		const host = await mount(<PhonePluginPage pluginId="drawing-pad">{view}</PhonePluginPage>);
 		assert.equal(host.querySelector('[data-testid="the-plugin-view"]'), null);
 		assert.equal(host.querySelector('[data-testid="plugin-page-phone"] > p')?.textContent, "Open this on a computer.");
 		assert.equal(PLUGIN_PAGE_PHONE_TEXT, "Open this on a computer.");
@@ -161,16 +288,24 @@ describe("a plugin page opened on a phone", () => {
 		assert.ok(bar);
 		assert.deepEqual([...bar.querySelectorAll("button")].map((b) => b.getAttribute("aria-label")), ["Open sidebar"]);
 	});
+	it("Flashcards' page and Rich code blocks' pages render on a phone", async () => {
+		layout = "phone";
+		for (const id of ["flashcards", "rich-code-blocks"]) {
+			const host = await mount(<PhonePluginPage pluginId={id}>{view}</PhonePluginPage>);
+			assert.ok(host.querySelector('[data-testid="the-plugin-view"]'), id);
+			assert.equal(host.querySelector('[data-testid="plugin-page-phone"]'), null, id);
+		}
+	});
 	it("is the plugin's page on a computer, and in the server's first render", async () => {
-		assert.match(renderToStaticMarkup(<PhonePluginPage>{view}</PhonePluginPage>), /the-plugin-view/);
-		const host = await mount(<PhonePluginPage>{view}</PhonePluginPage>);
+		assert.match(renderToStaticMarkup(<PhonePluginPage pluginId="drawing-pad">{view}</PhonePluginPage>), /the-plugin-view/);
+		const host = await mount(<PhonePluginPage pluginId="drawing-pad">{view}</PhonePluginPage>);
 		assert.ok(host.querySelector('[data-testid="the-plugin-view"]'));
 		assert.equal(host.querySelector('[data-testid="plugin-page-phone"]'), null);
 	});
-	it("is wired into the plugin route", async () => {
+	it("is wired into the plugin route, with the route's plugin id", async () => {
 		const { readFileSync } = await import("node:fs");
 		const page = readFileSync(new URL("../app/plugins/[pluginId]/[viewId]/page.tsx", import.meta.url), "utf8");
-		assert.match(page, /<PhonePluginPage><PluginViewScreen /);
+		assert.match(page, /<PhonePluginPage pluginId=\{pluginId\}><PluginViewScreen /);
 	});
 });
 

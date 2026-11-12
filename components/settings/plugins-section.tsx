@@ -5,6 +5,9 @@ import { usePlugins } from "@/components/plugins";
 import type { FrontendPlugin } from "@/components/plugin-manager";
 import { Button } from "@/components/ui/button";
 import { SettingsRow, SettingsSection, Toggle } from "./controls";
+// Side-tutor fork: on a phone only the phone-ready core plugins can be changed.
+import { useIsPhone } from "@/components/phone/use-phone";
+import { isPhoneLockedPlugin } from "@/components/phone/phone-plugins";
 
 export const PLUGIN_TRUST_WARNING = "Only enable plugins you trust. Plugins run trusted local code with broad file and network access; they are not sandboxed. A broken plugin may require restarting LearnHarness.";
 
@@ -53,13 +56,18 @@ function PluginRow({ plugin, onSettings }: { plugin: FrontendPlugin; onSettings:
 	const { manager, snapshot } = usePlugins();
 	const { info } = plugin;
 	const name = info.manifest?.name ?? info.id;
+	// Side-tutor fork: on a phone a core plugin that isn't phone-ready keeps
+	// its switch, greyed (app/phone.css) and unchangeable, and has no
+	// settings button.
+	const phoneLocked = isPhoneLockedPlugin(useIsPhone(), info);
+	const toggle = <Toggle label={`Enable ${name}`} checked={info.enabled} disabled={phoneLocked || !manager || plugin.busy || snapshot.refreshing || (!info.manifest && !info.enabled)} onChange={enabled => { if (!phoneLocked) void manager?.setEnabled(info.id, enabled); }} />;
 	return <div className="border-t border-border/60 pt-3" data-testid={`plugin-${info.id}`}>
 		<SettingsRow label={name} hint={[info.origin === "community" ? info.manifest?.version : undefined, plugin.busy ? "Saving…" : plugin.error ? "Error" : plugin.phase === "loading" ? "Loading…" : info.enabled ? "Enabled" : "Disabled"].filter(Boolean).join(" · ")}>
 			<div className="flex shrink-0 items-center gap-2">
-				{info.enabled && <button type="button" aria-label={`Settings for ${name}`} title={`Settings for ${name}`}
+				{info.enabled && !phoneLocked && <button type="button" data-phone="plugin-settings-link" aria-label={`Settings for ${name}`} title={`Settings for ${name}`}
 					className="flex size-7 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
 					onClick={onSettings}><Settings className="size-3.5" aria-hidden="true" /></button>}
-				<Toggle label={`Enable ${name}`} checked={info.enabled} disabled={!manager || plugin.busy || snapshot.refreshing || (!info.manifest && !info.enabled)} onChange={enabled => void manager?.setEnabled(info.id, enabled)} />
+				{phoneLocked ? <span data-phone="plugin-locked" className="contents">{toggle}</span> : toggle}
 			</div>
 		</SettingsRow>
 		{info.manifest?.description && <p className="mt-1 font-prose text-sm text-muted-foreground">{info.manifest.description}</p>}
