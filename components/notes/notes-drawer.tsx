@@ -29,7 +29,6 @@ import {
 	SettingsIcon,
 	XIcon,
 } from "lucide-react";
-import { createPortal } from "react-dom";
 import { cn } from "@/lib/utils";
 import {
 	folderOf,
@@ -70,7 +69,7 @@ import {
 import { NoteEditor, type NoteEditorHandle } from "./note-editor";
 import { NoteReadView } from "./note-read-view";
 import { DeleteDialog, MoveDialog, NameDialog, SplitDialog } from "./notes-dialogs";
-import { buildTree, filterTree, itemName, NotesTreeView, type RowTarget, type TreeMenuItem } from "./notes-tree";
+import { buildTree, filterTree, itemName, NotesTreeView, PointMenu, type RowTarget, type TreeMenuItem } from "./notes-tree";
 import { isPhoneNow, useIsPhone } from "@/components/phone/use-phone";
 import { useSettingsDialog } from "@/components/settings/settings-dialog";
 import { useServerMode } from "@/components/settings/server-mode";
@@ -150,7 +149,14 @@ export function useNotesDrawerOpen(): [boolean, (next: boolean | ((v: boolean) =
 	return [open, setOpen];
 }
 
-export function NotesDrawer({ chatId, onClose }: { chatId: string; onClose: () => void }) {
+export function NotesDrawer({ chatId, onClose, landInEditor = false }: {
+	chatId: string;
+	onClose: () => void;
+	/** Opened with the keyboard (Ctrl+Shift+N, owner's ask at the 0.6.0 merge,
+	 *  in place of a second shortcut): the cursor lands in the note's editor,
+	 *  or in the search box when no note is open. */
+	landInEditor?: boolean;
+}) {
 	const [tree, setTree] = useState<NotesTree | null>(null);
 	const [treeError, setTreeError] = useState<string | null>(null);
 	const [setupOpen, setSetupOpen] = useState(false);
@@ -319,6 +325,8 @@ export function NotesDrawer({ chatId, onClose }: { chatId: string; onClose: () =
 	);
 
 	// ─── The open note ──────────────────────────────────────────────────────
+	const landRef = useRef(landInEditor);
+	const searchRef = useRef<HTMLInputElement>(null);
 	const loadNote = useCallback(async (p: string) => {
 		try {
 			const n = await readNote(p);
@@ -389,6 +397,20 @@ export function NotesDrawer({ chatId, onClose }: { chatId: string; onClose: () =
 		},
 		[flush],
 	);
+
+	// ─── Opened with the keyboard: land in the editor ───────────────────────
+	useEffect(() => {
+		if (!landRef.current) return;
+		if (openPath) {
+			if (doc?.path !== openPath) return; // the note is still loading
+			landRef.current = false;
+			setMode("edit");
+			setTimeout(() => editorRef.current?.focus(), 50);
+		} else {
+			landRef.current = false;
+			setTimeout(() => searchRef.current?.focus(), 0);
+		}
+	}, [doc, openPath]);
 
 	// ─── Actions ────────────────────────────────────────────────────────────
 	const showToast = (text: string, opId?: string, reopen?: string) => setToast({ text, opId, reopen });
@@ -847,6 +869,7 @@ export function NotesDrawer({ chatId, onClose }: { chatId: string; onClose: () =
 									else (e.target as HTMLInputElement).blur();
 								}
 							}}
+							ref={searchRef}
 							placeholder="Search notes"
 							className="h-6 w-full rounded-sm border border-border bg-background pl-6 pr-2 text-xs outline-none placeholder:text-muted-foreground/60 focus:border-ring"
 						/>
@@ -1160,28 +1183,11 @@ function NoteArea({
 	);
 }
 
+/** The open note's ⋯ menu, under its button (onMenu's point, kept 8 px
+ *  from the window's left edge as before), on the host's menu layer. */
 function NoteMenu({ x, y, items, onClose }: { x: number; y: number; items: TreeMenuItem[]; onClose: () => void }) {
-	const ref = useRef<HTMLDivElement | null>(null);
-	useEffect(() => {
-		const onDown = (e: MouseEvent) => {
-			if (!ref.current?.contains(e.target as Node)) onClose();
-		};
-		const onKey = (e: KeyboardEvent) => {
-			if (e.key === "Escape") {
-				e.preventDefault();
-				e.stopPropagation();
-				onClose();
-			}
-		};
-		document.addEventListener("mousedown", onDown, true);
-		document.addEventListener("keydown", onKey);
-		return () => {
-			document.removeEventListener("mousedown", onDown, true);
-			document.removeEventListener("keydown", onKey);
-		};
-	}, [onClose]);
-	return createPortal(
-		<div ref={ref} role="menu" className="fixed z-50 w-52 rounded-lg border border-border bg-popover p-1 shadow-lg" style={{ left: Math.max(8, x), top: y }}>
+	return (
+		<PointMenu left={Math.max(8, x)} top={y} testid="notes-note-menu" menuClass="w-52 rounded-lg border border-border bg-popover p-1 shadow-lg" onClose={onClose}>
 			{items.map((it) => (
 				<button
 					key={it.label}
@@ -1197,8 +1203,7 @@ function NoteMenu({ x, y, items, onClose }: { x: number; y: number; items: TreeM
 					{it.label === "Open in Obsidian" && <ExternalLinkIcon className="ml-auto size-3 text-muted-foreground" aria-hidden />}
 				</button>
 			))}
-		</div>,
-		document.body,
+		</PointMenu>
 	);
 }
 
