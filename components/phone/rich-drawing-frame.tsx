@@ -10,20 +10,21 @@
  * lesson's existing diagram viewer (components/session-overlay.tsx: drag,
  * pinch, − / +) with a copy of the drawn picture.
  *
- * The plugin draws into its own DOM, outside React: this frame watches for
- * the drawn picture (`.rich-code-blocks--rendered > svg`) and shows the
- * button only once it is there. While a block is drawn, or after it failed
+ * The plugin draws into its own DOM, outside React: the phone's marker just
+ * before the block watches for the drawn picture
+ * (`.rich-code-blocks--rendered > svg`) and shows the button only once it is
+ * there. While a block is drawn, or after it failed
  * (the plugin removes its block and the host shows its error and the
  * source), there is no button.
  *
- * Outside the phone layout, and for every other fence, the frame is no box
- * at all: it renders its children as they are, so the computer, a tablet
- * and the desktop app are untouched.
+ * Outside the phone layout the frame renders the block alone, and other
+ * fences never reach it (md-blocks.tsx), so the computer, a tablet and the
+ * desktop app are untouched.
  *
  * WAITING FOR THE PLUGIN (owner's decision, after decision 8): while Rich
  * code blocks is switched on but its front end hasn't started, a fence shows
  * the same spinner box instead of the host's code fallback, from the first
- * paint of a page load. The frame says which state its fence is in
+ * paint of a page load. The marker says which state its fence is in
  * (`data-lh-rich-state`, see richFenceState) and app/phone-rich-code-blocks.css
  * draws the box. Before the frame runs (the server-rendered page, before
  * hydration) the box comes from the server's own mark that the plugin is on
@@ -36,9 +37,9 @@
  * so the copy never shares an id with the drawing in the lesson.
  */
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { MaximizeIcon } from "lucide-react";
-import { useIsPhone } from "@/components/phone/use-phone";
+import { isPhoneNow, PHONE_QUERY } from "@/components/phone/use-phone";
 import { useSessionMermaid } from "@/components/session-overlay";
 import { usePlugins } from "@/components/plugins";
 import type { PluginSnapshot } from "@/components/plugin-manager";
@@ -121,14 +122,47 @@ export function drawingCopy(svg: Element): string {
 	return `<div class="${RICH_BLOCK_CLASS}">${copy.outerHTML}</div>`;
 }
 
-/** Wraps one fence's plugin block (md-blocks' MarkdownCode). */
-export function PhoneRichDrawingFrame({ language, children }: { language: string; children: ReactNode }) {
-	const phone = useIsPhone();
-	if (!phone || !isRichDrawingLanguage(language)) return <>{children}</>;
-	return <PhoneFrame language={language}>{children}</PhoneFrame>;
+/** The phone layout, from ONE media-query listener for the whole page (every
+ *  rich fence asks; useIsPhone would add three listeners per fence). The
+ *  same rule as useIsPhone: below 640 px, in a browser, never the desktop
+ *  app; "no" on the server and during hydration. */
+let phoneQuery: MediaQueryList | null = null;
+const phoneListeners = new Set<() => void>();
+function subscribePhone(onChange: () => void): () => void {
+	if (typeof window === "undefined" || typeof window.matchMedia !== "function") return () => {};
+	if (!phoneQuery) {
+		phoneQuery = window.matchMedia(PHONE_QUERY);
+		phoneQuery.addEventListener("change", () => { for (const listener of [...phoneListeners]) listener(); });
+	}
+	phoneListeners.add(onChange);
+	return () => { phoneListeners.delete(onChange); };
+}
+const notPhone = () => false;
+function usePhoneLayout(): boolean {
+	return useSyncExternalStore(subscribePhone, isPhoneNow, notPhone);
 }
 
-function PhoneFrame({ language, children }: { language: string; children: ReactNode }) {
+/** Wraps one smiles, abc or tikz fence's plugin block (md-blocks' MarkdownCode;
+ *  other fences never reach it). It adds no box: on a phone it puts a marker
+ *  just BEFORE the block, and the block itself keeps its place in the tree
+ *  (a keyed child), so the layout answer arriving after hydration, or a
+ *  browser resized across 640 px, never mounts the block again (a mount
+ *  draws it again: a failed TikZ block would compile again, up to its 10 s
+ *  limit). On a computer it renders the block alone, exactly as before. */
+export function PhoneRichDrawingFrame({ language, children }: { language: string; children: ReactNode }) {
+	const phone = usePhoneLayout();
+	return (
+		<>
+			{phone && <PhoneMarker key="phone" language={language} />}
+			<Fragment key="block">{children}</Fragment>
+		</>
+	);
+}
+
+/** The phone's marker before a rich block: a box of no height that carries
+ *  the fence's state (`data-lh-rich-state`, for app/phone-rich-code-blocks.css)
+ *  and holds the enlarge button at the block's top right. */
+function PhoneMarker({ language }: { language: string }) {
 	const overlay = useSessionMermaid();
 	const { snapshot } = usePlugins();
 	const [timedOut, setTimedOut] = useState(false);
@@ -138,24 +172,27 @@ function PhoneFrame({ language, children }: { language: string; children: ReactN
 		const timer = window.setTimeout(() => setTimedOut(true), RICH_WAIT_CEILING_MS);
 		return () => window.clearTimeout(timer);
 	}, [state]);
-	const frameRef = useRef<HTMLDivElement>(null);
+	const markerRef = useRef<HTMLDivElement>(null);
 	const [drawn, setDrawn] = useState(false);
+	/** The drawn picture of this marker's block (the element right after it). */
+	const drawing = () => markerRef.current?.nextElementSibling?.querySelector(RICH_DRAWING_SELECTOR) ?? null;
 	useEffect(() => {
-		const frame = frameRef.current;
-		if (!frame) return;
-		const check = () => setDrawn(frame.querySelector(RICH_DRAWING_SELECTOR) !== null);
+		const parent = markerRef.current?.parentElement;
+		if (!parent) return;
+		const check = () => setDrawn(drawing() !== null);
 		check();
 		if (typeof MutationObserver === "undefined") return;
 		const observer = new MutationObserver(check);
-		observer.observe(frame, { childList: true, subtree: true, attributes: true, attributeFilter: ["class"] });
+		observer.observe(parent, { childList: true, subtree: true, attributes: true, attributeFilter: ["class"] });
 		return () => observer.disconnect();
 	}, []);
 	const open = overlay?.openDrawing;
 	return (
-		<div ref={frameRef} data-testid="rich-drawing-frame" data-lh-rich-state={state} className="group/md relative">
-			{children}
+		// No height and no margin, so it takes no room whatever spacing rule
+		// the Markdown container gives its children.
+		<div ref={markerRef} data-testid="rich-drawing-frame" data-lh-rich-state={state} className="relative" style={{ height: 0, margin: 0 }}>
 			{drawn && open && (
-				<div className="absolute top-0 right-0 flex items-start">
+				<div className="absolute top-0 right-0 z-10 flex items-start">
 					{/* The lesson's own enlarge control (md-blocks' mermaid button):
 					    the same label, tooltip, icon and look. Hover-only buttons
 					    always show on a phone, so this one is never hidden. */}
@@ -167,7 +204,7 @@ function PhoneFrame({ language, children }: { language: string; children: ReactN
 							className="flex size-6 items-center justify-center rounded-md text-muted-foreground/70 transition-opacity hover:bg-accent hover:text-foreground"
 							onClick={(e) => {
 								blurAfterPointerClick(e);
-								const svg = frameRef.current?.querySelector(RICH_DRAWING_SELECTOR);
+								const svg = drawing();
 								if (svg) open(drawingCopy(svg));
 							}}
 						>

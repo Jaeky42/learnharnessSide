@@ -25,11 +25,12 @@ export function richCodeBlocksOnIn(plugins: readonly Pick<PluginInfo, "id" | "en
 	return plugins.some((info) => info.id === RICH_CODE_BLOCKS_PLUGIN_ID && info.enabled && info.status === "active");
 }
 
-export async function richCodeBlocksBoot(waitMs = 300): Promise<boolean> {
+/** `getHost` is the plugin host (a seam for tests). */
+export async function richCodeBlocksBoot(waitMs = 300, getHost: () => Promise<{ list(): readonly Pick<PluginInfo, "id" | "enabled" | "status">[] }> = getPluginHost): Promise<boolean> {
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	try {
 		const host = await Promise.race([
-			getPluginHost(),
+			getHost(),
 			new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), waitMs); }),
 		]);
 		return host ? richCodeBlocksOnIn(host.list()) : false;

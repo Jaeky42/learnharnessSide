@@ -40,14 +40,14 @@
    host's code fallback of a smiles, abc or tikz fence ([data-lh-rich-fence],
    md-blocks.tsx) while Rich code blocks is on but hasn't started:
    - before the page runs, by the server's mark on <body> (app/layout.tsx),
-     for every fence no frame has decided yet;
-   - once it runs, where the frame says "waiting"
-     (components/phone/rich-drawing-frame.tsx, richFenceState). A frame that
-     says "code" or "plugin" shows the fallback as it is. */
+     for every fence no phone marker has decided yet (no marker before it);
+   - once it runs, where the marker right before the fence says "waiting"
+     (components/phone/rich-drawing-frame.tsx, richFenceState). A marker
+     that says "code" or "plugin" leaves the fallback as it is. */
 @media (max-width: 639.98px) {
 	html:not(.lh-electron) [data-plugin-renderer] .rich-code-blocks:not(.rich-code-blocks--rendered),
-	html:not(.lh-electron) body[data-lh-rich-code-blocks="on"] [data-lh-rich-fence]:not([data-lh-rich-state] > *),
-	html:not(.lh-electron) [data-lh-rich-state="waiting"] > [data-lh-rich-fence] {
+	html:not(.lh-electron) body[data-lh-rich-code-blocks="on"] [data-lh-rich-fence]:not([data-lh-rich-state] ~ *),
+	html:not(.lh-electron) [data-lh-rich-state="waiting"] + [data-lh-rich-fence] {
 		display: flex;
 		align-items: center;
 		justify-content: center;
@@ -56,13 +56,13 @@
 		border-radius: 0.75rem;
 	}
 	html:not(.lh-electron) [data-plugin-renderer] .rich-code-blocks:not(.rich-code-blocks--rendered) > pre,
-	html:not(.lh-electron) body[data-lh-rich-code-blocks="on"] [data-lh-rich-fence]:not([data-lh-rich-state] > *) > *,
-	html:not(.lh-electron) [data-lh-rich-state="waiting"] > [data-lh-rich-fence] > * {
+	html:not(.lh-electron) body[data-lh-rich-code-blocks="on"] [data-lh-rich-fence]:not([data-lh-rich-state] ~ *) > *,
+	html:not(.lh-electron) [data-lh-rich-state="waiting"] + [data-lh-rich-fence] > * {
 		display: none;
 	}
 	html:not(.lh-electron) [data-plugin-renderer] .rich-code-blocks:not(.rich-code-blocks--rendered)::after,
-	html:not(.lh-electron) body[data-lh-rich-code-blocks="on"] [data-lh-rich-fence]:not([data-lh-rich-state] > *)::after,
-	html:not(.lh-electron) [data-lh-rich-state="waiting"] > [data-lh-rich-fence]::after {
+	html:not(.lh-electron) body[data-lh-rich-code-blocks="on"] [data-lh-rich-fence]:not([data-lh-rich-state] ~ *)::after,
+	html:not(.lh-electron) [data-lh-rich-state="waiting"] + [data-lh-rich-fence]::after {
 		content: "";
 		width: 1.5rem;
 		height: 1.5rem;
@@ -79,8 +79,8 @@
 /* With reduced motion the spinner stands still. */
 @media (max-width: 639.98px) and (prefers-reduced-motion: reduce) {
 	html:not(.lh-electron) [data-plugin-renderer] .rich-code-blocks:not(.rich-code-blocks--rendered)::after,
-	html:not(.lh-electron) body[data-lh-rich-code-blocks="on"] [data-lh-rich-fence]:not([data-lh-rich-state] > *)::after,
-	html:not(.lh-electron) [data-lh-rich-state="waiting"] > [data-lh-rich-fence]::after {
+	html:not(.lh-electron) body[data-lh-rich-code-blocks="on"] [data-lh-rich-fence]:not([data-lh-rich-state] ~ *)::after,
+	html:not(.lh-electron) [data-lh-rich-state="waiting"] + [data-lh-rich-fence]::after {
 		animation: none;
 	}
 }

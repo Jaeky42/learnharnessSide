@@ -17,7 +17,7 @@
  * the CSS selectors are read from the stylesheet and run against the DOM.
  */
 
-import React, { act } from "react";
+import React, { act, useEffect } from "react";
 (globalThis as Record<string, unknown>).React = React;
 
 import assert from "node:assert/strict";
@@ -43,8 +43,8 @@ Object.assign(globalThis, {
 });
 const { createRoot } = await import("react-dom/client");
 const { renderToStaticMarkup } = await import("react-dom/server");
-const { PhoneRichDrawingFrame, drawingCopy, richFenceState, RICH_DRAWING_LANGUAGES, RICH_BLOCK_CLASS, RICH_RENDERED_CLASS, RICH_WAIT_CEILING_MS } = await import("../components/phone/rich-drawing-frame.tsx");
-const { richCodeBlocksOnIn } = await import("../src/server/rich-code-blocks-boot.ts");
+const { PhoneRichDrawingFrame, drawingCopy, isRichDrawingLanguage, richFenceState, RICH_DRAWING_LANGUAGES, RICH_BLOCK_CLASS, RICH_RENDERED_CLASS, RICH_WAIT_CEILING_MS } = await import("../components/phone/rich-drawing-frame.tsx");
+const { richCodeBlocksBoot, richCodeBlocksOnIn } = await import("../src/server/rich-code-blocks-boot.ts");
 const { AppRouterContext } = await import("next/dist/shared/lib/app-router-context.shared-runtime.js");
 const { ServerEventsProvider } = await import("../components/server-events.tsx");
 const { createPluginWindowOwner, PluginsProvider } = await import("../components/plugins.tsx");
@@ -130,7 +130,7 @@ describe("the guard: the names the phone rules rely on", () => {
 		assert.ok(own, "md-blocks' enlarge button");
 		assert.ok(frame.includes(`className="${own[1]} ${own[2]}"`), "the same look, always shown");
 		assert.match(frame, /<Hint label="Open full-screen" side="bottom">/);
-		assert.match(md, /<PhoneRichDrawingFrame language=\{language\}><PluginCodeBlock /);
+		assert.match(md, /return isRichDrawingLanguage\(language\) \? <PhoneRichDrawingFrame language=\{language\}>\{block\}<\/PhoneRichDrawingFrame> : block;/, "only smiles, abc and tikz fences reach the frame");
 		assert.match(read("components/chat.tsx"), /openDrawing: drawing => setFigureFocus\(\{ drawing \}\)/);
 	});
 });
@@ -163,10 +163,33 @@ describe("the enlarge button", () => {
 		assert.equal(host.querySelector('[aria-label="Expand diagram"]'), null);
 	});
 
-	it("is not there for an ordinary code fence on a phone", async () => {
+	it("is not there for an ordinary code fence: md-blocks never mounts the frame for it", () => {
+		const md = read("components/md-blocks.tsx");
+		assert.match(md, /isRichDrawingLanguage\(language\) \? <PhoneRichDrawingFrame/);
+		for (const language of ["js", "python", "mermaid", ""]) assert.equal(isRichDrawingLanguage(language), false, language);
+		for (const language of ["smiles", "abc", "tikz"]) assert.equal(isRichDrawingLanguage(language), true, language);
+	});
+
+	it("the block is never mounted again when the layout answer changes (a marker before it, the block keyed)", async () => {
+		phone = false;
+		let mounts = 0;
+		function Block() { useEffect(() => { mounts++; }, []); return <div data-plugin-renderer="Plugin code block (tikz)" />; }
+		const node = () => <SessionMermaidContext.Provider value={{ openMermaid() {}, openFigure() {}, openDrawing() {} }}><PhoneRichDrawingFrame language="tikz"><Block /></PhoneRichDrawingFrame></SessionMermaidContext.Provider>;
+		const host2 = document.createElement("div");
+		document.body.appendChild(host2);
+		const r2 = createRoot(host2);
+		roots.push({ root: r2, host: host2 });
+		phone = false;
+		await act(async () => r2.render(node()));
+		assert.equal(mounts, 1);
 		phone = true;
-		const host = await mount(<Lesson language="js" opened={[]} />);
-		assert.equal(host.querySelector('[data-testid="rich-drawing-frame"]'), null);
+		await act(async () => r2.render(node()));
+		await settle();
+		assert.ok(host2.querySelector('[data-testid="rich-drawing-frame"] + [data-plugin-renderer]'), "the marker sits right before the block");
+		phone = false;
+		await act(async () => r2.render(node()));
+		await settle();
+		assert.equal(mounts, 1, "the block kept its mount across both layout changes");
 	});
 
 	for (const language of ["smiles", "abc", "tikz"]) it(`shows on a drawn ${language} block on a phone, never while it is drawn or after it failed`, async () => {
@@ -188,7 +211,7 @@ describe("the enlarge button", () => {
 		assert.equal(opened.length, 1);
 		assert.match(opened[0]!, /^<div class="rich-code-blocks"><svg /, "a copy inside the plugin's block class, so the theme's ink applies");
 		assert.ok(opened[0]!.includes('viewBox="0 0 400 50"'));
-		assert.ok(host.querySelector("svg")!.outerHTML.includes('id="c1"'), "the lesson's drawing is untouched");
+		assert.ok(host.querySelector("[data-plugin-renderer] svg")!.outerHTML.includes('id="c1"'), "the lesson's drawing is untouched");
 		block.remove();
 		await settle();
 		assert.equal(host.querySelector('[aria-label="Expand diagram"]'), null, "the plugin removed a failed block: no button");
@@ -332,6 +355,19 @@ describe("which fences wait for the plugin (richFenceState)", () => {
 		assert.equal(richCodeBlocksOnIn([{ id: "rich-code-blocks", enabled: true, status: "error" }]), false);
 		assert.equal(richCodeBlocksOnIn([{ id: "flashcards", enabled: true, status: "active" }]), false);
 	});
+	it("the server's mark is read from the plugin host, and never holds a page up", async () => {
+		const on = [{ id: "rich-code-blocks", enabled: true, status: "active" as const }];
+		assert.equal(await richCodeBlocksBoot(300, async () => ({ list: () => on })), true);
+		assert.equal(await richCodeBlocksBoot(300, async () => ({ list: () => [{ id: "rich-code-blocks", enabled: false, status: "disabled" as const }] })), false);
+		const t0 = Date.now();
+		assert.equal(await richCodeBlocksBoot(40, () => new Promise(() => {})), false, "a host that isn't ready in time: not on");
+		const waited = Date.now() - t0;
+		assert.ok(waited >= 35 && waited < 1000, `gave up after ${waited} ms`);
+		assert.equal(await richCodeBlocksBoot(40, () => new Promise((resolve) => setTimeout(() => resolve({ list: () => on }), 200))), false, "ready only after the wait: not on");
+		assert.equal(await richCodeBlocksBoot(300, async () => { throw new Error("Plugin host is missing"); }), false, "a host that fails to start");
+		assert.equal(await richCodeBlocksBoot(300, () => Promise.reject(new Error("rejected"))), false, "a rejected host");
+		assert.equal(await richCodeBlocksBoot(300, async () => ({ list() { throw new Error("Plugin host is closed"); } })), false, "a closed host");
+	});
 });
 
 describe("md-blocks marks the fallback of a rich fence", () => {
@@ -382,7 +418,7 @@ describe("a phone fence while the plugin starts (the real plugin manager)", () =
 		const { node, start } = withRichPlugin(fence("tikz"), { enabled: true, languages: ["tikz"] });
 		const host = await mount(node);
 		assert.equal(stateOf(host), "waiting");
-		assert.ok(host.querySelector('[data-lh-rich-state="waiting"] > [data-lh-rich-fence]'), "the code fallback sits where the spinner rule draws its box");
+		assert.ok(host.querySelector('[data-lh-rich-state="waiting"] + [data-lh-rich-fence]'), "the code fallback sits where the spinner rule draws its box");
 		await act(async () => start());
 		await settle();
 		assert.equal(stateOf(host), "plugin");
@@ -398,7 +434,7 @@ describe("a phone fence while the plugin starts (the real plugin manager)", () =
 		await act(async () => start());
 		await settle();
 		assert.equal(stateOf(host), "code");
-		assert.ok(host.querySelector('[data-lh-rich-state="code"] > [data-lh-rich-fence]'));
+		assert.ok(host.querySelector('[data-lh-rich-state="code"] + [data-lh-rich-fence]'));
 	});
 
 	it("plugin off → code from the start, even with a stale server mark", async () => {
@@ -446,9 +482,9 @@ describe("a phone fence while the plugin starts (the real plugin manager)", () =
 
 describe("the stylesheet's waiting and touch-area rules", () => {
 	it("draws the spinner box for a waiting fence, and for an undecided one only under the server's mark", () => {
-		assert.match(css, /html:not\(\.lh-electron\) body\[data-lh-rich-code-blocks="on"\] \[data-lh-rich-fence\]:not\(\[data-lh-rich-state\] > \*\),\s*html:not\(\.lh-electron\) \[data-lh-rich-state="waiting"\] > \[data-lh-rich-fence\] \{[^}]*min-height: 7\.5rem;/);
-		assert.match(css, /\[data-lh-rich-state="waiting"\] > \[data-lh-rich-fence\] > \* \{\s*display: none;/);
-		assert.match(css, /\[data-lh-rich-state="waiting"\] > \[data-lh-rich-fence\]::after \{\s*animation: none;/, "reduced motion");
+		assert.match(css, /html:not\(\.lh-electron\) body\[data-lh-rich-code-blocks="on"\] \[data-lh-rich-fence\]:not\(\[data-lh-rich-state\] ~ \*\),\s*html:not\(\.lh-electron\) \[data-lh-rich-state="waiting"\] \+ \[data-lh-rich-fence\] \{[^}]*min-height: 7\.5rem;/);
+		assert.match(css, /\[data-lh-rich-state="waiting"\] \+ \[data-lh-rich-fence\] > \* \{\s*display: none;/);
+		assert.match(css, /\[data-lh-rich-state="waiting"\] \+ \[data-lh-rich-fence\]::after \{\s*animation: none;/, "reduced motion");
 		assert.ok(!/data-lh-rich-state="code"/.test(css), "a fence the frame says is code shows as it is");
 	});
 	it("gives the rich blocks' enlarge button a 40 x 40 touch area, and leaves the lesson's mermaid button alone", () => {
