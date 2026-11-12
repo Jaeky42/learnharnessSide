@@ -8,7 +8,8 @@
  *     (components/phone/phone-plugin-page.tsx);
  *   - Settings lists no plugin rows, and a link to one lands on the list
  *     (components/settings/settings-dialog.tsx);
- *   - a plugin question the teacher asks is parked
+ *   - a plugin question the teacher asks is parked, with a way to dismiss
+ *     it, and a plugin's practice problem is parked
  *     (components/phone/parked-plugin-question.tsx).
  *
  * Kept free of component imports, so Settings and the tests can read it
@@ -20,6 +21,13 @@ export const PLUGIN_PAGE_PHONE_TEXT = "Open this on a computer.";
 
 /** The owner's wording in place of a plugin question's box on a phone. */
 export const PARKED_PLUGIN_QUESTION_TEXT = "This question needs a bigger screen. Open this session on a computer to answer it.";
+
+/** The button under that sentence: upstream's own words for dismissing a
+ *  plugin question (its dock shows them when the plugin is switched off). */
+export const DISMISS_PLUGIN_QUESTION_TEXT = "Dismiss question";
+
+/** The owner's wording in place of a plugin's practice problem on a phone. */
+export const PARKED_PLUGIN_PROBLEM_TEXT = "This problem needs a bigger screen. Open this session on a computer to answer it.";
 
 /** Settings sections that belong to plugins: the two management rows and
  *  every plugin's own page (`plugin:<id>`). */

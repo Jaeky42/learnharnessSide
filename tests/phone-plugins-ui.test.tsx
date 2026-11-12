@@ -36,9 +36,9 @@ Object.assign(globalThis, {
 const restoreModalDom = installModalDom(dom);
 const { createRoot } = await import("react-dom/client");
 const { renderToStaticMarkup } = await import("react-dom/server");
-const { PARKED_PLUGIN_QUESTION_TEXT, PLUGIN_PAGE_PHONE_TEXT } = await import("../components/phone/phone-plugins.ts");
+const { DISMISS_PLUGIN_QUESTION_TEXT, PARKED_PLUGIN_PROBLEM_TEXT, PARKED_PLUGIN_QUESTION_TEXT, PLUGIN_PAGE_PHONE_TEXT } = await import("../components/phone/phone-plugins.ts");
 const { PhonePluginPage } = await import("../components/phone/phone-plugin-page.tsx");
-const { PhonePluginQuestionDock } = await import("../components/phone/parked-plugin-question.tsx");
+const { PhonePluginProblemDock, PhonePluginQuestionDock } = await import("../components/phone/parked-plugin-question.tsx");
 const { SettingsDialogBody, SettingsDialogProvider, useSettingsDialog } = await import("../components/settings/settings-dialog.tsx");
 const { InteractionLayersProvider } = await import("../components/interaction-layers.tsx");
 const { ServerEventsProvider } = await import("../components/server-events.tsx");
@@ -182,24 +182,71 @@ describe("a plugin question on a phone is parked", () => {
 		ready: true, reconciliation: "ready" as const, available: true, readingRef: { current: null },
 		onMicAvailable: (on: boolean) => calls.push(`mic:${on}`), send: async () => { calls.push("send"); return true; }, dismiss: async () => { calls.push("dismiss"); },
 	};
-	const composer = <div data-testid="composer">message box</div>;
+	/** React's own handler for the button (linkedom's click doesn't reach React here). */
+	const press = async (button: Element) => {
+		const key = Object.keys(button).find((k) => k.startsWith("__reactProps$"))!;
+		await act(async () => { (button as unknown as Record<string, { onClick(): void }>)[key]!.onClick(); });
+		await settle();
+	};
 
-	it("shows the sentence in place of the question box, and the message box under it", async () => {
+	it("shows the sentence in place of the question box, with upstream's way to dismiss it", async () => {
 		layout = "touch";
 		calls.length = 0;
-		const host = await mount(<PhonePluginQuestionDock {...props} composer={composer} />);
+		const host = await mount(<PhonePluginQuestionDock {...props} />);
 		assert.equal(host.querySelector('[data-testid="plugin-question-parked"] [role="status"]')?.textContent,
 			"This question needs a bigger screen. Open this session on a computer to answer it.");
 		assert.equal(PARKED_PLUGIN_QUESTION_TEXT, "This question needs a bigger screen. Open this session on a computer to answer it.");
-		assert.ok(host.querySelector('[data-testid="composer"]'), "the message box stays");
 		assert.equal(host.querySelector('[data-testid="plugin-question-dock"]'), null, "the plugin's box isn't mounted");
+		const button = host.querySelector('[data-testid="plugin-question-parked-dismiss"]')!;
+		assert.equal(button.textContent, "Dismiss question");
+		assert.equal(DISMISS_PLUGIN_QUESTION_TEXT, "Dismiss question");
+		assert.equal(button.hasAttribute("disabled"), false);
 		assert.deepEqual(calls, [], "nothing is answered, dismissed or sent by parking");
+
+		await press(button);
+		assert.deepEqual(calls, ["dismiss"], "the button is upstream's dismissal, once");
 	});
 
-	it("is upstream's question dock on a computer, without the extra message box", () => {
-		const html = renderToStaticMarkup(<PhonePluginQuestionDock {...props} composer={composer} />);
+	it("the button waits until the session is ready, as upstream's does", async () => {
+		layout = "touch";
+		calls.length = 0;
+		const host = await mount(<PhonePluginQuestionDock {...props} ready={false} />);
+		assert.equal(host.querySelector('[data-testid="plugin-question-parked-dismiss"]')!.hasAttribute("disabled"), true);
+		assert.deepEqual(calls, []);
+	});
+
+	it("is upstream's question dock on a computer", () => {
+		const html = renderToStaticMarkup(<PhonePluginQuestionDock {...props} />);
 		assert.match(html, /data-testid="plugin-question-dock"/);
-		assert.doesNotMatch(html, /plugin-question-parked|data-testid="composer"/);
+		assert.doesNotMatch(html, /plugin-question-parked/);
+	});
+});
+
+describe("a plugin's practice problem on a phone is parked", () => {
+	const calls: string[] = [];
+	const props = {
+		snapshot: { protocolVersion: 1, pluginId: "fixture", typeId: "code", label: "Code", problemId: "p1", contractVersion: 1, input: { statement: "Write a loop." } } as unknown as import("../src/core/index.ts").PluginProblemSnapshot,
+		occurrence: { messageId: "a", contentIndex: 0, toolCallId: "call", toolName: "code" } as unknown as import("../src/core/index.ts").PluginSubmissionOccurrence,
+		chatId: "chat", draft: { submission: { status: "empty" as const }, thinking: "" } as unknown as import("../components/session-core.ts").PluginProblemDraft,
+		expanded: true, onExpand: () => calls.push("expand"), ready: true, available: true, reconciliation: "ready" as const,
+		send: async () => { calls.push("send"); return true; },
+	};
+
+	it("shows the sentence and nothing else: no editor, no button", async () => {
+		layout = "touch";
+		calls.length = 0;
+		const host = await mount(<PhonePluginProblemDock {...props} />);
+		assert.equal(host.querySelector('[data-testid="plugin-problem-parked"] [role="status"]')?.textContent,
+			"This problem needs a bigger screen. Open this session on a computer to answer it.");
+		assert.equal(PARKED_PLUGIN_PROBLEM_TEXT, "This problem needs a bigger screen. Open this session on a computer to answer it.");
+		assert.equal(host.querySelectorAll("button, textarea, input").length, 0);
+		assert.deepEqual(calls, [], "nothing is submitted or changed by parking");
+	});
+
+	it("is upstream's problem dock on a computer", async () => {
+		const host = await mount(withPlugins(<PhonePluginProblemDock {...props} />));
+		assert.equal(host.querySelector('[data-testid="plugin-problem-parked"]'), null);
+		assert.ok(host.innerHTML.length > 0, "upstream's dock rendered");
 	});
 });
 

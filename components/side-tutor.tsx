@@ -75,7 +75,8 @@ const BUBBLE_TOP = 72;
  * On a dark theme the middle is black at 60% (the owner's pick from five
  * shades). On a light theme black would hide the dark text, so the middle is
  * the theme's own background, see-through, with a little of its text colour
- * mixed in: darker than the bars, as on a dark theme.
+ * mixed in: darker than the bars, as on a dark theme (the owner's pick of
+ * three light looks).
  */
 const BAR_BG = "bg-background/95";
 const BODY_BG = "bg-[color-mix(in_srgb,var(--foreground)_10%,color-mix(in_srgb,var(--background)_62%,transparent))] dark:bg-black/60";

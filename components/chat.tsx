@@ -78,7 +78,7 @@ import { ArrowRightIcon, DumbbellIcon, MessageCircleQuestionIcon, NotebookPenIco
 import type { PlanBlockData } from "@/src/core";
 import { QuestionDock } from "@/components/question-dock";
 // FORK (phone): a plugin question is parked on a phone, upstream's dock everywhere else.
-import { PhonePluginQuestionDock as PluginQuestionDock } from "@/components/phone/parked-plugin-question";
+import { PhonePluginProblemDock as PluginProblemDock, PhonePluginQuestionDock as PluginQuestionDock } from "@/components/phone/parked-plugin-question";
 import { PluginQuestionPart } from "./plugin-question-part";
 import { pluginQuestionKeySuppressed, composingQuestionKey } from "./plugin-question-keys";
 import { capturePluginQuestionDismissal, confirmPluginQuestionDismissal, type PluginQuestionDismissalTarget } from "./plugin-question-dismissal";
@@ -96,7 +96,7 @@ import { createSideQuestionActions } from "@/components/side-thread";
 import { useSideThread, type SideThreadOpenArgs } from "@/components/use-side-thread";
 import { useRouter } from "next/navigation";
 import { PracticeDock } from "@/components/practice-dock";
-import { PluginProblemDock, type PluginProblemDockProps } from "./plugin-problem-dock";
+import type { PluginProblemDockProps } from "./plugin-problem-dock";
 import { practiceProblemForCall } from "@/src/core";
 import { PluginProblemSubmitted } from "./plugin-problem-submitted";
 import { readPluginProblemSubmission, pluginProblemById } from "@/src/core";

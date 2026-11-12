@@ -89,7 +89,7 @@ See `docs/side-tutor.md`. In short: the fork's engine (store, route, agent, prom
 - **The notes editor** (CodeMirror) follows the theme's light or dark mode live (`editorTheme(mode)` in `components/notes/note-editor.tsx`).
 - **The login and setup pages** take the server's saved theme (`authPagePalette()` in `src/server/server-auth-theme.ts`): the theme's colours, and nothing else, are shown to someone who isn't signed in. Only plain hex colours reach the page; the pages keep their one inline `<style>` under their CSP.
 - **The home-screen app:** `app/manifest.ts` takes its background and theme colours from the saved theme, read per request (`force-dynamic`). The browser bar's colour (`themeColor` in `generateViewport`, `app/layout.tsx`) is the theme's background.
-- **The iPhone status bar style is unchanged** (`black-translucent`): see "Open, waiting for the owner".
+- **The iPhone status bar style is unchanged** (`black-translucent`): see "Asked after it was built".
 - Tests: `tests/themed-pages.test.ts`.
 
 ### Pop-up boxes on HostDialog
@@ -110,7 +110,7 @@ See `docs/side-tutor.md`. In short: the fork's engine (store, route, agent, prom
 - **Plugins are hidden under 640 px** (`components/phone/phone-plugins.ts` lists the rules):
   - the ways in are hidden by `app/phone.css`: the lesson's top-bar plugin buttons, the session list's plugin entries, the graph's plugin buttons;
   - a plugin page opened directly shows "Open this on a computer." under a top bar that has only the session-list button (`components/phone/phone-plugin-page.tsx`);
-  - a plugin's question is parked: "This question needs a bigger screen. Open this session on a computer to answer it." (`components/phone/parked-plugin-question.tsx`);
+  - a plugin's question is parked: "This question needs a bigger screen. Open this session on a computer to answer it.", with the button "Dismiss question" under it; a plugin's practice problem is parked with "This problem needs a bigger screen. Open this session on a computer to answer it." (`components/phone/parked-plugin-question.tsx`; "Asked after it was built" below);
   - rich diagrams inside a lesson still draw.
 - **HostDialog on a phone** is sized to the visible height (`--lh-vvh`), so the keyboard doesn't cover it; theme cards are one column.
 - Tests: `tests/phone-plugins-ui.test.tsx`, and the phone-only rule for every `phone.css` rule in `tests/phone-layout.test.ts`.
@@ -120,15 +120,15 @@ See `docs/side-tutor.md`. In short: the fork's engine (store, route, agent, prom
 - **Ctrl+Shift+N** opens the drawer with the cursor in the open note's editor (the note switches to its edit view), and closes the drawer again. With no note open, the cursor lands in the notes search box. Opening with the Notes chip doesn't move the cursor. (`landInEditor` on `NotesDrawer`, set by the `toggle-notes` shortcut in `components/chat.tsx`.)
 - **Ctrl+Shift+E is upstream's** (Drawing Pad). The fork's `focus-notes` shortcut is removed.
 
-## Open, waiting for the owner
+## Asked after it was built (owner's answers)
 
-Each of these is built one way for now; the owner hasn't chosen yet.
+Five things the plan had left open, or that came out differently than the plan said. The owner chose from pictures.
 
-1. **The Tutor's middle on a light theme.** Black at 60% is unreadable over a light lesson. For now a light theme gets the theme's background at 62% with 10% of its text colour mixed in; dark themes keep black at 60%.
-2. **A parked plugin question and the message box.** The approved note said the message box stays usable. The server refuses any typed message while a plugin question is pending ("Answer or dismiss the pending plugin question first"), so for now only the sentence shows.
-3. **Plugin practice problems on a phone** aren't parked; the plugin's editor still mounts.
-4. **The iPhone status bar on a light theme.** The plan said dark clock text. `black-translucent` gives white text and is what lets the app draw under the clock, which the phone layout is tuned for; it is unchanged.
-5. **The icons** chosen for the fork's Settings rows.
+1. **The Tutor's middle on a light theme: the theme's background at 62% with 10% of its text colour mixed in** (the owner's pick of three; the others were the background at 60% and the theme's soft grey at 78%). Black at 60% is unreadable over a light lesson. Dark themes keep black at 60%. (`BODY_BG` in `components/side-tutor.tsx`.)
+2. **A parked plugin question gets "Dismiss question".** The plan said the message box stays usable under the note. It can't: upstream's server takes no typed message while a plugin question waits ("Answer or dismiss the pending plugin question first"), on any device. The owner chose upstream's own button and words over the sentence alone and over changing upstream's rule. It is upstream's silent dismissal: the question is marked dismissed, the message box comes back, and the teacher learns of it with the learner's next message.
+3. **A plugin's practice problem is parked too**, with new wording the owner approved: "This problem needs a bigger screen. Open this session on a computer to answer it." No button; upstream has no dismissal for a problem. It can only be met by opening, on a phone, a practice session started on a computer.
+4. **The iPhone status bar is left as it is for now** (`black-translucent`). The plan said dark clock text on a light theme. An iPhone offers no style with dark text that also lets the app draw under the clock, which the full-height session list and the tuned top spacing rely on. So on a light theme the home-screen app's clock is white and hard to read; a Safari tab isn't affected. To be decided in the phone-layout round, on the owner's real phone. The two other options shown: a dark strip behind the clock on light themes, or the iPhone's standard bar on light themes (the icon must be added again and the top spacing re-checked).
+5. **The icons for the fork's Settings rows stay** as picked: a cloud (Cloud), a notebook with a pen (Obsidian), a person (Account).
 
 ## Updating the server and the PC together
 
@@ -154,4 +154,4 @@ Protocol 2 means both sides must be updated, or sync pauses (nothing is discarde
 - **Tests in the development sandbox** (Node 22, no IPv6): `tests/safe-fetch.test.ts` hangs and must be left out of a full run; `tests/safe-fetch-connector.test.ts`, `tests/passive-tooltip.test.tsx` and one case of `tests/plugin-document-proxy.test.ts` fail. All four behave the same on an untouched upstream v0.6.0 checkout. CI (Node 26) runs them.
 - **`docs/plugin-api/`** is generated: `node scripts/build-plugin-types.mjs <dir>`, then `node scripts/build-plugin-api-reference.mjs <dir> docs/plugin-api`. A test fails when it is stale, which happens whenever the fork adds an event (`cloud-changed`).
 - **A Tutor conversation for screenshots:** put threads in the chat record's `sideChats` (upstream's shape in `src/core/contracts/chat.ts`). The old `side-tutor/<chatId>.json` recipe in `docs/cloud-sync.md` no longer applies.
-- **At the next upstream release:** the fork's edits to upstream files are the lesson screen (`components/chat.tsx`: the Tutor's mount, upstream's card and markers left out, the `blocked` props, the parked question), `components/settings/settings-dialog.tsx`, `proxy.ts`, `instrumentation.ts`, `app/layout.tsx`, the `blocked` props in `plugin-chrome.tsx` and `selection-toolbar.tsx`, and the phone Enter rule in the three text-box files. Everything else is in the fork's own files.
+- **At the next upstream release:** the fork's edits to upstream files are the lesson screen (`components/chat.tsx`: the Tutor's mount, upstream's card and markers left out, the `blocked` props, the parked question and problem), `components/settings/settings-dialog.tsx`, `proxy.ts`, `instrumentation.ts`, `app/layout.tsx`, the `blocked` props in `plugin-chrome.tsx` and `selection-toolbar.tsx`, and the phone Enter rule in the three text-box files. Everything else is in the fork's own files.
