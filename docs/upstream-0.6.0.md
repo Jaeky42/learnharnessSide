@@ -241,4 +241,7 @@ Protocol 2 means both sides must be updated, or sync pauses (nothing is discarde
     - `instrumentation.ts`: on the server, the saved time zone set before the plugins start;
     - `src/server/index.ts`: the barrel exports `richCodeBlocksBoot` and `flashcardsExchangeResponse`;
     - `plugins/flashcards/src/store.cjs`: reads its file again when it changed on disk (Flashcards sync), and one line of `plugins/flashcards/tests/store.test.cjs` with it.
+  - **Added by the touch selection fix** (Highlight, then Ask on a phone and a tablet; `docs/side-tutor.md`):
+    - `components/selection-actions.ts`: a touch or pen gesture no longer sets the "press under way" flag (iOS sends no `mouseup` after a press-and-hold selection, and the flag stuck); it reports once the selection has rested with no finger down, re-checks after a touch is cancelled, a tap and Android's `contextmenu`, and holds the toolbar through a press on it until its click; `onSelection` gets a second argument, `touch`. Mouse timing unchanged;
+    - `components/selection-toolbar.tsx`: a touch selection is placed by `resolveTouchSelectionPosition` (`components/phone/touch-selection.ts`), opposite the system's Copy / Look Up box.
   - The phone styling of Flashcards and Rich code blocks hangs on upstream's class names and markup from the fork's own stylesheets; `tests/phone-flashcards.test.ts`, `tests/phone-flashcards-structure.test.tsx` and `tests/phone-rich-code-blocks.test.tsx` fail when one of those names or structures changes upstream.

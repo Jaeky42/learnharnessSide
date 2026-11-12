@@ -11,6 +11,7 @@ import {
 	isSelectionRectVisible, observeSelectionActions, resolveSelectionActionPosition,
 	type RectLike, type SelectionActionPoint,
 } from "./selection-actions";
+import { resolveTouchSelectionPosition, visibleScreen } from "./phone/touch-selection";
 
 /** One button on the toolbar. Cite is the first; side questions adds more. */
 export interface SelectionAction {
@@ -134,13 +135,31 @@ export function SelectionToolbar({ viewport, actions, blocked }: { viewport: HTM
 		const clear = () => setState(null);
 		const eligible = () => isInteractionScopeEligible(viewport, controller);
 		const unsubscribe = controller?.subscribe(() => { if (!eligible()) clear(); });
-		const update = (pointer: SelectionActionPoint | null) => {
+		const update = (pointer: SelectionActionPoint | null, touch?: boolean) => {
 			if (!eligible()) { clear(); return; }
 			const capture = captureSelection(viewport, window.getSelection());
 			if (!capture || !actionsRef.current.some((action) => action.visible(capture))) { clear(); return; }
 			const viewportRect = viewport.getBoundingClientRect();
 			if (!isSelectionRectVisible(capture.range.getBoundingClientRect(), [viewportRect]) || !selectionVisible(capture.range, viewport)) { clear(); return; }
 			const lines = Array.from(capture.range.getClientRects());
+			// Side-tutor fork (touch): opposite the system's Copy / Look Up box,
+			// clear of the selection handles (components/phone/touch-selection.ts).
+			if (touch) {
+				const drawn = lines.filter((line) => line.width > 0 || line.height > 0);
+				const whole = capture.range.getBoundingClientRect();
+				setState({
+					capture,
+					position: resolveTouchSelectionPosition({
+						bounds: viewportRect,
+						firstLine: drawn[0] ?? whole,
+						lastLine: drawn.at(-1) ?? whole,
+						visible: visibleScreen(window),
+						toolbarHeight: toolbarRef.current?.getBoundingClientRect().height || undefined,
+						viewportWidth: window.innerWidth,
+					}),
+				});
+				return;
+			}
 			const onText = pointer !== null && lines.some((line) =>
 				pointer.x >= line.left - 8 && pointer.x <= line.right + 8 && pointer.y >= line.top - 8 && pointer.y <= line.bottom + 8);
 			setState({

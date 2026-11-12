@@ -6,7 +6,17 @@
  * settled. Keyboard selection reports on selectionchange. Escape, blur,
  * resize, a new press and scrolling dismiss; with restoreAfterScroll the
  * toolbar comes back once scrolling settles.
+ *
+ * Side-tutor fork: a touch or pen gesture (pointerType, per gesture) reports
+ * once the selection has rested for TOUCH_SETTLE_MS with no finger down; iOS
+ * sends no mouseup after a press-and-hold selection, and its handles send
+ * only selectionchange. A press that starts on the toolbar keeps it (and its
+ * captured passage) until that press and its click are over, because a tap
+ * on iOS can clear the selection first. Mouse timing is unchanged. See
+ * components/phone/touch-selection.ts.
  */
+
+import { isTouchPointer, TOUCH_ACTION_RELEASE_MS, TOUCH_FINGER_WAIT_MS, TOUCH_SETTLE_MS } from "./phone/touch-selection";
 
 export type SelectionActionPoint = { x: number; y: number };
 export type RectLike = { left: number; top: number; right: number; bottom: number };
@@ -49,7 +59,9 @@ export function observeSelectionActions({ element, getActionElement, restoreAfte
 	element: HTMLElement;
 	getActionElement: () => HTMLElement | null;
 	restoreAfterScroll: boolean;
-	onSelection: (pointer: SelectionActionPoint | null) => void;
+	/** Side-tutor fork: `touch` is true when a touch or pen gesture made the
+	 *  selection (the toolbar is then placed by touch rules). */
+	onSelection: (pointer: SelectionActionPoint | null, touch?: boolean) => void;
 	onDismiss: (reason: SelectionDismissReason) => void;
 }): { selectionChanged: () => void; cancel: () => void; dispose: () => void } {
 	const view = element.ownerDocument.defaultView!;
@@ -60,6 +72,15 @@ export function observeSelectionActions({ element, getActionElement, restoreAfte
 	let timer: number | undefined;
 	let frame: number | undefined;
 	let scrollTimer: number | undefined;
+	// Side-tutor fork (touch): the last gesture was a touch or pen; the
+	// fingers down (not on the toolbar) and when the last went down; a press
+	// on the toolbar, and whether the selection changed under it.
+	let touch = false;
+	const fingers = new Set<number>();
+	let fingerAt = 0;
+	let actionPress: number | null = null;
+	let actionTimer: number | undefined;
+	let changedInPress = false;
 
 	const clearPending = () => {
 		if (timer !== undefined) view.clearTimeout(timer);
@@ -77,6 +98,33 @@ export function observeSelectionActions({ element, getActionElement, restoreAfte
 			});
 		}, delay);
 	};
+	// Side-tutor fork (touch): show once the selection has rested and no
+	// finger is down (a finger that never reported lifting holds it back at
+	// most TOUCH_FINGER_WAIT_MS).
+	const settleTouch = () => {
+		clearPending();
+		const check = () => {
+			timer = undefined;
+			if (fingers.size > 0 && Date.now() - fingerAt < TOUCH_FINGER_WAIT_MS) { timer = view.setTimeout(check, TOUCH_SETTLE_MS); return; }
+			fingers.clear();
+			frame = view.requestAnimationFrame(() => {
+				frame = undefined;
+				shown = true;
+				onSelection(null, true);
+			});
+		};
+		timer = view.setTimeout(check, TOUCH_SETTLE_MS);
+	};
+	const endActionPress = () => {
+		if (actionTimer !== undefined) view.clearTimeout(actionTimer);
+		actionTimer = undefined;
+		if (actionPress === null) return;
+		actionPress = null;
+		if (!changedInPress) return;
+		changedInPress = false;
+		if (shown) dismiss("cancel");
+		settleTouch();
+	};
 	const dismiss = (reason: SelectionDismissReason) => {
 		clearPending();
 		shown = false;
@@ -88,8 +136,17 @@ export function observeSelectionActions({ element, getActionElement, restoreAfte
 	};
 
 	const pointerDownCapture = (event: PointerEvent) => {
-		if (onAction(event.target)) { clearPending(); return; }
+		if (onAction(event.target)) {
+			clearPending();
+			// Side-tutor fork (touch): hold the toolbar through this press.
+			if (isTouchPointer(event)) { endActionPress(); actionPress = event.pointerId; changedInPress = false; }
+			return;
+		}
 		if (shown || timer !== undefined) dismiss("interaction");
+		// Side-tutor fork (touch): a touch or pen never sets pointerDown; it
+		// is never cleared on iOS (no mouseup) and blocked the toolbar for good.
+		touch = isTouchPointer(event);
+		if (touch) { fingers.add(event.pointerId); fingerAt = Date.now(); gesture = false; return; }
 		pointerDown = true;
 		const target = event.target as Element | null;
 		gesture = event.button === 0 && !event.defaultPrevented && element.contains(target) && !target?.closest("button, [role=button]");
@@ -100,34 +157,70 @@ export function observeSelectionActions({ element, getActionElement, restoreAfte
 		gesture = false;
 		schedule(event.detail >= 2 ? MULTI_CLICK_SETTLE_MS : 0, { x: event.clientX, y: event.clientY });
 	};
+	// Side-tutor fork (touch): a finger lifting, or the system taking it (a
+	// press-and-hold selection, a scroll).
+	const pointerUp = (event: PointerEvent) => {
+		if (!isTouchPointer(event)) return;
+		if (event.pointerId === actionPress) {
+			if (actionTimer !== undefined) view.clearTimeout(actionTimer);
+			actionTimer = view.setTimeout(endActionPress, TOUCH_ACTION_RELEASE_MS);
+			return;
+		}
+		if (!fingers.delete(event.pointerId)) return;
+		// A tap on the selection itself changes nothing: look again.
+		if (event.type === "pointerup" && !shown && timer === undefined && frame === undefined) settleTouch();
+	};
+	const actionClick = (event: MouseEvent) => {
+		if (actionPress !== null && onAction(event.target)) view.setTimeout(endActionPress, 0);
+	};
 	const keyDown = (event: KeyboardEvent) => {
 		if (event.key === "Escape") { if (shown || timer !== undefined) dismiss("cancel"); return; }
 		pointerDown = false;
+		touch = false; // Side-tutor fork: keyboard selection reports as upstream's
 	};
 	const cancel = () => { if (shown || timer !== undefined) dismiss("cancel"); };
-	const contextMenu = () => dismiss("interaction");
+	// Side-tutor fork (touch): the system taking a touch (a press-and-hold
+	// selection) must not drop a selection that is settling.
+	const pointerCancel = (event: PointerEvent) => {
+		if (!isTouchPointer(event)) { cancel(); return; }
+		const again = shown || fingers.has(event.pointerId);
+		pointerUp(event);
+		if (shown) dismiss("cancel");
+		if (again) settleTouch();
+	};
+	// Side-tutor fork (touch): Android fires contextmenu on a long press,
+	// then selects; look again once the selection rests.
+	const contextMenu = () => { dismiss("interaction"); if (touch) settleTouch(); };
 	const focusIn = (event: FocusEvent) => { if (shown && !onAction(event.target)) dismiss("interaction"); };
 	const scroll = () => {
 		if (pointerDown) return; // autoscroll while dragging keeps the gesture
-		const wasShown = shown;
+		// Side-tutor fork (touch): a touch selection still settling (a scroll
+		// cancelled its touch first) comes back too.
+		const wasShown = shown || (touch && timer !== undefined);
 		if (shown || timer !== undefined) dismiss("cancel");
 		if (!restoreAfterScroll || !wasShown) return;
 		if (scrollTimer !== undefined) view.clearTimeout(scrollTimer);
-		scrollTimer = view.setTimeout(() => { scrollTimer = undefined; schedule(0, null); }, SCROLL_SETTLE_MS);
+		scrollTimer = view.setTimeout(() => { scrollTimer = undefined; if (touch) settleTouch(); else schedule(0, null); }, SCROLL_SETTLE_MS);
 	};
 
 	document.addEventListener("pointerdown", pointerDownCapture, true);
 	document.addEventListener("mouseup", mouseUp, true);
+	document.addEventListener("pointerup", pointerUp, true);
+	document.addEventListener("click", actionClick);
 	document.addEventListener("keydown", keyDown, true);
 	document.addEventListener("focusin", focusIn, true);
 	element.addEventListener("contextmenu", contextMenu);
 	element.addEventListener("scroll", scroll, true);
-	view.addEventListener("pointercancel", cancel);
+	view.addEventListener("pointercancel", pointerCancel);
 	view.addEventListener("blur", cancel);
 	view.addEventListener("resize", cancel);
 
 	return {
 		selectionChanged() {
+			// Side-tutor fork (touch): a press on the toolbar keeps it; a
+			// handle drag hides it until the selection rests.
+			if (actionPress !== null) { changedInPress = true; return; }
+			if (touch) { if (shown) dismiss("cancel"); settleTouch(); return; }
 			if (pointerDown) { if (shown) dismiss("cancel"); return; }
 			if (timer === undefined && frame === undefined) schedule(0, null);
 		},
@@ -135,13 +228,16 @@ export function observeSelectionActions({ element, getActionElement, restoreAfte
 		dispose() {
 			clearPending();
 			if (scrollTimer !== undefined) view.clearTimeout(scrollTimer);
+			if (actionTimer !== undefined) view.clearTimeout(actionTimer);
 			document.removeEventListener("pointerdown", pointerDownCapture, true);
 			document.removeEventListener("mouseup", mouseUp, true);
+			document.removeEventListener("pointerup", pointerUp, true);
+			document.removeEventListener("click", actionClick);
 			document.removeEventListener("keydown", keyDown, true);
 			document.removeEventListener("focusin", focusIn, true);
 			element.removeEventListener("contextmenu", contextMenu);
 			element.removeEventListener("scroll", scroll, true);
-			view.removeEventListener("pointercancel", cancel);
+			view.removeEventListener("pointercancel", pointerCancel);
 			view.removeEventListener("blur", cancel);
 			view.removeEventListener("resize", cancel);
 		},
