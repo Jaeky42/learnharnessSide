@@ -1,6 +1,6 @@
 # Plan: the fork's own coding questions plugin (runs in the browser, sealed)
 
-**Status: a draft for the owner to approve. Nothing is built.** Written at the end of the upstream 0.6.0 session, for the next session to pick up. That session is led by one orchestrator at high effort, with worker agents at high effort; the owner names the models when starting it. Per `AGENTS.md`: investigate, ask the owner the open decisions one at a time, get this plan approved (changed where the owner says), and only then build.
+**Status: a draft for the owner to approve. Nothing is built; spikes 1 to 3 are done and passed** (`docs/spikes/sealed-box/`). Written at the end of the upstream 0.6.0 session, for the next session to pick up. That session is led by one orchestrator at high effort, with worker agents at high effort; the owner names the models when starting it. Per `AGENTS.md`: investigate, ask the owner the open decisions one at a time, get this plan approved (changed where the owner says), and only then build.
 
 ## Why
 
@@ -58,7 +58,7 @@ Read from the code on the shipped commit. Lines marked *(not verified)* were not
 
 | Engine | Licence | Size | Notes |
 |---|---|---|---|
-| Pyodide (CPython in wasm) | MPL-2.0 | about 14 MB | Full standard library. No interrupt without `SharedArrayBuffer`: stop = end the worker, then a cold start. `sqlite3` is not in the npm package *(not verified)*. |
+| Pyodide (CPython in wasm) | MPL-2.0 | about 14 MB | Full standard library. No interrupt without `SharedArrayBuffer`: stop = end the worker, then a cold start. `sqlite3` is in the standard library (run in the spike). |
 | MicroPython (wasm) | MIT | about 2.4 MB | Small and fast to start; not the full standard library. |
 | sql.js (SQLite in wasm) | MIT | under 1 MB needed | |
 | QuickJS (wasm) | MIT | about 0.65 MB | Its own interrupt and memory limits. Alternative to running JavaScript directly in the worker. |
@@ -79,7 +79,7 @@ Read from the code on the shipped commit. Lines marked *(not verified)* were not
 - **Front end:** the editor with three language modes, a way to run (decision below), the result badge and output, the model solution after submitting, as upstream shows them.
 - **The sealed runner:**
   - an `<iframe sandbox="allow-scripts">` with `srcdoc`, never `allow-same-origin`;
-  - a meta Content-Security-Policy in that document: nothing loads from the network (`default-src 'none'`, `connect-src 'none'`), workers only from `blob:`, scripts only from `blob:` with the eval permissions the engines need;
+  - a meta Content-Security-Policy in that document: nothing loads from the network (`default-src 'none'`, `connect-src 'none'`), workers only from `blob:`, scripts only from `blob:` plus `'wasm-unsafe-eval'` (the spike needed no `'unsafe-eval'`);
   - **the learner's code runs only in a worker started inside the frame**, never on the frame's own thread, so a busy loop can't freeze the app;
   - the plugin's page code fetches the engine's files from its own assets and transfers the bytes to the frame, which passes them to the worker. The engine starts from those bytes, with no network;
   - one run at a time; a time limit, an output limit and a code-size limit; on timeout the worker is ended and a fresh one started;
@@ -88,15 +88,16 @@ Read from the code on the shipped commit. Lines marked *(not verified)* were not
 - **Keeping the download small:** the engine's files are cached in the browser between visits (the asset route says `no-store`), keyed by the plugin's revision. Python's engine loads only when a Python question is opened.
 - **What the result is:** an observation reported by the learner's own browser. It can be forged, and the tests share a realm with the learner's code. For self-study that is acceptable; the instruction text should tell the teacher so (upstream's already says tests are observations, not proof).
 
-## Spikes first (each ends in go, or the named fallback)
+## Spikes
 
-Run these before any plugin code, and show the owner the results. Chromium and the desktop app can be checked in the session; **Safari on the owner's iPad cannot**, so spike 1 needs a small page the owner opens there.
+**Spikes 1 to 3 are done and passed**, in Chromium and on the owner's iPad. The page, the worker's source, the numbers and the recipe that worked are in `docs/spikes/sealed-box/`. Read its README before building the runner: it is the starting point for work packages B and C.
 
-1. **A worker inside a sealed frame.** A `blob:` worker started in an opaque-origin `srcdoc` frame under the strict CSP, in Chromium, in the packaged desktop app, and on the owner's iPad. Fallback if Safari refuses: decide with the owner (a different sealing, or no iPad support).
-2. **Python from transferred bytes.** The chosen Python engine booted inside that worker with no network: start time, memory, a 5-second run, a timeout and restart. Measure on the iPad too. Fallback: MicroPython.
-3. **SQL.** sql.js from transferred bytes in the same worker; setup, a learner query, a comparison.
-4. **Weight.** What the engine's files add to the installer, the server image and the server's memory (every plugin file is held in memory), and how long the first load takes from the server to the iPad. Fallback: ship the Python engine compressed, or pick MicroPython.
-5. **The submit flow.** Shapes (a), (b) and (c) tried against the real host with a stand-in model (recipe below): which one gives a result the teacher sees and a flow that feels right. The owner picks from what is shown.
+1. ✅ **A worker inside a sealed frame.** A classic `blob:` worker starts in an opaque-origin `srcdoc` frame under a strict policy, and from the frame and from the worker the page, storage and the network are refused. Chromium and the iPad's WebKit (inside the Claude app's web view).
+   - **Left to check:** Safari itself on the iPad (same engine), the packaged desktop app, and the frame fed from the plugin's real asset route.
+2. ✅ **Python from handed-over bytes.** Pyodide starts with no network in 0.8 s on the iPad (2.1 s in the sandbox's Chromium), is stopped by ending the worker, starts again in 1.0 s, and held a 150 MB program. MicroPython starts in 16 ms and ran the test loop 2.5 to 5 times slower. **On these numbers full Python needs no fallback on the iPad**; the choice is still the owner's (decision 3).
+3. ✅ **SQL.** sql.js from handed-over bytes: 15 ms to start. Pyodide's own `sqlite3` is there too.
+4. **Weight** (not done). What the engine's files add to the installer, the server image and the server's memory (every plugin file is held in memory), and how long the first load takes from the real server to the iPad. On the test page's host the 11.6 MB came down in 1.3 s. Fallback: ship the Python engine compressed.
+5. **The submit flow** (not done). Shapes (a), (b) and (c) tried against the real host with a stand-in model (recipe below): which one gives a result the teacher sees and a flow that feels right. The owner picks from what is shown.
 
 ## Decisions to ask the owner (one per question, with pictures where it is about a screen)
 
@@ -154,7 +155,7 @@ A stand-in for an OpenAI-compatible provider makes the teacher pose a question o
 
 ## Risks
 
-- Safari may not start a worker inside a sealed frame, or may run out of memory with full Python on an iPad. Spikes 1 and 2 answer this before anything else is built.
+- ~~Safari may not start a worker inside a sealed frame, or may run out of memory with full Python on an iPad.~~ Answered by spikes 1 and 2: it works on the owner's iPad. An iPhone has less memory and was not tried (plugin questions are parked on a phone anyway).
 - Full Python is a large download each time the browser's cache is empty, and a cold start after every timeout.
 - The teacher model must write tests in the new, smaller format; the instruction text needs a round of tries with a real model, which only the owner's devices have.
 - A copy of upstream's plugin doesn't get upstream's later fixes by a merge; changes there have to be read and carried over by hand.

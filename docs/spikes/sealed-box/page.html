@@ -1,0 +1,368 @@
+<title>Sealed Box Test</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one column. A verdict line, one button, then the checklist as it fills in. */
+:root {
+  --bg: #f2f4f8; --panel: #ffffff; --fg: #1a2130; --muted: #5b6577; --line: #d9deea;
+  --accent: #3550c8; --accent-fg: #ffffff; --ok: #1f7a4d; --bad: #b3372f; --warn: #9a6200;
+  --display: "Space Grotesk", "Inter", system-ui, sans-serif;
+  --body: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #11141a; --panel: #1a1f29; --fg: #e7eaf1; --muted: #9aa4b6; --line: #2c3442;
+  --accent: #93a6ff; --accent-fg: #11141a; --ok: #6bd3a0; --bad: #ff8f85; --warn: #e6b455; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #11141a; --panel: #1a1f29; --fg: #e7eaf1; --muted: #9aa4b6; --line: #2c3442;
+  --accent: #93a6ff; --accent-fg: #11141a; --ok: #6bd3a0; --bad: #ff8f85; --warn: #e6b455; color-scheme: dark }
+body { background: var(--bg); color: var(--fg); font: 16px/1.5 var(--body); }
+.wrap { max-width: 760px; margin: 0 auto; padding-block: 32px 56px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: flex; flex-direction: column; gap: 24px; }
+h1 { font: 600 1.8rem/1.2 var(--display); margin: 0; text-wrap: balance; }
+h2 { font: 600 0.75rem/1 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin: 0; }
+p { margin: 0; max-width: 64ch; }
+.muted { color: var(--muted); }
+header, section { display: flex; flex-direction: column; gap: 12px; }
+button { font: 600 1rem var(--body); border: 0; border-radius: 10px; padding: 14px 22px; background: var(--accent); color: var(--accent-fg); cursor: pointer; align-self: flex-start; }
+button:disabled { opacity: 0.55; cursor: default; }
+button:focus-visible { outline: 3px solid var(--fg); outline-offset: 2px; }
+button.quiet { background: transparent; color: var(--accent); border: 1px solid var(--line); padding: 10px 16px; font-weight: 500; }
+#verdict { font: 600 1.1rem/1.35 var(--display); padding: 14px 16px; border-radius: 10px; background: var(--panel); border: 1px solid var(--line); }
+#verdict.ok { color: var(--ok); } #verdict.bad { color: var(--bad); } #verdict.warn { color: var(--warn); }
+ol { list-style: none; margin: 0; padding: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
+li { display: grid; grid-template-columns: 4.6rem 1fr; gap: 12px; padding: 11px 14px; border-bottom: 1px solid var(--line); align-items: baseline; }
+li:last-child { border-bottom: 0; }
+li > span.s { font: 500 0.72rem/1.4 var(--mono); letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
+li.ok > span.s { color: var(--ok); } li.bad > span.s { color: var(--bad); } li.run > span.s { color: var(--warn); } li.info > span.s { color: var(--accent); }
+li > div { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+li b { font-weight: 600; }
+li small { font: 0.82rem/1.45 var(--mono); color: var(--muted); overflow-wrap: anywhere; white-space: pre-wrap; }
+textarea { width: 100%; box-sizing: border-box; min-height: 9rem; font: 0.8rem/1.45 var(--mono); background: var(--panel); color: var(--fg); border: 1px solid var(--line); border-radius: 10px; padding: 12px; resize: vertical; }
+.row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Sealed box test</h1>
+    <p class="muted">This checks whether this device's browser can run Python, JavaScript and SQL inside a sealed box. It downloads about 15&nbsp;MB and takes under a minute. Nothing leaves this page.</p>
+  </header>
+  <section>
+    <div id="verdict" class="muted">Not run yet.</div>
+    <div class="row">
+      <button id="go" type="button">Run the test</button>
+      <span id="progress" class="muted"></span>
+    </div>
+  </section>
+  <section>
+    <h2>Checks</h2>
+    <ol id="list"></ol>
+  </section>
+  <section>
+    <h2>Results as text</h2>
+    <textarea id="text" readonly aria-label="Results as text"></textarea>
+    <div class="row"><button id="copy" class="quiet" type="button">Copy results</button><span id="copied" class="muted"></span></div>
+  </section>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var FRAME_CSP = "default-src 'none'; script-src 'unsafe-inline' blob: 'wasm-unsafe-eval'; worker-src blob:; connect-src 'none'";
+
+  // ── runs inside the sealed frame ─────────────────────────────────────────
+  function frameMain() {
+    var workerSrc = null, worker = null, pending = {}, seq = 0, cookieSeen = "";
+    function send(id, ok, result) { parent.postMessage({ lhSpike: 1, id: id, ok: ok, result: result }, "*"); }
+    function tryNow(fn) { try { fn(); return "REACHED"; } catch (e) { return "blocked"; } }
+    function tryLater(p) { return p.then(function () { return "REACHED"; }, function () { return "blocked"; }); }
+    function tiny(source, options) {
+      return new Promise(function (res, rej) {
+        var w;
+        try { w = new Worker(URL.createObjectURL(new Blob([source], { type: "text/javascript" })), options); }
+        catch (e) { rej(new Error(e.name + ": " + e.message)); return; }
+        var t = setTimeout(function () { w.terminate(); rej(new Error("no answer in 8 s")); }, 8000);
+        w.onmessage = function (e) { clearTimeout(t); w.terminate(); res(e.data); };
+        w.onerror = function (e) { clearTimeout(t); w.terminate(); rej(new Error(e.message || "worker error")); };
+      });
+    }
+    function engine() {
+      if (worker) return Promise.resolve(worker);
+      return new Promise(function (res, rej) {
+        var w;
+        try { w = new Worker(URL.createObjectURL(new Blob([workerSrc], { type: "text/javascript" }))); }
+        catch (e) { rej(new Error(e.name + ": " + e.message)); return; }
+        var t = setTimeout(function () { w.terminate(); rej(new Error("engine worker did not start in 30 s")); }, 30000);
+        w.onerror = function (e) { clearTimeout(t); rej(new Error(e.message || "engine worker error")); };
+        w.onmessage = function (e) {
+          if (e.data && e.data.ready) {
+            clearTimeout(t); worker = w;
+            w.onmessage = function (m) { var p = pending[m.data.id]; if (!p) return; delete pending[m.data.id]; clearTimeout(p.t); m.data.ok ? p.res(m.data.result) : p.rej(new Error(m.data.error)); };
+            w.onerror = function () {};
+            res(w);
+          }
+        };
+      });
+    }
+    function kill() { if (worker) worker.terminate(); worker = null; for (var k in pending) { clearTimeout(pending[k].t); pending[k].rej(new Error("stopped")); } pending = {}; }
+    function call(op, args, ms) {
+      return engine().then(function (w) {
+        return new Promise(function (res, rej) {
+          var id = ++seq, list = [];
+          for (var k in args) if (args[k] instanceof ArrayBuffer) list.push(args[k]);
+          pending[id] = { res: res, rej: rej, t: setTimeout(function () { delete pending[id]; kill(); rej(new Error("TIMEOUT")); }, ms) };
+          w.postMessage({ id: id, op: op, args: args }, list);
+        });
+      });
+    }
+    var ops = {
+      frameProbe: function (a) {
+        var r = { origin: String(self.origin), cookie: (function () {
+          // A box with no origin may read an empty cookie string without an error. What counts is
+          // whether it can see the page's cookie, or keep one of its own.
+          try { var before = document.cookie; document.cookie = "lhbox=1"; var after = document.cookie; cookieSeen = "read " + JSON.stringify(before) + ", after writing " + JSON.stringify(after); return before || after ? "REACHED" : "blocked"; }
+          catch (e) { cookieSeen = "refused (" + e.name + ")"; return "blocked"; }
+        })(), storage: tryNow(function () { return localStorage.length; }), parentPage: tryNow(function () { return parent.document.title; }) };
+        return Promise.all([
+          tryLater(fetch("https://example.com/", { mode: "no-cors" })),
+          tryLater(fetch(a.home, { mode: "no-cors" })),
+        ]).then(function (x) { r.fetchOther = x[0]; r.fetchHome = x[1]; r.cookieNote = cookieSeen; return r; });
+      },
+      setWorker: function (a) { workerSrc = a.src; return Promise.resolve(workerSrc.length); },
+      classicWorker: function () { return tiny("postMessage('classic ok')"); },
+      moduleWorker: function () { return tiny("postMessage('module ok')", { type: "module" }); },
+      jsRun: function (a) {
+        var src = "var __o=[];console.log=function(){__o.push([].map.call(arguments,String).join(' '))};var __t=performance.now();" +
+          "try{\n" + a.code + "\n" + a.tests + "\npostMessage({ok:true,out:__o.join('\\n'),ms:performance.now()-__t})}catch(e){postMessage({ok:false,error:String(e),out:__o.join('\\n')})}";
+        return tiny(src);
+      },
+      jsSpin: function (a) {
+        return new Promise(function (res) {
+          var w = new Worker(URL.createObjectURL(new Blob(["for(;;){}"], { type: "text/javascript" })));
+          var t0 = performance.now();
+          setTimeout(function () { w.terminate(); res({ stoppedAfterMs: performance.now() - t0 }); }, a.ms);
+        });
+      },
+      kill: function () { kill(); return Promise.resolve(true); },
+    };
+    addEventListener("message", function (e) {
+      if (e.source !== parent || !e.data || !e.data.lhSpike) return;
+      var m = e.data, p = ops[m.op] ? ops[m.op](m.args || {}) : call(m.op, m.args || {}, m.ms || 60000);
+      p.then(function (r) { send(m.id, true, r); }, function (err) { send(m.id, false, String(err && err.message ? err.message : err)); });
+    });
+    parent.postMessage({ lhSpike: 1, hello: true }, "*");
+  }
+
+  // ── the page ─────────────────────────────────────────────────────────────
+  var list = document.getElementById("list"), text = document.getElementById("text"), verdict = document.getElementById("verdict");
+  var progress = document.getElementById("progress"), go = document.getElementById("go");
+  var lines = [], rows = [], frame = null, waiting = {}, n = 0, helloWaiter = null;
+
+  function row(label) {
+    var li = document.createElement("li"); li.className = "run";
+    li.innerHTML = '<span class="s">running</span><div><b></b><small></small></div>';
+    li.querySelector("b").textContent = label; list.appendChild(li);
+    var r = { li: li, label: label, state: "run", detail: "" }; rows.push(r); return r;
+  }
+  function done(r, state, detail) {
+    r.state = state; r.detail = detail || "";
+    r.li.className = state; r.li.querySelector(".s").textContent = state === "ok" ? "pass" : state === "bad" ? "fail" : state === "info" ? "note" : "skipped";
+    r.li.querySelector("small").textContent = r.detail;
+    lines.push((state === "ok" ? "PASS " : state === "bad" ? "FAIL " : state === "info" ? "NOTE " : "SKIP ") + r.label + (r.detail ? " | " + r.detail.replace(/\n/g, " / ") : ""));
+    text.value = header() + lines.join("\n");
+  }
+  function header() { return "Sealed box test\n" + navigator.userAgent + "\nscreen " + screen.width + "x" + screen.height + ", cores " + (navigator.hardwareConcurrency || "?") + (navigator.deviceMemory ? ", memory hint " + navigator.deviceMemory + " GB" : "") + "\n\n"; }
+  function ms(x) { return x < 1000 ? Math.round(x) + " ms" : (x / 1000).toFixed(1) + " s"; }
+  function mb(x) { return (x / 1048576).toFixed(1) + " MB"; }
+
+  addEventListener("message", function (e) {
+    if (!frame || e.source !== frame.contentWindow || !e.data || !e.data.lhSpike) return;
+    if (e.data.hello) { if (helloWaiter) helloWaiter(); return; }
+    var w = waiting[e.data.id]; if (!w) return; delete waiting[e.data.id]; clearTimeout(w.t);
+    e.data.ok ? w.res(e.data.result) : w.rej(new Error(e.data.result));
+  });
+  function box(op, args, opts) {
+    opts = opts || {};
+    return new Promise(function (res, rej) {
+      var id = ++n, transfer = [];
+      for (var k in args) if (args[k] instanceof ArrayBuffer) transfer.push(args[k]);
+      waiting[id] = { res: res, rej: rej, t: setTimeout(function () { delete waiting[id]; rej(new Error("no answer from the box in " + ms((opts.ms || 60000) + 5000))); }, (opts.ms || 60000) + 5000) };
+      frame.contentWindow.postMessage({ lhSpike: 1, id: id, op: op, args: args || {}, ms: opts.ms || 60000 }, "*", transfer);
+    });
+  }
+  function startFrame() {
+    return new Promise(function (res, rej) {
+      frame = document.createElement("iframe");
+      frame.setAttribute("sandbox", "allow-scripts");
+      frame.setAttribute("title", "sealed box");
+      frame.style.cssText = "position:absolute;width:0;height:0;border:0;visibility:hidden";
+      var t = setTimeout(function () { rej(new Error("the frame's script did not answer in 8 s")); }, 8000);
+      helloWaiter = function () { clearTimeout(t); res(); };
+      frame.srcdoc = '<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="' + FRAME_CSP + '"><scr' + 'ipt>(' + frameMain.toString() + ')()</scr' + 'ipt>';
+      document.body.appendChild(frame);
+    });
+  }
+  function download(path, label) {
+    var t0 = performance.now();
+    progress.textContent = "Downloading " + label + "…";
+    return fetch(path).then(function (r) { if (!r.ok) throw new Error(path + ": HTTP " + r.status); return r.arrayBuffer(); })
+      .then(function (b) { return { bytes: b, ms: performance.now() - t0 }; });
+  }
+  function copyOf(b) { return b.slice(0); }
+  // The standard library travels as base64 text and is turned back into bytes here.
+  function downloadText64(path, label) {
+    var t0 = performance.now();
+    progress.textContent = "Downloading " + label + "…";
+    return fetch(path).then(function (r) { if (!r.ok) throw new Error(path + ": HTTP " + r.status); return r.text(); })
+      .then(function (t) { var bin = atob(t.trim()), u = new Uint8Array(bin.length); for (var i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return { bytes: u.buffer, ms: performance.now() - t0 }; });
+  }
+
+  var PY_ANSWER = "def square(x):\n    return x * x\n";
+  var PY_TESTS = "assert square(3) == 9, 'square(3) should be 9'\nassert square(-2) == 4\nprint('2 tests passed')\n";
+  var PY_LOOP = "s = 0\nfor i in range(2000000):\n    s += i\nprint(s)\n";
+
+  async function step(label, fn) {
+    var r = row(label);
+    progress.textContent = label + "…";
+    try { var d = await fn(); done(r, d && d.state ? d.state : "ok", d && d.detail !== undefined ? d.detail : (typeof d === "string" ? d : "")); return r.state === "ok" || r.state === "info"; }
+    catch (e) { done(r, "bad", String(e && e.message ? e.message : e)); return false; }
+  }
+
+  async function run() {
+    go.disabled = true; list.innerHTML = ""; lines = []; rows = []; text.value = header();
+    verdict.className = "muted"; verdict.textContent = "Running…";
+    if (frame) { frame.remove(); frame = null; }
+    var sealed = true, hostOk = true;
+
+    hostOk = await step("This page can run WebAssembly at all", async function () {
+      await WebAssembly.instantiate(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0])); return "";
+    }) && hostOk;
+    hostOk = await step("This page can start a worker", function () {
+      return new Promise(function (res, rej) {
+        var w = new Worker(URL.createObjectURL(new Blob(["postMessage(1)"], { type: "text/javascript" })));
+        var t = setTimeout(function () { rej(new Error("no answer in 8 s")); }, 8000);
+        w.onmessage = function () { clearTimeout(t); w.terminate(); res(""); };
+        w.onerror = function (e) { clearTimeout(t); rej(new Error(e.message || "worker error")); };
+      });
+    }) && hostOk;
+
+    var frameOk = await step("The sealed box starts", async function () { await startFrame(); return ""; });
+    if (frameOk) {
+      sealed = await step("The box can't reach the page, cookies, storage or the network", async function () {
+        var mine = "not available to this page";
+        try { document.cookie = "lhpage=1; SameSite=Lax"; mine = /lhpage=1/.test(document.cookie) ? "set and readable by the page" : "not kept by this browser"; } catch (e) {}
+        var p = await box("frameProbe", { home: location.origin + "/" });
+        var leaks = Object.keys(p).filter(function (k) { return p[k] === "REACHED"; });
+        return { state: leaks.length ? "bad" : "ok", detail: "origin " + p.origin + (leaks.length ? " · REACHED: " + leaks.join(", ") : " · all five blocked") + " · the page's own cookie: " + mine + " · the box's cookie: " + p.cookieNote };
+      }) && sealed;
+    }
+    var classic = frameOk && await step("A worker starts inside the box", async function () { return await box("classicWorker", {}); });
+    if (frameOk) await step("A module worker starts inside the box", async function () {
+      try { return { state: "info", detail: await box("moduleWorker", {}) }; } catch (e) { return { state: "info", detail: "no: " + e.message + " (not needed)" }; }
+    });
+
+    var engineOk = false, bundle = null;
+    if (classic) {
+      await step("JavaScript: an answer and its tests run", async function () {
+        var r = await box("jsRun", { code: "function square(x) { return x * x; }", tests: "if (square(3) !== 9) throw new Error('square(3) should be 9'); if (square(-2) !== 4) throw new Error('square(-2)'); console.log('2 tests passed');" });
+        if (!r.ok) throw new Error(r.error);
+        return r.out + " · " + ms(r.ms);
+      });
+      await step("A program that never ends is stopped", async function () {
+        var r = await box("jsSpin", { ms: 2000 }, { ms: 15000 });
+        var again = await box("classicWorker", {});
+        return "stopped after " + ms(r.stoppedAfterMs) + ", box still answers (" + again + ")";
+      });
+      engineOk = await step("The engines' code loads into the box", async function () {
+        bundle = await download("engines/worker.bundle.js", "the engines (1.2 MB)");
+        var src = new TextDecoder().decode(bundle.bytes);
+        await box("setWorker", { src: src });
+        var p = await box("probe", {}, { ms: 40000 });
+        var leaks = Object.keys(p).filter(function (k) { return p[k] === "REACHED"; });
+        if (p.wasm !== "ok") throw new Error("WebAssembly inside the box: " + p.wasm);
+        return { state: leaks.length ? "bad" : "ok", detail: mb(bundle.bytes.byteLength) + " in " + ms(bundle.ms) + " · WebAssembly ok · " + (leaks.length ? "REACHED: " + leaks.join(", ") : "network and storage blocked") };
+      });
+    }
+
+    var sqlOk = false, mpyOk = false, pyOk = false;
+    if (engineOk) {
+      sqlOk = await step("SQL: tables, a query, a result", async function () {
+        var f = await download("engines/sql-wasm.wasm", "SQL (0.7 MB)");
+        var r = await box("sql", { wasm: f.bytes, setup: "CREATE TABLE pets(name TEXT, legs INT); INSERT INTO pets VALUES ('cat',4),('bird',2),('dog',4);", query: "SELECT name FROM pets WHERE legs = 4 ORDER BY name" });
+        var got = JSON.stringify(r.rows);
+        if (got !== '[["cat"],["dog"]]') throw new Error("wrong rows: " + got);
+        return "download " + ms(f.ms) + " · start " + ms(r.bootMs) + " · query " + ms(r.runMs) + " · rows " + got;
+      });
+
+      mpyOk = await step("Small Python (MicroPython): starts and runs an answer", async function () {
+        var f = await download("engines/micropython.wasm", "small Python (0.4 MB)");
+        var b = await box("mpyBoot", { wasm: f.bytes });
+        var r = await box("mpyRun", { code: PY_ANSWER + PY_TESTS });
+        if (r.error) throw new Error(r.error);
+        var l = await box("mpyRun", { code: PY_LOOP });
+        return "download " + ms(f.ms) + " · start " + ms(b.bootMs) + " · " + r.out + " · 2 million loop steps " + ms(l.runMs);
+      });
+      await box("kill", {});
+
+      var wasm = null, stdlib = null, lock = null;
+      pyOk = await step("Full Python (Pyodide): starts and runs an answer", async function () {
+        var t0 = performance.now();
+        wasm = await download("engines/pyodide.asm.wasm", "full Python, part 1 of 2 (9.2 MB)");
+        stdlib = await downloadText64("engines/python_stdlib.b64.txt", "full Python, part 2 of 2 (3.4 MB)");
+        lock = await download("engines/pyodide-lock.json", "full Python's index");
+        var dl = performance.now() - t0;
+        progress.textContent = "Starting full Python…";
+        var b = await box("pyBoot", { wasm: copyOf(wasm.bytes), stdlib: copyOf(stdlib.bytes), lock: copyOf(lock.bytes) }, { ms: 120000 });
+        var r = await box("pyRun", { code: PY_ANSWER + PY_TESTS });
+        if (r.error) throw new Error(r.error);
+        var l = await box("pyRun", { code: PY_LOOP });
+        return "download " + mb(wasm.bytes.byteLength + stdlib.bytes.byteLength) + " in " + ms(dl) + " · start " + ms(b.bootMs) + " · " + r.out + " · 2 million loop steps " + ms(l.runMs) + " · Python " + b.version;
+      });
+      if (pyOk) {
+        await step("Full Python: its standard library is there", async function () {
+          var r = await box("pyRun", { code: "import json, math, re, collections, itertools, random, datetime, statistics, functools\nprint(json.dumps({'pi': round(math.pi, 3)}))\ntry:\n    import sqlite3\n    print('sqlite3 yes')\nexcept Exception as e:\n    print('sqlite3 no')\n" });
+          if (r.error) throw new Error(r.error);
+          return r.out.replace(/\n/g, " · ") + " · " + ms(r.runMs);
+        });
+        await step("Full Python: a program that never ends is stopped, and Python starts again", async function () {
+          var t0 = performance.now(), stopped = false;
+          try { await box("pyRun", { code: "while True:\n    pass\n" }, { ms: 3000 }); } catch (e) { stopped = /TIMEOUT/.test(e.message); if (!stopped) throw e; }
+          if (!stopped) throw new Error("the loop ended by itself?");
+          var cut = performance.now() - t0;
+          var b = await box("pyBoot", { wasm: copyOf(wasm.bytes), stdlib: copyOf(stdlib.bytes), lock: copyOf(lock.bytes) }, { ms: 120000 });
+          var r = await box("pyRun", { code: "print(21 * 2)" });
+          if (r.error || r.out !== "42") throw new Error("after restart: " + (r.error || r.out));
+          return "stopped after " + ms(cut) + " · started again in " + ms(b.bootMs);
+        });
+        await step("Full Python: room for a 150 MB program", async function () {
+          var r = await box("pyRun", { code: "b = bytearray(150 * 1024 * 1024)\nb[-1] = 7\nprint(len(b) // (1024 * 1024), 'MB held')\ndel b\n" }, { ms: 30000 });
+          if (r.error) return { state: "info", detail: "no: " + r.error.split("\n").pop() };
+          return r.out + " · " + ms(r.runMs);
+        });
+      }
+    }
+
+    progress.textContent = "";
+    var v, cls;
+    if (!hostOk) { v = "This test page itself is held back here, so the result says nothing about your device. Send the results anyway."; cls = "warn"; }
+    else if (!frameOk || !classic) { v = "This browser does not run the sealed box."; cls = "bad"; }
+    else if (!sealed) { v = "The box runs, but it is not sealed. Send the results."; cls = "bad"; }
+    else if (!engineOk) { v = "The sealed box runs JavaScript here, but the engines for Python and SQL did not load."; cls = "bad"; }
+    else if (pyOk && sqlOk) { v = "The sealed box works on this device: JavaScript, SQL and full Python."; cls = "ok"; }
+    else if (mpyOk && sqlOk) { v = "The sealed box works here with JavaScript, SQL and the small Python. Full Python did not run."; cls = "warn"; }
+    else { v = "The sealed box runs here, but not every language did. Send the results."; cls = "warn"; }
+    verdict.className = cls; verdict.textContent = v;
+    lines.push("", "VERDICT: " + v); text.value = header() + lines.join("\n");
+    go.disabled = false; go.textContent = "Run it again";
+  }
+
+  go.addEventListener("click", function () { run().catch(function (e) { verdict.className = "bad"; verdict.textContent = "The test itself broke: " + e.message; go.disabled = false; }); });
+  document.getElementById("copy").addEventListener("click", function () {
+    var said = document.getElementById("copied");
+    function fallback() { text.focus(); text.select(); said.textContent = "Selected. Copy it with the menu."; }
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text.value).then(function () { said.textContent = "Copied."; }, fallback); else fallback();
+  });
+  text.value = header();
+})();
+</script>
