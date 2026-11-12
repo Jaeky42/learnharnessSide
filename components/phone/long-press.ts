@@ -133,9 +133,11 @@ export function installLongPress(doc: Document = document): () => void {
 	const onTouchEnd = (e: TouchEvent) => {
 		if (held && e.cancelable) e.preventDefault();
 	};
-	// Fallback for browsers that send the tap anyway.
+	// Fallback for browsers that send the tap anyway. A click the page sends
+	// itself isn't that tap (Flashcards' hold presses the row's ⚙ button,
+	// flashcards-touch.ts): it goes through.
 	const onClick = (e: MouseEvent) => {
-		if (!held) return;
+		if (!held || e.isTrusted === false) return;
 		held = false;
 		e.preventDefault();
 		e.stopPropagation();

@@ -8,4 +8,440 @@
  * sits inside @media (max-width: 639.98px) AND under html:not(.lh-electron),
  * so nothing here can apply on a computer, a tablet or in the desktop app.
  * Unlayered, like phone.css. Loaded by app/layout.tsx.
+ *
+ * These rules restyle upstream's markup: the plugin's own class names
+ * (plugins/flashcards/src) and the host components that render for it
+ * (the tree, the surface, the dialog, the menu, the knowledge picker).
+ * tests/phone-flashcards.test.ts fails when one of the names hung on here
+ * disappears upstream. The plugin's stylesheet is injected into the page;
+ * every rule here is more specific than the plugin's (html:not(...) plus the
+ * plugin's own selector), and inline styles are beaten with !important only.
+ *
+ * Behaviour that CSS can't give (press and hold, the rename ✕, a focused box
+ * brought above the keyboard) is components/phone/flashcards-touch.ts.
  */
+
+/* ── The review and practice surface (decisions 4a–4d) ─────────────────
+   While a card shows, the stage is the scroller: the card sits in the
+   middle of the space above the buttons (two flexible spacers), and the
+   footer with Reveal answer, Next or the four ratings is pinned to the
+   bottom (sticky), clear of the home bar. A longer card scrolls in that
+   space while the buttons stay in view. The end states ("No cards due in
+   this selection.", "Practice complete.", the loading line, an error with
+   Retry) have no card and keep upstream's layout. */
+@media (max-width: 639.98px) {
+	html:not(.lh-electron) .fc-root.fc-review-surface:has(> .fc-review-stage > .fc-review-card:not([hidden])) {
+		overflow: hidden;
+		padding: 44px 0 0;
+	}
+	html:not(.lh-electron) .fc-root .fc-review-stage:has(> .fc-review-card:not([hidden])) {
+		display: flex;
+		flex-direction: column;
+		flex: 1 1 0;
+		min-height: 0;
+		margin-block: 0;
+		max-width: none;
+		padding-inline: 12px;
+		overflow-x: hidden;
+		overflow-y: auto;
+		overscroll-behavior-y: contain;
+	}
+	html:not(.lh-electron) .fc-root .fc-review-stage:has(> .fc-review-card:not([hidden]))::before,
+	html:not(.lh-electron) .fc-root .fc-review-stage:has(> .fc-review-card:not([hidden]))::after {
+		content: "";
+		flex: 1 0 0;
+	}
+	html:not(.lh-electron) .fc-root .fc-review-stage:has(> .fc-review-card:not([hidden]))::after {
+		order: 1;
+	}
+	html:not(.lh-electron) .fc-root .fc-review-stage:has(> .fc-review-card:not([hidden])) > .fc-review-card {
+		flex: none;
+	}
+	html:not(.lh-electron) .fc-root .fc-review-stage:has(> .fc-review-card:not([hidden])) > .fc-review-bottom {
+		flex: none;
+		margin-bottom: 8px;
+	}
+	html:not(.lh-electron) .fc-root .fc-review-stage:has(> .fc-review-card:not([hidden])) > .fc-review-footer {
+		order: 2;
+		flex: none;
+		position: sticky;
+		bottom: 0;
+		z-index: 1;
+		align-items: stretch;
+		gap: 8px;
+		margin: 12px -12px 0;
+		padding: 12px 12px max(20px, calc(env(safe-area-inset-bottom, 0px) + 8px));
+		border-top: 1px solid var(--border);
+		background: var(--background);
+	}
+	/* Practice: the note under the stage takes the home bar's clearance. */
+	html:not(.lh-electron) .fc-root.fc-practice-surface:has(> .fc-review-stage > .fc-review-card:not([hidden])) > .fc-review-stage > .fc-review-footer {
+		padding-bottom: 12px;
+	}
+	html:not(.lh-electron) .fc-root.fc-practice-surface:has(> .fc-review-stage > .fc-review-card:not([hidden])) > .fc-practice-note {
+		margin: 0;
+		padding: 8px 12px max(16px, calc(env(safe-area-inset-bottom, 0px) + 8px));
+		background: var(--background);
+	}
+
+	/* The buttons: full width; the ratings stacked, Again to Easy. */
+	html:not(.lh-electron) .fc-root .fc-review-footer .fc-actions {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr);
+		gap: 8px;
+		width: 100%;
+	}
+	html:not(.lh-electron) .fc-root .fc-review-footer .fc-rating {
+		align-items: stretch;
+		width: 100%;
+	}
+	html:not(.lh-electron) .fc-root .fc-review-footer :is(.fc-button, .fc-button > [data-plugin-ui-widget]) {
+		display: flex;
+		width: 100%;
+	}
+	html:not(.lh-electron) .fc-root .fc-review-footer [data-slot="button"] {
+		width: 100%;
+		min-height: 44px;
+	}
+	html:not(.lh-electron) .fc-root .fc-review-footer .fc-rating [data-slot="button"]:not([data-variant="custom"]) {
+		min-height: 48px;
+	}
+
+	/* Keyboard hints hidden (decision 4c); the keys still work. */
+	html:not(.lh-electron) .fc-root .fc-shortcut {
+		display: none;
+	}
+
+	/* A formula wider than the card scrolls sideways inside the card: the
+	   paragraph or list item that holds it (KaTeX renders "$$…$$" from the
+	   cards inline, as one unbreakable span), or a KaTeX display block.
+	   Text that fits shows no scroller. Also the card preview box. */
+	html:not(.lh-electron) .fc-root .fc-review-card :is(.fc-markdown, .fc-answer) {
+		min-width: 0;
+		max-width: 100%;
+	}
+	html:not(.lh-electron) .fc-root .fc-review-card :is(p, li):has(> .katex),
+	html:not(.lh-electron) .fc-root .fc-review-card .katex-display {
+		max-width: 100%;
+		overflow-x: auto;
+		overflow-y: hidden;
+	}
+
+	/* The surface's ✕: the same place, finger-sized (decision 4d). Its
+	   centre stays where it was (8 px in, 28 px wide). */
+	html:not(.lh-electron) [data-plugin-session-surface-frame]:has(.fc-review-surface) > button[aria-label="Close"] {
+		top: 0;
+		right: 0;
+		width: 44px;
+		height: 44px;
+	}
+	html:not(.lh-electron) [data-plugin-session-surface-frame]:has(.fc-review-surface) > button[aria-label="Close"] > svg {
+		width: 18px;
+		height: 18px;
+	}
+}
+
+/* ── The deck list (decision 5a): fits the screen, finger-sized rows,
+   without the three number columns. Names truncate. ─────────────────── */
+@media (max-width: 639.98px) {
+	html:not(.lh-electron) .fc-root .fc-tree-viewport {
+		overflow-x: hidden;
+	}
+	html:not(.lh-electron) .fc-root .fc-tree-inner {
+		min-width: 0;
+	}
+	html:not(.lh-electron) .fc-root [data-plugin-tree] :is([data-plugin-tree-column], [data-plugin-tree-cell]) {
+		display: none;
+	}
+	html:not(.lh-electron) .fc-root [data-plugin-tree] > div.border-b {
+		padding-left: 8px;
+		padding-right: 4px;
+	}
+	html:not(.lh-electron) .fc-root [data-plugin-tree-row] {
+		min-height: 48px;
+		padding: 4px 4px 4px 8px;
+	}
+	/* The empty columns beside rows and the header: as wide as the controls. */
+	html:not(.lh-electron) .fc-root [data-plugin-tree] span[aria-hidden="true"]:is(.h-5, .size-3\.5) {
+		width: 40px;
+		height: 40px;
+	}
+	html:not(.lh-electron) .fc-root [data-plugin-tree] > div.border-b > span[aria-hidden="true"]:is(.h-5, .size-3\.5) {
+		height: auto;
+	}
+	html:not(.lh-electron) .fc-root [data-plugin-tree-control="disclosure"] {
+		width: 40px;
+		height: 40px;
+	}
+	html:not(.lh-electron) .fc-root [data-plugin-tree-control="disclosure"] > svg {
+		width: 18px;
+		height: 18px;
+	}
+	/* The tree's guide lines hang from the checkbox's centre (the controls
+	   grew; the indentation per level is upstream's 36 px). */
+	html:not(.lh-electron) .fc-root [data-plugin-tree-row] + div[aria-hidden="true"] {
+		top: 40px !important;
+	}
+	html:not(.lh-electron) .fc-root [data-plugin-tree-row][data-plugin-tree-depth="0"] + div[aria-hidden="true"] {
+		left: 28px !important;
+	}
+	html:not(.lh-electron) .fc-root [data-plugin-tree-row][data-plugin-tree-depth="1"] + div[aria-hidden="true"] {
+		left: 64px !important;
+	}
+	html:not(.lh-electron) .fc-root [data-plugin-tree-row][data-plugin-tree-depth="2"] + div[aria-hidden="true"] {
+		left: 100px !important;
+	}
+	/* Row controls: + and ⚙ 40 × 40; Review keeps its size with a 40 px
+	   touch area around it. */
+	html:not(.lh-electron) .fc-root .fc-tree-more [data-slot="button"] {
+		width: 40px;
+		height: 40px;
+	}
+	html:not(.lh-electron) .fc-root .fc-tree-row-content > .fc-button [data-slot="button"] {
+		position: relative;
+		height: 28px;
+		min-height: 0;
+	}
+	/* The name: the deck's opens its rename box, the cue's its preview. */
+	html:not(.lh-electron) .fc-root button.fc-tree-label {
+		height: 40px;
+		line-height: 40px;
+	}
+	html:not(.lh-electron) .fc-root .fc-tree-row-content > .fc-button [data-slot="button"]::after {
+		content: "";
+		position: absolute;
+		inset: -6px -2px;
+	}
+	/* Press and hold opens the row's menu (flashcards-touch.ts): no text
+	   selection or iOS callout under the finger. */
+	html:not(.lh-electron) .fc-root [data-plugin-tree-row][data-phone-press] {
+		-webkit-user-select: none;
+		user-select: none;
+		-webkit-touch-callout: none;
+	}
+
+	/* ── The rename ✕ (decision 5c, flashcards-touch.ts adds it) ────── */
+	html:not(.lh-electron) .fc-root .fc-tree-name:has(> .fc-tree-rename) {
+		position: relative;
+		/* The box takes the row's free width, so the ✕ leaves room to type. */
+		flex: 1 1 0;
+	}
+	html:not(.lh-electron) .fc-root .fc-tree-rename {
+		height: 40px;
+		padding-right: 40px;
+	}
+	html:not(.lh-electron) .fc-root [data-phone="flashcards-rename-cancel"] {
+		position: absolute;
+		top: 0;
+		right: 0;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 40px;
+		height: 40px;
+		padding: 0;
+		border: 0;
+		background: transparent;
+		color: var(--muted-foreground);
+		-webkit-tap-highlight-color: transparent;
+	}
+	html:not(.lh-electron) .fc-root [data-phone="flashcards-rename-cancel"] > svg {
+		width: 16px;
+		height: 16px;
+	}
+}
+
+/* ── Checkboxes with a finger-sized touch area: the deck list's and the
+   knowledge picker's. A native checkbox draws at its own box size, so this
+   draws a 20 px box inside a 40 × 40 control (theme tokens). ────────── */
+@media (max-width: 639.98px) {
+	html:not(.lh-electron) :is(.fc-root [data-plugin-tree-control="selection"], [data-plugin-knowledge-picker-pane] [data-chain-nav-row] input[type="checkbox"]) {
+		-webkit-appearance: none;
+		appearance: none;
+		position: relative;
+		flex: none;
+		width: 40px;
+		height: 40px;
+		margin: 0;
+		border: 0;
+		background: transparent;
+		cursor: pointer;
+		-webkit-tap-highlight-color: transparent;
+	}
+	html:not(.lh-electron) :is(.fc-root [data-plugin-tree-control="selection"], [data-plugin-knowledge-picker-pane] [data-chain-nav-row] input[type="checkbox"])::before {
+		content: "";
+		position: absolute;
+		inset: 10px;
+		box-sizing: border-box;
+		border: 1.5px solid var(--muted-foreground);
+		border-radius: 4px;
+		background: var(--background);
+	}
+	html:not(.lh-electron) :is(.fc-root [data-plugin-tree-control="selection"], [data-plugin-knowledge-picker-pane] [data-chain-nav-row] input[type="checkbox"]):is(:checked, :indeterminate)::before {
+		border-color: var(--primary);
+		background: var(--primary);
+	}
+	html:not(.lh-electron) :is(.fc-root [data-plugin-tree-control="selection"], [data-plugin-knowledge-picker-pane] [data-chain-nav-row] input[type="checkbox"]):checked::after {
+		content: "";
+		position: absolute;
+		left: 16.5px;
+		top: 13px;
+		width: 7px;
+		height: 12px;
+		box-sizing: border-box;
+		border: solid var(--primary-foreground);
+		border-width: 0 2px 2px 0;
+		transform: rotate(45deg);
+	}
+	html:not(.lh-electron) :is(.fc-root [data-plugin-tree-control="selection"], [data-plugin-knowledge-picker-pane] [data-chain-nav-row] input[type="checkbox"]):indeterminate::after {
+		content: "";
+		position: absolute;
+		left: 14px;
+		right: 14px;
+		top: 19px;
+		height: 2px;
+		background: var(--primary-foreground);
+	}
+	html:not(.lh-electron) :is(.fc-root [data-plugin-tree-control="selection"], [data-plugin-knowledge-picker-pane] [data-chain-nav-row] input[type="checkbox"]):disabled {
+		opacity: 0.4;
+		cursor: default;
+	}
+	html:not(.lh-electron) :is(.fc-root [data-plugin-tree-control="selection"], [data-plugin-knowledge-picker-pane] [data-chain-nav-row] input[type="checkbox"]):focus-visible {
+		outline: none;
+	}
+	html:not(.lh-electron) :is(.fc-root [data-plugin-tree-control="selection"], [data-plugin-knowledge-picker-pane] [data-chain-nav-row] input[type="checkbox"]):focus-visible::before {
+		outline: 2px solid var(--ring);
+		outline-offset: 2px;
+	}
+}
+
+/* ── Toolbars, boxes, menus: 40 px touch areas ───────────────────────── */
+@media (max-width: 639.98px) {
+	/* Every button of the library page (toolbar, search row, selection row,
+	   the generation panel) and of the plugin's boxes. The tree's own row
+	   buttons are sized above. */
+	html:not(.lh-electron) .fc-root:is(.fc-library, .fc-dialog) [data-slot="button"] {
+		min-height: 40px;
+	}
+	html:not(.lh-electron) .fc-root:is(.fc-library, .fc-dialog) [data-slot="button"]:is([data-size="icon-sm"], [data-size="icon"], [data-size="icon-xs"]) {
+		width: 40px;
+		height: 40px;
+	}
+	html:not(.lh-electron) .fc-root .fc-picker button {
+		min-height: 40px;
+	}
+	/* A box's checkbox rows (Deck memberships, Delete empty decks too): the
+	   whole label is the touch area. */
+	html:not(.lh-electron) .fc-dialog .fc-check {
+		min-height: 40px;
+	}
+	html:not(.lh-electron) .fc-dialog .fc-check input[type="checkbox"] {
+		width: 18px;
+		height: 18px;
+	}
+	/* The boxes' own ✕ (the host's dialog frame, only around this plugin's
+	   boxes). Its centre stays where it was. */
+	html:not(.lh-electron) [data-plugin-ui-dialog]:has(> [data-plugin-ui-dialog-scroll] .fc-dialog) > button[aria-label="Close dialog"] {
+		top: 2px;
+		right: 2px;
+		width: 40px;
+		height: 40px;
+	}
+	/* The rows' ⚙ menus (Deck, Proposition, Cue actions): 40 px items. */
+	html:not(.lh-electron) [data-testid="plugin-menu"]:has(> [role="menu"]:is([aria-label="Deck actions"], [aria-label="Proposition actions"], [aria-label="Cue actions"])) [role="menuitem"] {
+		min-height: 40px;
+		align-items: center;
+	}
+	/* The ⚙ beside the page title (opens Settings → Flashcards). */
+	html:not(.lh-electron) [data-phone="topbar"]:has(+ * .fc-root.fc-library) > button[aria-label="Plugin settings"] {
+		width: 40px;
+		height: 40px;
+	}
+	/* Settings → Flashcards: the model and thinking pickers keep their pill
+	   with a 40 px touch area around it. */
+	html:not(.lh-electron) .fc-root.fc-settings :is([data-plugin-model-picker], [data-plugin-thinking-picker]) > button {
+		position: relative;
+	}
+	html:not(.lh-electron) .fc-root.fc-settings :is([data-plugin-model-picker], [data-plugin-thinking-picker]) > button::after {
+		content: "";
+		position: absolute;
+		inset: -8px -4px;
+	}
+}
+
+/* ── The knowledge picker ("Pick nodes", the host's shared screen) ─────
+   Finger-sized rows and controls, and its header text uncut. It still
+   covers the whole screen; its top bar is the app's (phone.css clears
+   --lh-safe-top there). */
+@media (max-width: 639.98px) {
+	html:not(.lh-electron) [data-plugin-knowledge-picker-pane] [data-phone="topbar"] > span:first-child {
+		flex: none;
+	}
+	html:not(.lh-electron) [data-plugin-knowledge-picker-pane] [data-phone="topbar"] > div.relative {
+		flex: 1 1 0;
+		min-width: 0;
+	}
+	html:not(.lh-electron) [data-plugin-knowledge-picker-pane] [data-testid="chain-table-search"] {
+		width: 100%;
+		height: 40px;
+	}
+	html:not(.lh-electron) [data-plugin-knowledge-picker-pane] :is([data-testid="add-source-folder"], [data-testid="chain-table-close"]) {
+		display: flex;
+		flex: none;
+		align-items: center;
+		justify-content: center;
+		width: 40px;
+		height: 40px;
+	}
+	html:not(.lh-electron) [data-plugin-knowledge-picker-pane] [data-testid^="sort-"] {
+		min-height: 40px;
+	}
+	/* Rows: 48 px; the sources' rows (px-3), the chains' (pl-12) and the
+	   nodes' (pl-21) keep their staircase with room for the larger boxes.
+	   Folder rows keep upstream's own indent. */
+	html:not(.lh-electron) [data-plugin-knowledge-picker-pane] [data-chain-nav-row] {
+		min-height: 48px;
+		padding-right: 8px;
+	}
+	html:not(.lh-electron) [data-plugin-knowledge-picker-pane] [data-chain-nav-row].px-3 {
+		padding-left: 8px;
+	}
+	html:not(.lh-electron) [data-plugin-knowledge-picker-pane] [data-chain-nav-row].pl-12 {
+		padding-left: 44px;
+	}
+	html:not(.lh-electron) [data-plugin-knowledge-picker-pane] [data-chain-nav-row].pl-21 {
+		padding-left: 80px;
+	}
+	html:not(.lh-electron) [data-plugin-knowledge-picker-pane] [data-chain-nav-row] button[title="Rename"] {
+		min-height: 40px;
+	}
+	/* A node's statement row carries two empty cells that only line it up
+	   with the number columns: without them the statement has the row's
+	   width instead of a third of it. */
+	html:not(.lh-electron) [data-plugin-knowledge-picker-pane] [data-testid^="prop-row-"] > span:is(.w-14, .w-20):empty {
+		display: none;
+	}
+	html:not(.lh-electron) [data-plugin-knowledge-picker-pane] [data-chain-nav-row] :is([data-testid^="cluster-toggle-"], [data-testid^="chain-toggle-"], [data-testid^="folder-toggle-"]) {
+		width: 40px;
+		height: 40px;
+	}
+	html:not(.lh-electron) [data-plugin-knowledge-picker-pane] [data-chain-nav-row] [data-source-icon] {
+		width: 28px;
+		height: 40px;
+	}
+	html:not(.lh-electron) [data-plugin-knowledge-picker-pane] [data-chain-nav-row] :is([data-testid^="cluster-toggle-"], [data-testid^="chain-toggle-"], [data-testid^="folder-toggle-"], [data-source-icon]) > svg {
+		width: 18px;
+		height: 18px;
+	}
+	html:not(.lh-electron) [data-plugin-knowledge-picker-pane] [data-testid^="cluster-thread-"] {
+		top: 40px !important;
+		left: 28px !important;
+	}
+	html:not(.lh-electron) [data-plugin-knowledge-picker-pane] [data-testid^="chain-thread-"] {
+		top: 40px !important;
+		left: 64px !important;
+	}
+	html:not(.lh-electron) [data-plugin-knowledge-picker-pane] [data-testid="chain-selection-bar"] button {
+		min-height: 40px;
+	}
+}
