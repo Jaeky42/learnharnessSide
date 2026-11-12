@@ -1028,8 +1028,11 @@ The smaller rules approved with them (what travels, schedules never travel, orde
 - **A side with no Flashcards folder** makes no backup folder and counts as backed up.
 - **Made while fixing the review's findings** (for the owner's review; the owner was told in chat):
   - **the same-question rule** reads as "only a pair that meets from two devices": two cards with the same question on one fact, one from each device, lose the later one; two cards one device made are both kept ("The items" below);
-  - **a fact taken out of every deck stays in the deck it was put in last** (a fact is never left in no deck);
+  - **a fact taken out of every deck stays in the deck it was put in last** that isn't deleted; **if every one of its decks is deleted, the last one stays as a deck** (a fact is never left in no deck, and is never dropped);
   - **a generation that shows no progress for 15 minutes holds the exchange no longer.**
+- **Made while fixing the second pass's findings** (for the owner's review):
+  - **the watcher's timing:** this side's own changes are noted 20 s after the last one, at most 50 s after the first not yet noted ("Noting this side's own changes" below);
+  - **a server that lost its memory takes the first PC's values:** it starts its table afresh, each PC is told `send_all`, and the first desktop to send counts as the first.
 
 #### What travels, and what stays per device
 
@@ -1051,11 +1054,14 @@ The smaller rules approved with them (what travels, schedules never travel, orde
   - `f|<file>` an uploaded file's record `{name, fingerprint, deckId}`.
 - **Nothing is deleted by a missing item.** Deletions are items of their own (`x`, `k`, `e`), so latest-change-wins only ever chooses between two values. A per-device memory tells "deleted here" from "never had it": the plugin's file keeps no record of what it deleted ("The memory" under "The wiring").
 - **A card's deletion is final:** `k` is never taken back, whatever was edited later.
-- **A fact deleted and made again starts fresh:** `e` says from when its reviews count. An `e` is also made for a fact whose file holds reviews from before it was made (deleted and made again before this device's first sync). A fact is alive while it has a card. Its moment of making (`created`) travels, so a fact nobody has reviewed yet has the same schedule everywhere.
+- **A fact deleted and made again starts fresh:** `e` says from when its reviews count. A fact is alive while it has a card. Its moment of making (`created`) travels, so a fact nobody has reviewed yet has the same schedule everywhere.
+  - **An inferred `e`:** only for a fact this device's sync has never seen (no memory, or no `p|<fact>` in it), and only from what the file itself counted: just before its first counted review (`firstReviewedAt − 1`), or the latest review's time when it counted none. Never from `created`: a fact made on both devices keeps one `created`, and the other device's earlier reviews must still count.
 - **Order items exist only after a real reorder.** Members an order doesn't know follow it by stamp, then id, so the later reorder wins and anything it doesn't know comes after.
 - **Twin decks** (S4): two decks from the same session or source (`sourceId`), or made from the same uploaded file (fingerprint), are joined. The earliest made stays; name and limit come from the most recently changed.
-- **Membership combines** (one item per fact and deck): a fact put into a deck on each side is in both decks afterwards; taking it out of a deck (`{in: false}`) travels like any change; a fact taken out of every deck it was in stays in the one it was put in last.
-- **The same question, word for word after trimming, twice on one fact:** only a pair whose cards came from different devices loses one, the later (`duplicateDeletions`). It is decided by the device that takes in the second card, from what it knows the sender had. Two cards one device made are both kept, there and everywhere.
+- **Membership combines** (one item per fact and deck): a fact put into a deck on each side is in both decks afterwards; taking it out of a deck (`{in: false}`) travels like any change. A fact taken out of every deck it was in stays in the one it was put in last that isn't deleted; if every one of its decks is deleted, the one it was put in last, which then stays as a deck.
+- **The same question, word for word after trimming, twice on one fact:** only a pair whose cards came from different devices loses one, the later (`duplicateDeletions`). It is decided by the side that takes in the second card, from what it knows the sender had. Two cards one device made are both kept, there and everywhere.
+  - On the server, "the sender had it" also covers keys the PC sends in this exchange, its earlier pages included, so a card the server took from a PC whose answer was lost still counts as that PC's.
+  - The PC runs the same check, but every card it holds was agreed with the server or sent in that exchange, so in practice only the server decides a pair.
 - **A review item leaves out** `before`, `after` and `introduced` (worked out again), `requestId` and `ticketId` (local), and the model fields of its settings copy.
 
 #### The replay (`src/core/sync/flashcards-replay.ts`)
@@ -1071,6 +1077,7 @@ The smaller rules approved with them (what travels, schedules never travel, orde
   - Refusals: 409 `send_all` (send everything once), `busy`, `flashcards_failed` (the server couldn't take it this time; tried again next round); 400 when the changes didn't arrive whole.
 - **A second instance of the per-item exchange:** `createMapsAuthority` / `createMapsDesktop` (`src/server/sync/maps-sync.ts`) take optional `rules` and options (`busy`, `makeBackup`, the time zone). Both sides now work on a copy of their state (`structuredClone`), agreed only once it is in the files. The settings exchange keeps its rules (`MAP_RULES`).
 - **Paged both ways:** at most 5,000 items or about 4 MB a page (`PAGE_ITEMS`, `PAGE_BYTES`). The desktop takes what arrived once, after the last page.
+- **No time before 1970:** a desktop clamps a change's time to 0, and the server takes a negative time as 0 instead of refusing the page, in both exchanges (Flashcards' and the settings'); a time that isn't a number (NaN) is still refused. Before, a PC whose clock was ahead of the server's, with a library put back (items timed 0, minus its clock offset), was refused every round (400) and never synced Flashcards again.
 - **Cached:** the parsed library by its file's stamp (inode, size and times), and the items with their fingerprints by the file's stamp plus the memory's. **An idle round reads no Flashcards file and writes nothing.**
 - **Apply is one synchronous step**, with nothing awaited between reading and writing (`src/server/sync/flashcards-files.ts`): read the file again, combine (`applyFlashcardsChanges`, with the plugin's own scheduler), write the file whole (a temporary file renamed over it, as the plugin writes), save the memory (after the file: a memory ahead of its file would read as deletions), then tell open pages: `plugin-message {pluginId: "flashcards", topic: "changed", data: {by: "sync"}}`. The loop doesn't take a notice "by sync" for a change made here.
 - **The format lock:** a file whose `version` isn't the one this build reads (`FLASHCARDS_FORMAT`, 1), or that isn't the plugin's shape, is neither sent nor taken, and never written over. No message on screen.
@@ -1079,13 +1086,17 @@ The smaller rules approved with them (what travels, schedules never travel, orde
   - on the server: the exchange answers 409 `locked`, and the PC then sends only a cheap `{probe: true}` each round until the server can read again. The server's backup isn't made again;
   - no cursor moves past a kind that can't be read, so nothing the other side has is passed over (the settings exchange follows the same rule).
 - **The memory,** each side's own: `sync/flashcards-memory.json` (`{version: 1, items}`) and `sync/flashcards-memory-reviews.json` (`{version: 1, reviews, revision}`: the review ids, and the library's `revision` it was made from). The library is always written before the memory.
-  - **Records lost** means no memory while the library can be read, or a library that doesn't follow its memory (`followsMemory`: a lower `revision`, or a review the memory saw is gone; the plugin only ever raises the revision and never removes a review). Then nothing missing counts as deleted, everything is combined again, and the log says so once.
-  - The server then starts its table afresh (each PC is told `send_all`); a PC sends everything again. The items of a library that was put back are timed 0, so the other side's values stand where both have an item.
+  - **Records lost** means no memory while the library can be read (also a memory cut between its two files: the reviews file missing), or a library that doesn't follow its memory (`followsMemory`: a lower `revision`, or a review the memory saw is gone; the plugin only ever raises the revision and never removes a review). Then nothing missing counts as deleted, everything is combined again, and for a library that doesn't follow its memory the log says so once.
+  - **Every item is then timed 0**, lost memory and library put back alike, so the other side's values stand where both have an item and only what is here alone is added. A lost memory used to time items with the file's modified time.
+  - On the server a lost memory still starts its table afresh (each PC is told `send_all`, and the first desktop's values win); a PC sends everything again.
 - **Restoring a backup** (the first-sync one or the Flashcards one): nothing is deleted on the other side. Decks deleted after the backup can come back as decks; their cards stay deleted.
 - **The round** (`src/server/sync/round.ts`): Flashcards is its last part, after the settings, in its own try/catch, so a failure there leaves the rest syncing. While the server can't be reached, its changes are still noted with their times (`detect()`), as for the settings. The loop's 2-second trigger fires on Flashcards' own `changed` and `batch-changed` notices (`flashcardsChanged` in `loop.ts`).
 - **State files** under `<data>/sync/`, each side's own and never synced: on the server `flashcards.json` and `time-zone.json`; on a PC `flashcards-desktop.json`; on both `flashcards-memory.json` and `flashcards-memory-reviews.json` ("The memory" above).
 - **The backup:** `backups/before-first-flashcards-sync <date>/core-plugin-data/flashcards/`, once per side, before anything the exchange writes (`makeFlashcardsBackup` in `src/store/sync/backup.ts`). If it can't be made, the Flashcards part of the round fails and the rest syncs. It, and the first-sync backup, also keep Flashcards sync's own files under `sync/` when they exist (the memory and the exchange's state), so a library restored with them is whole.
-- **Noting this side's own changes:** about 2 seconds after the plugin's `changed` or `batch-changed` notice, each side notes its own Flashcards changes with their time, also with nobody connected (`watchFlashcardsChanges` in `flashcards-engine.ts`; the server's starts in `autostart.ts`, a PC's with its loop). Only once `sync/flashcards.json` (the server) or the PC's state exists; nothing on an unpaired side, and an idle side writes nothing. Without that the server timed its own changes when a PC next asked, so an older phone edit could beat a newer PC edit.
+- **Noting this side's own changes** (`watchFlashcardsChanges` in `flashcards-engine.ts`): each side notes its own Flashcards changes with their time, also with nobody connected, **20 s after the last change and at most 50 s after the first one not yet noted** (`WATCH_QUIET_MS`, `WATCH_CEILING_MS`). Only once `sync/flashcards.json` (the server) or the PC's state exists, and on a PC only while it is paired; nothing on an unpaired side, and an idle side writes nothing. It runs while a generation holds the exchange too. Without it the server timed its own changes when a PC next asked, so an older phone edit could beat a newer PC edit.
+  - **On the server** (started in `autostart.ts`) it skips when an exchange has looked at the files since the first change, and it leaves reviews (`r|`, `ExchangeRules.untimed`: they never change, so their time decides nothing) to the next exchange, so a review-only session rewrites no table.
+  - **On a PC** (started with its loop) the same timing; its noting has neither skip.
+  - The loop's 2-second sync trigger on the plugin's notices is unchanged; only the noting moved.
 - **A generation holding the exchange:** while it does, its notices start no round; the one after it ends does. The hold ends after 15 minutes with no change to the active batches (`BUSY_HOLD_MAX_MS`), with a log line.
 - **Two PCs:** a desktop counts as later (it takes the server's values) when another has done its first exchange or is part-way through it, in pages. Both exchanges follow this.
 - **The time zone** (S2; `src/server/sync/flashcards-zone.ts`):
@@ -1106,10 +1117,21 @@ A reviewer read the sync part. It found six serious issues, each reproduced by a
 2. **A fact deleted and generated again before a device's first sync** had its schedule rebuilt from the old reviews. Now an `e` is set at the first read.
 3. **A library that can't be read** (the format lock, damaged) made the PC download everything every round and the server back up every round. Now: no request, nothing written, no cursor moved, `locked` and a probe.
 4. **Seconds-long stalls of the server's process** with a 25 MB library. Now tables are copied only on the first change, an idle exchange skips the walk of its table, an apply starts from the last read and leaves its own result as the next read, and fingerprints are kept while a value is the same (a review's for good).
-5. **The server timed its own changes when a PC next asked**, so an older phone edit could beat a newer PC edit. Now each side notes its own changes about 2 seconds after the plugin's notice.
+5. **The server timed its own changes when a PC next asked**, so an older phone edit could beat a newer PC edit. Now each side notes its own changes a little after the plugin's notice (about 2 seconds then; 20 to 50 s since the second pass).
 6. **Two PCs whose first exchanges overlapped** were both "first". Now one part-way through counts too.
 
 Also changed then: deck membership as one item per fact and deck, which combines; the same-question rule for pairs from two devices only; the 15-minute end of a generation's hold, and no rounds from its notices; zone names in their standard form and checked after they are set; one rebuild per zone on the PC.
+
+**The second pass**, by the same reviewer over those fixes, found six more, all fixed (`f831b39`):
+
+1. **A PC whose clock was ahead of the server's, with a library put back**, sent times before 1970 and was refused every round: it never synced Flashcards again. Now times are clamped to 0 on both sides.
+2. **A fact made on both devices** lost the other device's earlier reviews at a later read (the `e` was inferred from `created`). Now it is inferred only for a fact sync has never seen here, from what the file counted.
+3. **A lost memory** timed items with the file's modified time, so they could beat newer values on the other side. Now every item is timed 0, as for a library put back; a memory cut between its two files counts as lost.
+4. **A card the server took from a PC whose answer was lost** could be paired with the PC's next same-question card. Now the server counts what the PC is sending in this exchange as the PC's.
+5. **The server's own noting** ran 2 s after a notice, noted reviews too and didn't run while a generation held the exchange. Now 20 s after the last change, at most 50 s after the first, skipped after an exchange, reviews left to the exchange, and also while a generation holds it.
+6. **The fallback for a fact taken out of every deck** now looks at deleted decks: the last deck it was put in that isn't deleted; if all are, the last one, which stays as a deck, so the fact is never dropped.
+
+A third pass, over these, is the last check.
 
 #### Protocol 3
 
@@ -1131,8 +1153,9 @@ Also changed then: deck membership as one item per fact and deck, which combines
 - The same card reviewed on both devices while apart: both reviews count, and that day's new-card limit can be passed.
 - A joined twin deck can undercount that day's new cards; with two PCs in different zones, the one not counted keeps its own zone's schedules (above).
 - 60,000 reviews (over 26 MB) weren't tried.
-- With a 25 MB library (20,000 reviews), a phone review or an incoming PC review still holds the server's process for about 300 to 480 ms (measured after the fixes).
+- With a 25 MB library (20,000 reviews), noting a phone review holds the server's process for about 570 ms and applying one PC review about 540 ms (about 540 to 650 ms, measured after the second pass's fixes). The noting now runs about once every 20 to 50 s during a review session, not on every rating, and rewrites no table for reviews.
 - Clock differences between devices affect the times of reviews and deletions.
+- A PC with a wrong clock wasn't run between built copies (a built copy's clock can't be skewed in the development sandbox); it rests on the exchange tests.
 
 #### Tests
 
@@ -1140,7 +1163,9 @@ Also changed then: deck membership as one item per fact and deck, which combines
 - `tests/sync-flashcards-replay.test.ts`: the replay, byte for byte against the plugin's own file.
 - `tests/sync-flashcards-exchange.test.ts` (with `tests/sync-flashcards-harness.ts`): the real exchange, the real files and the plugin's real back end on each side, never restarted. Pages both ways, the backups, a review landing without a restart, plugin writes right before and after a sync write, an idle round, a generation holding the exchange, the format lock, a lost memory, a PC with no library, no backup no sync, and the time zone sent once and again when it changes.
 - Added with the review's fixes (`tests/sync-flashcards-exchange.test.ts`, and cases in `tests/sync-flashcards.test.ts`, `sync-flashcards-replay.test.ts`, `sync-flashcards-zone.test.ts` and `tests/sync-maps.test.ts`): a library put back from its backup deletes nothing; a crash between writing the library and its memory deletes nothing; the backups keep sync's own files; a library that can't be read for a while passes nothing over; a locked library costs no request, and a server's locked library one cheap request a round; the phone's changes keep their own time while every PC is away; the watcher; two PCs whose first exchanges overlap; the same-question pairs; a generation stuck for 15 minutes; one rebuild per zone; the kept snapshot equal to a fresh read.
-- **After the fixes:** all sync tests, 300 of 300; typecheck clean.
+- **After the first pass's fixes:** all sync tests, 300 of 300; typecheck clean.
+- **Added with the second pass's fixes:** in `tests/sync-flashcards-exchange.test.ts`, a restored library on a PC whose clock is ahead and behind, the server taking a negative time, a fact made on both sides, a lost memory and a cut first save, a dropped reply then a same-question card, the watcher's timing, and the server's noting with no table write for a review alone and skipped after an exchange; in `tests/sync-flashcards.test.ts`, the fallback with deleted decks; in `tests/sync-maps.test.ts`, a negative time taken as 0 and NaN refused.
+- **After the second pass's fixes:** all sync tests, 309 of 309.
 - `tests/sync-flashcards-zone.test.ts`: the zone kept and used by the running process at once and at the next start, the most recent one counting, a name that isn't a zone ignored, the plugin's study day following, and the loop's 2-second trigger.
 - `tests/sync-inert.test.ts` (an unpaired app does nothing new) and the protocol rows in `tests/sync-sessions.test.ts`.
 
@@ -1158,7 +1183,7 @@ Before the review's fixes. Two built copies with the loop on, the server in UTC 
 - 2,000 facts and 20,000 reviews (a 20.3 MB file): first-synced in 10.7 s, in 7 pages up and 3 down;
 - unpair and pair again: carried on with 1 change and no second backup.
 
-**Measured after the fixes** (a 25 MB library, 20,000 reviews): the server's idle exchange 25 ms; a first sync 6.5 s. The steps that still hold the server's process are under "Known limits".
+**Measured after the fixes** (a 25 MB library, 20,000 reviews): the server's idle exchange 25 ms; a first sync 6.5 s. **After the second pass's fixes:** the idle exchange 23 ms; a first exchange 2.2 s. The steps that still hold the server's process are under "Known limits".
 
 #### Only the real PC and server can confirm
 
