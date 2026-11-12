@@ -42,9 +42,9 @@ function lesson(scrollTop: number, scrollHeight = 2000, clientHeight = 600) {
 		clientHeight: { configurable: true, value: clientHeight },
 	});
 }
-function touch(type: string, target: Element, points: [number, number][]) {
+function touch(type: string, target: Element, points: [number, number][], touchType = "direct") {
 	const e = new dom.window.Event(type, { bubbles: true, cancelable: true });
-	Object.assign(e, { touches: points.map(([clientX, clientY]) => ({ clientX, clientY })) });
+	Object.assign(e, { touches: points.map(([clientX, clientY]) => ({ clientX, clientY, touchType })) });
 	target.dispatchEvent(e);
 	return e;
 }
@@ -86,6 +86,20 @@ describe("the page never moves under a finger on a tablet (computer layout, in a
 		assert.equal(drag(el("text"), 0, -60), false, "pushing up still scrolls the lesson");
 		lesson(1400);
 		assert.equal(drag(el("text"), 0, -60), true, "at its bottom, pushing up is stopped");
+	});
+
+	it("an Apple Pencil tap's small wobble is left to Safari, so the tap clicks; a Pencil drag is still stopped", () => {
+		uninstall = installWindowLock(document as unknown as Document);
+		// The owner's Pencil taps moved 1.4 to 9.6 px, and stopping that move cost the click.
+		const pencil = (moves: [number, number][]) => {
+			touch("touchstart", el("bar"), [[300, 300]], "stylus");
+			const prevented = moves.map(([dx, dy]) => touch("touchmove", el("bar"), [[300 + dx, 300 + dy]], "stylus").defaultPrevented);
+			touch("touchend", el("bar"), [], "stylus");
+			return prevented;
+		};
+		assert.deepEqual(pencil([[0, 2], [1, 4], [1, 9]]), [false, false, false], "a tap's wobble: nothing stopped");
+		assert.deepEqual(pencil([[0, 5], [0, 14], [0, 40]]), [false, true, true], "past 12 px it is a drag on the top bar: stopped");
+		assert.equal(drag(el("bar"), 0, 1), true, "a finger is stopped on its first pixel, as before");
 	});
 
 	it("sideways drags and two fingers (a pinch) are left alone", () => {

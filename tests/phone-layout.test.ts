@@ -264,6 +264,20 @@ describe("drag on the dock scrolls the lesson", async () => {
 		assert.equal(dragDecision(0, 2, true, () => true), "native", "a panel under the finger can scroll");
 		assert.equal(dragDecision(0, 2, false, none), "native", "Safari already scrolling: leave it");
 	});
+	it("an Apple Pencil first moves 12 px, so its taps' wobble doesn't cancel the click (owner's iPad)", async () => {
+		const { dragDecision, PENCIL_SLOP, isPencilTouch } = await import("../components/phone/use-dock-touch-scroll.ts");
+		const none = () => false;
+		assert.equal(PENCIL_SLOP, 12);
+		assert.equal(dragDecision(0, 4, true, none, true), "wait", "a Pencil tap's wobble");
+		assert.equal(dragDecision(6, 9, true, none, true), "wait", "under 12 px in any direction");
+		assert.equal(dragDecision(0, 12, true, none, true), "take", "from 12 px it is a drag, decided as before");
+		assert.equal(dragDecision(20, 5, true, none, true), "native", "a sideways Pencil drag");
+		assert.equal(dragDecision(0, 4, false, none, true), "native", "Safari already scrolling");
+		assert.equal(dragDecision(0, 1, true, none), "take", "a finger: unchanged");
+		assert.equal(isPencilTouch({ touchType: "stylus" } as unknown as Touch), true);
+		assert.equal(isPencilTouch({ touchType: "direct" } as unknown as Touch), false);
+		assert.equal(isPencilTouch({} as Touch), false, "a browser that doesn't label touches: a finger");
+	});
 	it("replays a short tap that Safari swallowed because the lesson was moving", async () => {
 		const { replayTap, TAP_MS } = await import("../components/phone/use-dock-touch-scroll.ts");
 		assert.equal(replayTap(true, 120), true);

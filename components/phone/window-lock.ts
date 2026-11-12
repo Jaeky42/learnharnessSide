@@ -25,7 +25,7 @@
  */
 
 import { isBrowserNow } from "@/components/phone/use-phone";
-import { dragDecision, innerCanTake, type ScrollBox } from "@/components/phone/use-dock-touch-scroll";
+import { dragDecision, innerCanTake, isPencilTouch, type ScrollBox } from "@/components/phone/use-dock-touch-scroll";
 
 function scrollersFrom(target: EventTarget | null, doc: Document): ScrollBox[] {
 	const out: ScrollBox[] = [];
@@ -38,6 +38,7 @@ function scrollersFrom(target: EventTarget | null, doc: Document): ScrollBox[] {
 export function installWindowLock(doc: Document = document): () => void {
 	let startX = 0;
 	let startY = 0;
+	let pencil = false;
 	let target: EventTarget | null = null;
 	let mode: "idle" | "pending" | "free" | "lock" = "idle";
 	const onStart = (e: TouchEvent) => {
@@ -48,6 +49,7 @@ export function installWindowLock(doc: Document = document): () => void {
 		}
 		startX = t.clientX;
 		startY = t.clientY;
+		pencil = isPencilTouch(t);
 		target = e.target;
 		mode = "pending";
 	};
@@ -57,7 +59,8 @@ export function installWindowLock(doc: Document = document): () => void {
 		if (mode === "pending") {
 			// Decided on the first movement, as the dock does (dragDecision):
 			// Safari starts its own scrolling on the first unprevented move.
-			const decision = dragDecision(t.clientX - startX, t.clientY - startY, e.cancelable, (dy) => innerCanTake(scrollersFrom(target, doc), dy));
+			// An Apple Pencil first moves PENCIL_SLOP px, so its taps click.
+			const decision = dragDecision(t.clientX - startX, t.clientY - startY, e.cancelable, (dy) => innerCanTake(scrollersFrom(target, doc), dy), pencil);
 			if (decision === "wait") return;
 			mode = decision === "native" ? "free" : "lock";
 		}
