@@ -169,6 +169,7 @@ Read from the code by a reviewer; nothing is built. The owner asked whether the 
   4. a Content-Security-Policy for the app's pages, so plugin front-end code can't send data elsewhere (medium; `proxy.ts`);
   5. only run a community plugin whose content hash the owner approved (small to medium; upstream's activation code).
 - **What no option fixes:** a plugin the owner installs and switches on can do whatever LearnHarness can. On the Windows PC there is no practical sandbox for test programs.
+- **The owner's direction since:** write the fork's own coding questions plugin, for Python, JavaScript and SQL, whose code and tests run in the learner's browser and never on the machine. A draft plan for the next session is `docs/own-coding-plugin-plan.md` (not approved, nothing built). The six options above are still unchosen; the plan asks about option 1 with its other decisions.
 
 ### Asked about, not started: Apple Pencil on an iPad (owner: "dont start working on it yet")
 
