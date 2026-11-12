@@ -376,7 +376,7 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 
 ### After the merge (read this first)
 
-- **Upstream 0.6.0 is merged on its own branch, `claude/upstream-0.6.0`, and not shipped yet.** It raises the sync protocol to 2, so the server and the desktop app must be updated together. What changed in sync, the gate, the phone layout and the screens, and the update steps, are in `docs/upstream-0.6.0.md`. Where this file and that one differ, that one is newer.
+- **Upstream 0.6.0 is merged and shipped** to both branches, at the same commit. It raises the sync protocol to 2, so the server and the desktop app must both be updated or sync pauses (nothing is discarded while paused). What changed in sync, the gate, the phone layout and the screens is in `docs/upstream-0.6.0.md`. Where this file and that one differ, that one is newer.
 
 - **Merged:** `side-tutor` was fast-forwarded to the cloud sync branch at `a2d2b7e` with the owner's word ("merge"), and the Windows workflow published **release 0.5.6** from it. The desktop app now has everything in this file and in `docs/side-tutor.md`.
 - **Checked on Windows before it went out:** the Windows workflow was started by hand on the cloud sync branch (a dry run: no release) and passed, with the sync and cloud tests added to it. Before that the sync code had only run on Linux.
