@@ -21,6 +21,8 @@
  *   GET | POST /api/sync/graph       the graph log (slice 4)
  *   POST /api/sync/maps              settings and the other files that
  *                                    sync one item at a time (slice 5)
+ *   POST /api/sync/flashcards        the Flashcards library, item by item
+ *                                    (docs/phone-plugins-plan.md)
  *
  * Everything answers 404 outside server mode. The gate for /api/sync/* is
  * syncGate in server-auth.ts: a device key, never the login cookie.
@@ -49,6 +51,7 @@ import { MAX_BUNDLE_BYTES } from "../../core/sync/sessions.ts";
 import { clientAddress, json, lockedMessage, notFound, readBody, serverModeEnabled, signedIn } from "../server-auth.ts";
 import { syncAuthority } from "./engine.ts";
 import { graphAuthority } from "./graph-engine.ts";
+import { flashcardsAuthority } from "./flashcards-engine.ts";
 import { mapsAuthority } from "./maps-engine.ts";
 
 const NOT_PAIRED = { error: "This desktop app isn't paired with this server.", code: "not_paired" } as const;
@@ -237,4 +240,29 @@ export async function mapsExchangeResponse(request: Request): Promise<Response> 
 	if (caller instanceof Response) return caller;
 	const reply = mapsAuthority().exchange(caller.id, await syncBody(request));
 	return json(reply.body, reply.status);
+}
+
+// ─── Flashcards (docs/phone-plugins-plan.md) ─────────────────────────────────
+
+const flashcardsFailures = globalThis as typeof globalThis & { __lhFlashcardsFailure?: string };
+
+/**
+ * POST {cursor, all, changes, more?, timeZone?}: one page of a Flashcards
+ * exchange. A failure here (a file that can't be written, no backup) is a
+ * refusal the desktop tries again next round; the rest of its round goes on.
+ */
+export async function flashcardsExchangeResponse(request: Request): Promise<Response> {
+	const caller = syncCaller(request);
+	if (caller instanceof Response) return caller;
+	const body = await syncBody(request);
+	try {
+		const reply = flashcardsAuthority().exchange(caller.id, body);
+		delete flashcardsFailures.__lhFlashcardsFailure;
+		return json(reply.body, reply.status);
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		if (flashcardsFailures.__lhFlashcardsFailure !== message) console.error(`[LearnHarness] Flashcards sync: ${message}`);
+		flashcardsFailures.__lhFlashcardsFailure = message;
+		return json({ error: "The server couldn't take the Flashcards changes this time.", code: "flashcards_failed" }, 409);
+	}
 }

@@ -100,8 +100,8 @@ beforeEach(() => {
 });
 
 describe("the protocol version rule", () => {
-	it("is at 2 since upstream 0.6.0, and names the side that is behind in the approved words", () => {
-		assert.equal(protocol.SYNC_PROTOCOL_VERSION, 2);
+	it("is at 3 since Flashcards sync (2 since upstream 0.6.0), and names the side that is behind in the approved words", () => {
+		assert.equal(protocol.SYNC_PROTOCOL_VERSION, 3);
 		assert.deepEqual(protocol.protocolVerdict(1, 1), { ok: true });
 		assert.deepEqual(protocol.protocolVerdict(2, 1), { ok: false, behind: "server", message: "Update the server to continue syncing" });
 		assert.deepEqual(protocol.protocolVerdict(1, 2), { ok: false, behind: "app", message: "Update LearnHarness to continue syncing" });
@@ -118,14 +118,14 @@ describe("the protocol version rule", () => {
 			headers: { authorization: `Bearer ${key}`, "content-type": "application/json", ...(version === null ? {} : { [protocol.SYNC_PROTOCOL_HEADER]: version }) },
 			body: "{}",
 		});
-		const same = await asServer(() => syncHttp.helloResponse(request("2")));
+		const same = await asServer(() => syncHttp.helloResponse(request("3")));
 		assert.equal(same.status, 200);
-		const newer = await asServer(() => syncHttp.helloResponse(request("3")));
+		const newer = await asServer(() => syncHttp.helloResponse(request("4")));
 		assert.equal(newer.status, 409);
-		assert.deepEqual(await newer.json(), { error: "Update the server to continue syncing", code: "protocol_mismatch", protocol: 2 });
-		const older = await asServer(() => syncHttp.helloResponse(request("1")));
-		assert.equal(older.status, 409, "a build from before upstream 0.6.0 is refused");
-		assert.deepEqual(await older.json(), { error: "Update LearnHarness to continue syncing", code: "protocol_mismatch", protocol: 2 });
+		assert.deepEqual(await newer.json(), { error: "Update the server to continue syncing", code: "protocol_mismatch", protocol: 3 });
+		const older = await asServer(() => syncHttp.helloResponse(request("2")));
+		assert.equal(older.status, 409, "a build from before Flashcards sync is refused");
+		assert.deepEqual(await older.json(), { error: "Update LearnHarness to continue syncing", code: "protocol_mismatch", protocol: 3 });
 		assert.equal((await asServer(() => syncHttp.helloResponse(request(null)))).status, 400);
 	});
 });
@@ -440,10 +440,10 @@ describe("the desktop's view of its link", () => {
 		await paired();
 		const serverAt = (version: number): typeof fetch => async () =>
 			Response.json({ error: "x", code: "protocol_mismatch", protocol: version }, { status: 409 });
-		let status = await client.contactServer({ fetch: serverAt(3) });
+		let status = await client.contactServer({ fetch: serverAt(4) });
 		assert.equal(status.sync.state, "paused");
 		assert.equal(status.sync.message, "Update LearnHarness to continue syncing");
-		status = await client.contactServer({ fetch: serverAt(1) });
+		status = await client.contactServer({ fetch: serverAt(2) });
 		assert.equal(status.sync.message, "Update the server to continue syncing");
 		assert.equal(status.paired, true, "a pause never unpairs");
 		status = await client.contactServer({ fetch: serverFetch });

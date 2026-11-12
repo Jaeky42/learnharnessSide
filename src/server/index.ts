@@ -91,7 +91,7 @@ export {
 export { claudeLoginStatusResponse, claudeLoginControlResponse, claudeLoginOpenResponse } from "./claude-login-http.ts";
 export { obsidianStatusResponse, obsidianControlResponse } from "./obsidian-sync-http.ts";
 // Cloud sync (side-tutor fork, Phase 5): pairing, and this copy's own sync control.
-export { desktopsResponse, pairResponse, helloResponse, unpairSelfResponse, sessionsExchangeResponse, sessionBundleResponse, sessionTakeResponse, sessionPictureResponse, graphLogResponse, mapsExchangeResponse } from "./sync/http.ts";
+export { desktopsResponse, pairResponse, helloResponse, unpairSelfResponse, sessionsExchangeResponse, sessionBundleResponse, sessionTakeResponse, sessionPictureResponse, graphLogResponse, mapsExchangeResponse, flashcardsExchangeResponse } from "./sync/http.ts";
 export { heldElsewhereResponse, holdsSession } from "./sync/engine.ts";
 import "./sync/local-work.ts";
 import "./sync/autostart.ts";

@@ -31,6 +31,7 @@ const guards = await import("../src/server/sync/guarded-stores.ts");
 const engine = await import("../src/server/sync/engine.ts");
 const protocol = await import("../src/core/sync/protocol.ts");
 const { CURRENT_CHAT_VERSION } = await import("../src/core/contracts/chat.ts");
+const { FLASHCARDS_FORMAT } = await import("../src/core/sync/flashcards.ts");
 import type { SyncReply } from "../src/server/sync/client.ts";
 import type { AuthorityReply } from "../src/server/sync/authority.ts";
 
@@ -608,6 +609,30 @@ describe("the chat record format and the sync protocol", () => {
 			assert.equal(rows[i]![1] > rows[i - 1]![1], true, `Chat record format ${rows[i]![0]} must need a higher sync protocol than format ${rows[i - 1]![0]}.`);
 		}
 		assert.equal(rows.at(-1)![0], CURRENT_CHAT_VERSION, "the table ends at the format this build writes");
+	});
+
+	/**
+	 * The same rule for the Flashcards file (docs/phone-plugins-plan.md):
+	 * which sync protocol each format of flashcards.json needs. It first
+	 * travels with protocol 3. A build that reads a newer format must raise
+	 * SYNC_PROTOCOL_VERSION and add the row; until then the format lock
+	 * (flashcardsFormatTooNew) keeps a newer file from travelling.
+	 */
+	const PROTOCOL_FOR_FLASHCARDS_FORMAT: Record<number, number> = {
+		1: 3, // Flashcards sync
+	};
+
+	it("the Flashcards format never changes without a protocol bump", () => {
+		const needed = PROTOCOL_FOR_FLASHCARDS_FORMAT[FLASHCARDS_FORMAT];
+		assert.notEqual(needed, undefined,
+			`The Flashcards file format is now ${FLASHCARDS_FORMAT}, and no sync protocol is listed for it. Raise SYNC_PROTOCOL_VERSION (src/core/sync/protocol.ts) and add the row ${FLASHCARDS_FORMAT}: <new protocol> to PROTOCOL_FOR_FLASHCARDS_FORMAT in this test.`);
+		assert.equal(protocol.SYNC_PROTOCOL_VERSION >= needed!, true,
+			`Flashcards file format ${FLASHCARDS_FORMAT} needs sync protocol ${needed}, but SYNC_PROTOCOL_VERSION is ${protocol.SYNC_PROTOCOL_VERSION}.`);
+		const rows = Object.entries(PROTOCOL_FOR_FLASHCARDS_FORMAT).map(([format, needs]) => [Number(format), needs] as const).sort((a, b) => a[0] - b[0]);
+		for (let i = 1; i < rows.length; i++) {
+			assert.equal(rows[i]![1] > rows[i - 1]![1], true, `Flashcards file format ${rows[i]![0]} must need a higher sync protocol than format ${rows[i - 1]![0]}.`);
+		}
+		assert.equal(rows.at(-1)![0], FLASHCARDS_FORMAT, "the table ends at the format this build reads");
 	});
 
 	it("a chat file newer than this build reads is never sent, never replaced, and never taken (the second lock)", async () => {

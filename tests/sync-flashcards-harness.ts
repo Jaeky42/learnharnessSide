@@ -73,7 +73,8 @@ export const graphNode = (id: string, session = "session-1"): GraphNode => ({ id
 
 /** One device: the plugin's back end over its own folder, and that device's sync memory. */
 export class Device {
-	readonly directory = fs.mkdtempSync(path.join(os.tmpdir(), "lh-fc-sync-"));
+	/** The plugin's data folder; a scratch folder unless one is given (the wiring tests use a data folder's). */
+	readonly directory: string;
 	graph: { propositions: GraphNode[]; chains: unknown[]; sessions: Record<string, string>; fileSources: Record<string, string> } = { propositions: [], chains: [], sessions: { "session-1": "Lesson one", "session-2": "Lesson two" }, fileSources: {} };
 	memory: FlashcardsMemory | null = null;
 	/** key → fingerprint both sides last agreed on (what the exchange keeps per desktop). */
@@ -85,7 +86,10 @@ export class Device {
 	private controller = new AbortController();
 	private workers = workerService();
 
-	constructor(readonly name: string) { this.activate(); }
+	constructor(readonly name: string, directory?: string) {
+		this.directory = directory ?? fs.mkdtempSync(path.join(os.tmpdir(), "lh-fc-sync-"));
+		this.activate();
+	}
 
 	/** (Re)start the back end: it reads its file once, as at app start. */
 	activate(): void {

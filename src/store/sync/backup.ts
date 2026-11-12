@@ -42,3 +42,27 @@ export function makeFirstSyncBackup(dataDir: string, now: Date = new Date()): st
 	}
 	return target;
 }
+
+/**
+ * Flashcards sync (docs/phone-plugins-plan.md): each side copies the
+ * Flashcards folder aside once, right before its first Flashcards exchange,
+ * beside the backups above:
+ *
+ *   backups/before-first-flashcards-sync 2026-11-20/core-plugin-data/flashcards/
+ *
+ * Returns the backup folder, or null when there is no Flashcards folder yet
+ * (nothing to keep). A throw means no backup: Flashcards sync doesn't start.
+ */
+export function makeFlashcardsBackup(dataDir: string, now: Date = new Date()): string | null {
+	const from = path.join(/* turbopackIgnore: true */ dataDir, "core-plugin-data", "flashcards");
+	if (!fs.existsSync(/* turbopackIgnore: true */ from)) return null;
+	const root = path.join(/* turbopackIgnore: true */ path.dirname(dataDir), "backups");
+	let target = path.join(/* turbopackIgnore: true */ root, `before-first-flashcards-sync ${localDate(now)}`);
+	for (let n = 2; fs.existsSync(/* turbopackIgnore: true */ target); n++) {
+		target = path.join(/* turbopackIgnore: true */ root, `before-first-flashcards-sync ${localDate(now)} (${n})`);
+	}
+	const to = path.join(/* turbopackIgnore: true */ target, "core-plugin-data", "flashcards");
+	fs.mkdirSync(/* turbopackIgnore: true */ path.dirname(to), { recursive: true });
+	fs.cpSync(/* turbopackIgnore: true */ from, to, { recursive: true });
+	return target;
+}

@@ -37,16 +37,22 @@ export interface MapItem {
 	value: unknown;
 	/** When the file holding it last changed (ms), or null when unknown. */
 	mtime: number | null;
+	/** The value's fingerprint (itemHash), when the reader already has it (a cached snapshot). */
+	h?: string;
 }
 
+/**
+ * The kinds are maps.ts kinds here; the Flashcards exchange (flashcards-files.ts)
+ * uses the same shape with its own kinds.
+ */
 export interface MapSnapshot {
 	items: Map<string, MapItem>;
 	/** Kinds whose file is there but can't be read: left alone this round. */
-	unreadable: Set<MapKind>;
+	unreadable: Set<string>;
 	/** Single items whose own file is there but can't be read (a damaged theme file): left alone too. */
 	unreadableKeys?: Set<string>;
 	/** When each kind's file last changed: the time given to an item that went. */
-	fileTimes: Map<MapKind, number | null>;
+	fileTimes: Map<string, number | null>;
 }
 
 export interface MapFiles {

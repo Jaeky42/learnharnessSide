@@ -6,6 +6,10 @@
  *
  * This process is first an unpaired desktop app, then a server nobody has
  * paired with. Everything is driven through the real composition root.
+ *
+ * Flashcards sync (docs/phone-plugins-plan.md) keeps the rule: no request,
+ * no timer, no file, a library left as it is, and the process's time zone
+ * untouched.
  */
 
 import assert from "node:assert/strict";
@@ -34,6 +38,12 @@ const { syncInUse } = await import("../src/server/sync/engine.ts");
 const { deleteChatSession } = await import("../src/server/chats.ts");
 const { deleteGraphNode } = await import("../src/server/graph.ts");
 const { initializePlugins } = await import("../src/server/plugins.ts");
+const { flashcardsDesktop } = await import("../src/server/sync/flashcards-engine.ts");
+const { applyStoredTimeZone } = await import("../src/server/sync/flashcards-zone.ts");
+
+/** The process's time zone as it started: nothing here may change it. */
+const ZONE = { env: process.env.TZ, intl: Intl.DateTimeFormat().resolvedOptions().timeZone, offset: new Date(Date.UTC(2026, 6, 1, 12)).getTimezoneOffset() };
+const sameZone = () => assert.deepEqual({ env: process.env.TZ, intl: Intl.DateTimeFormat().resolvedOptions().timeZone, offset: new Date(Date.UTC(2026, 6, 1, 12)).getTimezoneOffset() }, ZONE, "the time zone is untouched");
 
 after(() => {
 	globalThis.fetch = realFetch;
@@ -73,8 +83,11 @@ describe("a desktop app that was never paired", () => {
 	it("says it is off, and a round does nothing", async () => {
 		const status = await (server.cloudStatusResponse()).json() as { paired: boolean; sync: { state: string }; held: object; notices: unknown[] };
 		assert.deepEqual([status.paired, status.sync.state, status.held, status.notices], [false, "off", {}, []]);
-		assert.deepEqual(await runSyncRound(), { sessions: { ok: false, reason: "not-paired" }, graph: null, maps: null });
+		assert.deepEqual(await runSyncRound(), { sessions: { ok: false, reason: "not-paired" }, graph: null, maps: null, flashcards: null });
 		mapsDesktop().detect();
+		flashcardsDesktop().detect();
+		assert.deepEqual(await flashcardsDesktop().round(), { ok: false, reason: "not-paired" });
+		sameZone();
 		assert.equal(shouldAutostart({ NODE_ENV: "production" } as NodeJS.ProcessEnv), false);
 		assert.equal((globalThis as { __lhSyncLoop?: unknown }).__lhSyncLoop, undefined, "no loop, no timer");
 		assert.equal(syncInUse(), false, "its pages get no marker, so they ask nothing about sync");
@@ -96,7 +109,7 @@ describe("a desktop app that was never paired", () => {
 	});
 
 	it("every sync address answers 404 on a desktop: there is nothing to pair with", async () => {
-		const call = (pathname: string, method = "POST") => new Request(`http://localhost${pathname}`, { method, headers: { "content-type": "application/json", authorization: `Bearer ${"k".repeat(43)}`, "x-lh-sync-protocol": "2" }, body: method === "GET" ? undefined : "{}" });
+		const call = (pathname: string, method = "POST") => new Request(`http://localhost${pathname}`, { method, headers: { "content-type": "application/json", authorization: `Bearer ${"k".repeat(43)}`, "x-lh-sync-protocol": "3" }, body: method === "GET" ? undefined : "{}" });
 		assert.equal((await server.pairResponse(call("/api/sync/pair"))).status, 404);
 		assert.equal(server.helloResponse(call("/api/sync/hello")).status, 404);
 		assert.equal((await server.sessionsExchangeResponse(call("/api/sync/sessions"))).status, 404);
@@ -105,21 +118,31 @@ describe("a desktop app that was never paired", () => {
 		assert.equal((await server.sessionTakeResponse(call("/api/sync/sessions/chat_1/take"), "chat_1")).status, 404);
 		assert.equal((await server.graphLogResponse(call("/api/sync/graph?after=0", "GET"))).status, 404);
 		assert.equal((await server.mapsExchangeResponse(call("/api/sync/maps"))).status, 404);
+		assert.equal((await server.flashcardsExchangeResponse(call("/api/sync/flashcards"))).status, 404);
 		assert.equal(fs.existsSync(path.join(DATA, "sync")), false);
+		sameZone();
 	});
 });
 
 describe("a server no desktop has paired with", () => {
 	it("works as before: nothing kept for sync, nothing held elsewhere, and a stranger's key opens nothing", async () => {
 		process.env.LH_SERVER_MODE = "1";
+		// A Flashcards library on the server, from its own use of the plugin.
+		const library = path.join(DATA, "core-plugin-data", "flashcards", "flashcards.json");
+		fs.mkdirSync(path.dirname(library), { recursive: true });
+		fs.writeFileSync(library, JSON.stringify({ version: 1, revision: 4, settings: { retention: 0.9 }, decks: [{ id: "d", name: "Physics", newLimit: 20, propositionIds: [] }], propositions: {}, reviews: [], batches: [] }));
 		const before = tree(DATA);
 		const status = await (server.cloudStatusResponse()).json();
 		assert.deepEqual(status, { role: "server", held: {}, desktops: [] });
 		await useTheApp("cloud");
-		const call = (pathname: string, method = "POST") => new Request(`http://localhost${pathname}`, { method, headers: { "content-type": "application/json", authorization: `Bearer ${"k".repeat(43)}`, "x-lh-sync-protocol": "2" }, body: method === "GET" ? undefined : "{}" });
+		const call = (pathname: string, method = "POST") => new Request(`http://localhost${pathname}`, { method, headers: { "content-type": "application/json", authorization: `Bearer ${"k".repeat(43)}`, "x-lh-sync-protocol": "3" }, body: method === "GET" ? undefined : "{}" });
 		assert.equal((await server.sessionsExchangeResponse(call("/api/sync/sessions"))).status, 401);
 		assert.equal((await server.graphLogResponse(call("/api/sync/graph?after=0", "GET"))).status, 401);
 		assert.equal((await server.mapsExchangeResponse(call("/api/sync/maps"))).status, 401);
+		assert.equal((await server.flashcardsExchangeResponse(call("/api/sync/flashcards"))).status, 401);
+		// The start-up step (instrumentation.ts) finds no zone a desktop gave, and changes nothing.
+		applyStoredTimeZone();
+		sameZone();
 		assert.equal((await server.sessionPictureResponse(call(`/api/sync/sessions/chat_1/pictures/${"a".repeat(64)}`, "PUT"), "chat_1", "a".repeat(64))).status, 401);
 		assert.equal(fs.existsSync(path.join(DATA, "sync")), false);
 		assert.equal(fs.existsSync(path.join(TMP, "backups")), false);

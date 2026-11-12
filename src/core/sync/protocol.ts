@@ -13,9 +13,15 @@
  * once, and theme files and more settings sync. A protocol-1 build must
  * never receive any of that. tests/sync-sessions.test.ts pins which chat
  * format needs which protocol.
+ *
+ * 3 (Flashcards sync, docs/phone-plugins-plan.md): the Flashcards library
+ * travels item by item (POST /api/sync/flashcards), and a PC sends its time
+ * zone. A protocol-2 build knows nothing of it, and a server of protocol 2
+ * would refuse the route. tests/sync-sessions.test.ts pins which Flashcards
+ * file format needs which protocol, beside the chat format.
  */
 
-export const SYNC_PROTOCOL_VERSION = 2;
+export const SYNC_PROTOCOL_VERSION = 3;
 
 /** Sent by the desktop on every sync request, and echoed by the server. */
 export const SYNC_PROTOCOL_HEADER = "x-lh-sync-protocol";

@@ -417,7 +417,7 @@ describe("Unpair this PC, end to end", () => {
 		await client.pairWithServer({ server: SERVER, code: await pairingCode(cookie), name: "Desktop" }, { fetch: serverFetch });
 		const key = pairingStore.readCloudPairing()!.key!;
 		await unpairThisDesktop({ round: async () => undefined, fetch: serverFetch });
-		const hello = await serverFetch(`${SERVER}/api/sync/hello`, { method: "POST", headers: { authorization: `Bearer ${key}`, "content-type": "application/json", "x-lh-sync-protocol": "2" }, body: "{}" });
+		const hello = await serverFetch(`${SERVER}/api/sync/hello`, { method: "POST", headers: { authorization: `Bearer ${key}`, "content-type": "application/json", "x-lh-sync-protocol": "3" }, body: "{}" });
 		assert.equal(hello.status, 401);
 	});
 

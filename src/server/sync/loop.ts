@@ -4,7 +4,8 @@
  *
  *   - a full round when the app starts;
  *   - about 2 seconds after something changes here (a turn settles, a
- *     session is renamed or deleted, a helper finishes, a folder moves);
+ *     session is renamed or deleted, a helper finishes, a folder moves,
+ *     Flashcards changes its library);
  *   - at once when a reply starts, so the server knows this desktop is busy;
  *   - every 10 seconds otherwise, to ask the server for news;
  *   - while the server can't be reached: quiet retries that slow down,
@@ -20,6 +21,7 @@
 
 import { subscribe, type ServerEvent } from "../../core/events.ts";
 import { activePairing } from "./client.ts";
+import { isSyncEcho } from "./flashcards-engine.ts";
 import { runSyncRound } from "./round.ts";
 
 export const POLL_MS = 10_000;
@@ -51,6 +53,15 @@ export function retryDelayMs(failures: number): number {
 
 /** Events that mean "something that syncs changed here". */
 const CHANGES = new Set<ServerEvent["type"]>(["turn-settled", "record-changed", "chats-changed", "jobs-changed", "sources-changed", "activity-changed"]);
+
+/**
+ * Flashcards (docs/phone-plugins-plan.md) changed its library here. Cards a
+ * generation adds are announced as `batch-changed`. What sync itself wrote
+ * into the library is announced too (for open pages), and isn't a change made here.
+ */
+export function flashcardsChanged(event: ServerEvent): boolean {
+	return event.type === "plugin-message" && event.pluginId === "flashcards" && (event.topic === "changed" || event.topic === "batch-changed") && !isSyncEcho(event.data);
+}
 
 export function createSyncLoop(deps: SyncLoopDeps): SyncLoop {
 	let running = false;
@@ -97,6 +108,8 @@ export function createSyncLoop(deps: SyncLoopDeps): SyncLoop {
 	}
 
 	function onEvent(event: ServerEvent): void {
+		// What sync itself wrote is no change made here, also while a round is under way.
+		if (event.type === "plugin-message" && isSyncEcho(event.data)) return;
 		if (inFlight) { again = true; return; }
 		// While the server can't be reached, the retries keep their own slow pace.
 		if (failures > 0) return;
@@ -106,7 +119,7 @@ export function createSyncLoop(deps: SyncLoopDeps): SyncLoop {
 		// as a reply's start does, and the question isn't left unsent while the
 		// answer is being written.
 		if (event.type === "turn-started" || event.type === "side-chats-changed") schedule(0);
-		else if (CHANGES.has(event.type)) schedule(CHANGE_MS);
+		else if (CHANGES.has(event.type) || flashcardsChanged(event)) schedule(CHANGE_MS);
 	}
 
 	return {
@@ -139,7 +152,7 @@ const globals = globalThis as typeof globalThis & { __lhSyncLoop?: SyncLoop };
 async function oneRound(): Promise<RoundOutcome> {
 	if (!activePairing()) return "not-paired";
 	const round = await runSyncRound();
-	for (const part of [round.sessions, round.graph, round.maps]) {
+	for (const part of [round.sessions, round.graph, round.maps, round.flashcards]) {
 		if (!part || part.ok) continue;
 		if (part.reason === "not-paired" || part.reason === "paused") return part.reason;
 		// "busy" (another round is under way) and a refusal are tried again at the usual pace.

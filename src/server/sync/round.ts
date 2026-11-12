@@ -2,7 +2,8 @@
  * Cloud sync (Phase 5): one whole round of a desktop with its server:
  * sessions first (leases decide who may write what), then the graph log,
  * then the small files that sync item by item (they point at sessions and
- * concepts, so those are in place first).
+ * concepts, so those are in place first), then the Flashcards library
+ * (its facts are graph concepts).
  */
 
 import { emit } from "../../core/events.ts";
@@ -10,6 +11,7 @@ import { serverModeEnabled } from "../server-auth.ts";
 import { cloudStatus } from "./client.ts";
 import type { TickResult } from "./desktop-sync.ts";
 import { desktopSync } from "./engine.ts";
+import { flashcardsDesktop } from "./flashcards-engine.ts";
 import { graphDesktop } from "./graph-engine.ts";
 import type { GraphRound } from "./graph-sync.ts";
 import { mapsDesktop } from "./maps-engine.ts";
@@ -20,9 +22,11 @@ export interface SyncRound {
 	graph: GraphRound | null;
 	/** Settings and the other files that sync one item at a time. */
 	maps: MapsRound | null;
+	/** The Flashcards library (docs/phone-plugins-plan.md), item by item too. */
+	flashcards: MapsRound | null;
 }
 
-const globals = globalThis as typeof globalThis & { __lhSyncRound?: Promise<SyncRound>; __lhCloudSeen?: string };
+const globals = globalThis as typeof globalThis & { __lhSyncRound?: Promise<SyncRound>; __lhCloudSeen?: string; __lhFlashcardsTrouble?: string };
 
 /**
  * Phase 6: tell this app's open windows when its sync state changed
@@ -52,15 +56,37 @@ export function runSyncRound(): Promise<SyncRound> {
 	return mine.finally(() => { if (globals.__lhSyncRound === mine) delete globals.__lhSyncRound; });
 }
 
+/** A Flashcards failure is said once in the log, and never stops the rest of a round. */
+function flashcardsTrouble(error: unknown): void {
+	const message = error instanceof Error ? error.message : String(error);
+	if (globals.__lhFlashcardsTrouble === message) return;
+	globals.__lhFlashcardsTrouble = message;
+	console.error(`[LearnHarness] Flashcards sync: ${message}`);
+}
+
+async function flashcardsRound(): Promise<MapsRound> {
+	try {
+		const round = await flashcardsDesktop().round();
+		if (round.ok) delete globals.__lhFlashcardsTrouble;
+		return round;
+	} catch (error) {
+		flashcardsTrouble(error);
+		return { ok: false, reason: "refused" };
+	}
+}
+
 async function oneRound(): Promise<SyncRound> {
-	if (serverModeEnabled()) return { sessions: { ok: false, reason: "not-paired" }, graph: null, maps: null };
+	if (serverModeEnabled()) return { sessions: { ok: false, reason: "not-paired" }, graph: null, maps: null, flashcards: null };
 	const sessions = await desktopSync().tick();
 	// Without the server there is no point asking again for the rest. What
 	// changed in the small files is still noted, with the time it changed.
 	if (!sessions.ok) {
 		mapsDesktop().detect();
-		return { sessions, graph: null, maps: null };
+		try { flashcardsDesktop().detect(); } catch (error) { flashcardsTrouble(error); }
+		return { sessions, graph: null, maps: null, flashcards: null };
 	}
 	const graph = await graphDesktop().round();
-	return { sessions, graph, maps: await mapsDesktop().round() };
+	const maps = await mapsDesktop().round();
+	// Last, and on its own: a library can be large, and a failure here leaves the rest syncing.
+	return { sessions, graph, maps, flashcards: await flashcardsRound() };
 }

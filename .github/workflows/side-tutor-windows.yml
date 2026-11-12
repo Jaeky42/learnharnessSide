@@ -64,6 +64,11 @@ jobs:
         run: npx tsx --test tests/sync-*.test.ts tests/cloud-*.test.tsx
         env:
           NODE_ENV: test
+      - name: Flashcards store and back-end tests on Windows
+        # Flashcards sync writes the plugin's file beside the plugin, which
+        # reads it again when it changed on disk (its store.cjs, the fork's
+        # one edit there). tests/sync-flashcards-*.test.ts above drive both.
+        run: node --test plugins/flashcards/tests/store.test.cjs plugins/flashcards/tests/backend.test.cjs
       - name: Native renderer tests on Windows
         run: npx electron --import tsx --test tests/pdf-native-render.test.ts tests/pdf-ops.test.ts tests/svg-native-render.test.ts tests/browser-service.test.ts
         env:
