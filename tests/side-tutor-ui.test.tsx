@@ -855,6 +855,174 @@ describe("moving and resizing (computer)", () => {
 	});
 });
 
+describe("the phone's sheet swipes down to minimize (owner's ask)", () => {
+	type Run = { el: Element; frames: Record<string, unknown>[]; options: Record<string, unknown>; onfinish: (() => void) | null; cancelled: boolean; cancel(): void };
+	/** The phone layout, and a browser that animates (unless motion is reduced). */
+	async function onPhone(test: (runs: Run[]) => Promise<void>, { reduced = false, phone = true }: { reduced?: boolean; phone?: boolean } = {}) {
+		const runs: Run[] = [];
+		const proto = dom.window.HTMLElement.prototype as unknown as Record<string, unknown>;
+		const before = proto.animate;
+		proto.animate = function (this: Element, frames: Record<string, unknown>[], options: Record<string, unknown>) {
+			const run: Run = { el: this, frames, options, onfinish: null, cancelled: false, cancel() { run.cancelled = true; } };
+			runs.push(run);
+			return run;
+		};
+		Object.assign(dom.window, { matchMedia: (query: string) => ({ matches: (phone && query.includes("max-width")) || (reduced && query.includes("reduced-motion")), addEventListener() {}, removeEventListener() {} }) });
+		try {
+			await test(runs);
+		} finally {
+			delete (dom.window as unknown as Record<string, unknown>).matchMedia;
+			if (before) proto.animate = before; else delete proto.animate;
+		}
+	}
+	const sheetOf = () => document.querySelector("[data-testid='side-tutor']") as HTMLElement | null;
+	const bubbleOf = () => document.querySelector("[data-testid='side-tutor-toggle']") as HTMLElement | null;
+	const dimOf = () => document.querySelector("[data-phone='backdrop'][data-phone-layer='sheet']") as HTMLElement | null;
+	const touch = (type: string, target: Element, ys: number[]) => {
+		const e = new dom.window.Event(type, { bubbles: true, cancelable: true });
+		Object.assign(e, { touches: ys.map((y) => ({ clientX: 100, clientY: y })) });
+		target.dispatchEvent(e);
+		return e;
+	};
+	/** Down by each step, then held still (no flick) and lifted. */
+	const swipe = async (target: Element, steps: number[]) => {
+		touch("touchstart", target, [300]);
+		for (const dy of steps) touch("touchmove", target, [300 + dy]);
+		await new Promise((r) => setTimeout(r, 80));
+		await act(async () => void touch("touchend", target, []));
+	};
+	const openSheet = async () => {
+		await act(async () => bubbleOf()!.click());
+		const sheet = sheetOf();
+		assert.ok(sheet, "the sheet is open");
+		return sheet;
+	};
+	const slideOf = (runs: Run[]) => runs.filter((run) => run.el === sheetOf()).at(-1);
+
+	it("a swipe on the top bar past a quarter of the sheet slides it away; the bubble comes back when it is down", async () => {
+		await onPhone(async (runs) => {
+			await mountTutor();
+			const sheet = await openSheet();
+			const bar = sheet.querySelector("[data-tutor-swipe]")!;
+			assert.ok(bar.textContent?.includes("Tutor"));
+			touch("touchstart", bar, [300]);
+			touch("touchmove", bar, [340]);
+			assert.equal(sheet.style.transform, "translateY(40px)", "it follows the finger");
+			assert.equal(dimOf()!.style.opacity, String(1 - 40 / 480), "the dim fades with it");
+			touch("touchmove", bar, [450]);
+			await new Promise((r) => setTimeout(r, 80));
+			await act(async () => void touch("touchend", bar, []));
+			const slide = slideOf(runs)!;
+			assert.deepEqual(slide.frames.at(-1), { transform: "translateY(100%)" });
+			assert.equal(slide.options.duration, Math.max(130, Math.round(260 * (1 - 150 / 480))));
+			assert.equal(slide.options.easing, "cubic-bezier(0.2, 0.8, 0.2, 1)");
+			assert.ok(sheetOf(), "still on screen while it slides");
+			assert.equal(bubbleOf(), null, "no bubble yet");
+			await act(async () => slide.onfinish?.());
+			assert.equal(sheetOf(), null);
+			assert.ok(bubbleOf(), "then the bubble");
+		});
+	});
+
+	it("a short swipe springs back, and the Tutor stays open", async () => {
+		await onPhone(async (runs) => {
+			await mountTutor();
+			const sheet = await openSheet();
+			await swipe(sheet.querySelector("[data-tutor-swipe]")!, [20, 60]);
+			const spring = slideOf(runs)!;
+			assert.deepEqual(spring.frames, [{ transform: "translateY(60px)" }, { transform: "translateY(0px)" }]);
+			assert.equal(spring.options.duration, 200);
+			await act(async () => spring.onfinish?.());
+			assert.equal(sheetOf(), sheet, "still open");
+			assert.equal(sheet.style.transform, "");
+		});
+	});
+
+	it("doesn't move for a swipe that starts on the conversation, the typing row or the − button", async () => {
+		await onPhone(async (runs) => {
+			await mountTutor();
+			const sheet = await openSheet();
+			for (const start of [
+				sheet.querySelector("[data-testid='side-tutor-scroll']")!,
+				sheet.querySelector("[aria-label='Ask the side tutor']")!,
+				sheet.querySelector("[aria-label='Ask']")!,
+				sheet.querySelector("[aria-label='Minimize the side tutor']")!,
+			]) {
+				await swipe(start, [60, 200]);
+				assert.equal(sheet.style.transform, "", start.getAttribute("aria-label") ?? start.getAttribute("data-testid") ?? "");
+			}
+			assert.equal(runs.length, 0);
+			assert.equal(sheetOf(), sheet);
+		});
+	});
+
+	it("the − button and a tap on the dimmed lesson slide it away too", async () => {
+		await onPhone(async (runs) => {
+			await mountTutor();
+			for (const close of [() => sheetOf()!.querySelector("[aria-label='Minimize the side tutor']") as HTMLElement, () => dimOf()!]) {
+				await openSheet();
+				await act(async () => close().click());
+				const slide = slideOf(runs)!;
+				assert.deepEqual(slide.frames, [{ transform: "translateY(0px)" }, { transform: "translateY(100%)" }]);
+				assert.equal(slide.options.duration, 260);
+				assert.deepEqual(runs.find((run) => run.el === dimOf())?.frames.map((f) => f.opacity), [1, 0], "the dim fades out with it");
+				assert.ok(sheetOf(), "on screen while it slides");
+				await act(async () => slide.onfinish?.());
+				assert.equal(sheetOf(), null);
+				assert.ok(bubbleOf());
+			}
+		});
+	});
+
+	it("with reduced motion it closes at once, as before", async () => {
+		await onPhone(async (runs) => {
+			await mountTutor();
+			const sheet = await openSheet();
+			await act(async () => (sheet.querySelector("[aria-label='Minimize the side tutor']") as HTMLElement).click());
+			assert.equal(sheetOf(), null);
+			assert.ok(bubbleOf());
+			assert.equal(runs.length, 0);
+		}, { reduced: true });
+	});
+
+	it("a session that becomes held closes at once, even while it slides", async () => {
+		await onPhone(async (runs) => {
+			const host = await mountTutor();
+			await openSheet();
+			await host.rerender(undefined, { held: true });
+			assert.equal(sheetOf(), null, "no slide");
+			assert.equal(runs.length, 0);
+			await host.rerender(undefined);
+			assert.ok(sheetOf(), "taken over: as the learner left it");
+			await act(async () => (sheetOf()!.querySelector("[aria-label='Minimize the side tutor']") as HTMLElement).click());
+			assert.ok(sheetOf(), "sliding");
+			await host.rerender(undefined, { held: true });
+			assert.equal(sheetOf(), null);
+			// Taken over: it was being minimized, so it is the bubble.
+			await host.rerender(undefined);
+			assert.equal(sheetOf(), null);
+			assert.ok(bubbleOf());
+		});
+	});
+
+	it("on a computer none of it is there: a touch on the top bar moves nothing", async () => {
+		await onPhone(async (runs) => {
+			const host = await mountTutor();
+			const panel = host.querySelector("[data-testid='side-tutor']") as HTMLElement;
+			assert.equal(panel.querySelector("[data-tutor-swipe]"), null, "the bar isn't marked as a swipe zone");
+			const bar = panel.querySelector("[aria-label='Minimize the side tutor']")!.parentElement!;
+			const moves = [touch("touchstart", bar, [300]), touch("touchmove", bar, [450])];
+			assert.equal(moves[1]!.defaultPrevented, false);
+			await act(async () => void touch("touchend", bar, []));
+			assert.doesNotMatch(styleOf(panel), /transform/);
+			assert.equal(runs.length, 0);
+			await minimize(host);
+			assert.equal(sheetOf(), null, "the − button minimizes it as before");
+			assert.equal(runs.length, 0, "no slide");
+		}, { phone: false });
+	});
+});
+
 describe("in the tablet home-screen app (owner's iPad: the top bar sits below iOS's blur)", () => {
 	it("opens 12 px under the lowered top bar, and can't be dragged up into the blur", async () => {
 		const { defaultPos, clampPos } = await import("../components/side-tutor.tsx");

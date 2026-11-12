@@ -38,6 +38,7 @@ import { joinDictation, type Dictation } from "@/components/dictation";
 import { SIDE_TUTOR_DICTATION_ID, SideTutorDictate, tutorOwnsDictation } from "@/components/side-tutor-dictation";
 import { MORPH_CLOSE_MS, MORPH_EASE, MORPH_OPEN_MS, morphStart, resizeTutorRect, storedTutorSize, TUTOR_EDGE, TUTOR_RESIZE_EDGES, type MorphBox, type TutorRect, type TutorResizeEdge, type TutorSize } from "@/components/side-tutor-window";
 import { tabletTopInset } from "@/components/phone/tablet-top";
+import { SWIPE_BAR_ATTR, useTutorSheetSwipe } from "@/components/phone/tutor-sheet-swipe";
 import { CitationActionsContext } from "@/components/citation-chip";
 import { useServerResync } from "@/components/server-events";
 import type { useSideThread } from "@/components/use-side-thread";
@@ -231,6 +232,8 @@ export function SideTutor({ chatId, messages, side, dictation, held = false, ope
 	const morphBox = useRef<MorphBox | null>(null);
 	const resizeRef = useRef<{ edge: TutorResizeEdge; x: number; y: number; start: TutorRect } | null>(null);
 	const scrollRef = useRef<HTMLDivElement>(null);
+	/** PHONE: the dim over the lesson above the sheet. */
+	const dimRef = useRef<HTMLDivElement>(null);
 	const inputRef = useRef<HTMLTextAreaElement>(null);
 	const dragRef = useRef<{ x: number; y: number; start: Pos } | null>(null);
 	/** Last known panel width, for keeping the dragged window on screen. */
@@ -425,6 +428,9 @@ export function SideTutor({ chatId, messages, side, dictation, held = false, ope
 		if (!next && tutorDictating) dictation?.stop();
 		if (!next && panelRef.current) widthRef.current = panelRef.current.offsetWidth;
 		if (isPhoneNow()) { // no auto-focus either: it would pop the keyboard up
+			// The sheet slides away and leaves once it is down (owner's ask);
+			// at once with reduced motion.
+			if (!next && sheetSwipe.current?.slideAway()) return;
 			setOpen(next);
 			return;
 		}
@@ -444,6 +450,11 @@ export function SideTutor({ chatId, messages, side, dictation, held = false, ope
 			setOpen(false);
 		}
 	};
+
+	// PHONE: a swipe down on the sheet's handle or top bar minimizes it, and
+	// every way of minimizing slides it away (owner's ask;
+	// components/phone/tutor-sheet-swipe.ts). A held session closes at once.
+	const sheetSwipe = useTutorSheetSwipe(panelRef, dimRef, phone && open, () => setOpenPersist(false), () => setOpen(false));
 
 	// The morph itself. Only transform and opacity move (side-tutor-window.ts).
 	useLayoutEffect(() => {
@@ -487,6 +498,8 @@ export function SideTutor({ chatId, messages, side, dictation, held = false, ope
 		openRequestSeen.current = openRequest;
 		if (held) return;
 		if (isPhoneNow()) {
+			// Still sliding away: it comes back up.
+			sheetSwipe.current?.reopen();
 			setOpen(true);
 			return;
 		}
@@ -674,7 +687,7 @@ export function SideTutor({ chatId, messages, side, dictation, held = false, ope
 
 	return (
 		<>
-		{phone && <div data-phone="backdrop" data-phone-layer="sheet" aria-hidden="true" onClick={() => setOpenPersist(false)} />}
+		{phone && <div ref={dimRef} data-phone="backdrop" data-phone-layer="sheet" aria-hidden="true" onClick={() => setOpenPersist(false)} />}
 		{/* An unseen stand-in where the bubble will be: the place the window folds back into. */}
 		{!phone && atBubblePlace(<span ref={placeRef} aria-hidden="true" data-testid="side-tutor-bubble-place" style={bubbleStyle} className={cn("pointer-events-none invisible size-13", bubblePosition)} />)}
 		{/* The frame: on a computer it holds the window's place and size, and
@@ -702,6 +715,8 @@ export function SideTutor({ chatId, messages, side, dictation, held = false, ope
 				</div>
 			)}
 			<div
+				// PHONE: where a swipe down starts, with the handle strip above it.
+				{...(phone ? { [SWIPE_BAR_ATTR]: "" } : {})}
 				className={cn("flex cursor-grab touch-none items-center gap-2 border-b border-border px-3 py-2 select-none active:cursor-grabbing", BAR_BG)}
 				onPointerDown={onDragStart}
 				onPointerMove={onDragMove}

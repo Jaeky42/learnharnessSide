@@ -51,7 +51,7 @@ Branch `side-tutor`, based on upstream amosblomqvist/learnharness v0.6.0 (merged
   - a cover in the bubble's own grey, with its icon, lies over the window and fades as the shape opens, so the bubble turns into the window. The owner saw two earlier demos and named their faults: one moved in two steps ("choppy"), one hid the contents first, which left only the dark middle on screen ("turns black");
   - it runs from wherever the bubble is to wherever the window was left. Only `transform` and `opacity` move, so nothing is laid out again on the way;
   - while it folds back the window is still on screen; the bubble appears when it has folded. An unseen stand-in keeps the bubble's place while the window is open, so the end point can be measured (`side-tutor-bubble-place`);
-  - **not animated:** with reduced motion (at once, as before); when a session becomes held (the window closes to the greyed bubble at once); and **on a phone, where the sheet's own slide-up is unchanged** (owner: "do not change the phone animation yet");
+  - **not animated:** with reduced motion (at once, as before); when a session becomes held (the window closes to the greyed bubble at once); and **on a phone, where the sheet's own slide-up is unchanged** (owner: "do not change the phone animation yet"). The owner has since asked for the phone's closing slide: the sheet now slides down when minimized and swipes down from its handle and top bar ("On a phone: swipe down to minimize" below); its opening is still unchanged;
   - `morphStart` and the timings are in `components/side-tutor-window.ts`; the run is in `components/side-tutor.tsx`.
 - **It stays above the Drawing Pad** (owner's ask; any plugin surface that covers the lesson). Upstream's pad is opaque and covers the lesson and the dock, and it covered the Tutor's window and bubble with them.
   - The open window keeps its place and is drawn one layer above the surface. Drawing beside it works, and what is typed in it stays.
@@ -109,12 +109,29 @@ Branch `side-tutor`, based on upstream amosblomqvist/learnharness v0.6.0 (merged
   - `src/core/tutor-view.ts` (the order of the conversations, the divider's words)
   - `components/side-tutor-window.ts` (which edges resize the window, and how far)
   - `components/side-tutor-dictation.tsx` (the Dictate button)
+  - `components/phone/tutor-sheet-swipe.ts` (the phone sheet's swipe down and its slide away)
   - `components/chat.tsx`: the mount, "Ask" opening the window, and where upstream's card and markers are left out
   - upstream's, unchanged: `components/use-side-thread.ts`, `src/core/side-chat.ts`, `src/server/side-chat.ts`, `src/agent/side-chat.ts`, `app/api/chats/[id]/side-chats/**`
-- **Tests:** the window's words and look, the conversations (through upstream's real hook, with a scripted server), its Dictate button, moving and resizing, the bubble's place, starting minimized and the morph: `tests/side-tutor-ui.test.tsx`; the order, the divider's words and the one-time cleanup: `tests/tutor-view.test.ts`; the resize rules and the morph's geometry: `tests/side-tutor-window.test.ts`; the phone sheet's background and text size: `tests/phone-layout.test.ts`. Upstream's own: `tests/side-chat*.test.ts`, `tests/use-side-thread.test.ts`.
+- **Tests:** the window's words and look, the conversations (through upstream's real hook, with a scripted server), its Dictate button, moving and resizing, the bubble's place, starting minimized and the morph: `tests/side-tutor-ui.test.tsx`; the order, the divider's words and the one-time cleanup: `tests/tutor-view.test.ts`; the resize rules and the morph's geometry: `tests/side-tutor-window.test.ts`; the phone sheet's background and text size: `tests/phone-layout.test.ts`; the phone sheet's swipe and slide (the rules, and the touch driver with scripted touches): `tests/tutor-sheet-swipe.test.ts`, and through the window in `tests/side-tutor-ui.test.tsx`. Upstream's own: `tests/side-chat*.test.ts`, `tests/use-side-thread.test.ts`.
 - **Known limit:** when "Ask" is pressed on a passage of another step while an answer is still being written, that answer finishes on the server and shows a spinner until it lands; its words don't stream in meanwhile.
 - **On a session another device holds** (cloud sync, a paired app only): the window closes to a greyed bubble that can't be pressed, at the lesson's bottom right. See "Slice 2" in `docs/cloud-sync.md`.
 - **On a phone** (browser narrower than 640 px): a bubble above the message box opens the tutor as a bottom sheet. See "Phone layouts" in `docs/cloud-sync.md`.
+- **On a phone: swipe down to minimize** (owner's choice from a live demo, option A of two: "handle and top bar"; the other was "anywhere on the sheet, the conversation too while it is at its top"). Built on `claude/upstream-0.6.0`, not pushed.
+  - **Where it starts:** the handle strip at the sheet's top and the top bar ("Tutor"). Not on the conversation (it only scrolls), not on the typing row, and not on a button in the bar (the − button).
+  - **The sheet follows the finger** downward, never above its resting place. The dim over the lesson fades with it (its opacity is 1 minus the share of the sheet's height it has moved).
+  - **Letting go:** past a quarter of the sheet's height, or after a quick flick down (faster than 0.5 px/ms over the finger's last 80 ms, with more than 12 px moved), it slides away and the Tutor is minimized; otherwise it springs back in 200 ms.
+  - **The − button and a tap on the dimmed lesson slide it away the same way** (they closed it at once).
+  - **The slide:** only `transform` and the dim's `opacity` move; `max(130, 260 × the share of the height still to travel)` ms, the morph's easing (`cubic-bezier(0.2, 0.8, 0.2, 1)`). The sheet stays mounted while it goes; the bubble comes back when it is down, as on a computer when the window has folded.
+  - **Unchanged:** opening (the 200 ms slide-up), and an answer being written carries on after minimizing as before.
+  - **At once:** with reduced motion (a swipe still follows the finger and minimizes, with no slide), and when a session becomes held, also in the middle of a slide (it then ends minimized).
+  - **Touch rules** (the iPhone's, "Touch and typing" in `docs/cloud-sync.md`): decided on the first movement, whose default is prevented from then on; the release speed comes from `releaseVelocity`, nothing if the finger had stopped; a second finger, or a cancelled touch, springs it back. A tap on the bar that doesn't move does nothing. A swipe that starts during the opening slide picks the sheet up where that slide had reached (the CSS slide is cancelled), so nothing jumps. A touch while it slides away does nothing.
+  - **Read while building, for the owner to review:**
+    - the sheet's two other ways of closing on a session that isn't held slide away too: a tap on a quoted passage ("Show in the lesson", which closes the sheet first) and Esc from a connected keyboard;
+    - asked to open while it is still sliding away (the lesson's Ask is the only way left to do that), it springs back up and stays open;
+    - a cancelled touch (`touchcancel`) springs back rather than deciding as a release would.
+  - With the keyboard up the sheet slides down under it, and the keyboard goes when the typing box unmounts at the end, as closing did before.
+  - **Only the owner's iPhone can confirm the feel:** Chromium has no rubber band, no iOS keyboard and no 120 fps touch timing.
+  - `components/phone/tutor-sheet-swipe.ts` (the rules and the touch driver); `components/side-tutor.tsx` hooks it to the sheet, the dim and every way of minimizing.
 
 ## Notes drawer
 
