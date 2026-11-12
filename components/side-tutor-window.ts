@@ -58,3 +58,35 @@ export function storedTutorSize(raw: unknown): TutorSize | null {
 	if (typeof width !== "number" || typeof height !== "number" || !Number.isFinite(width) || !Number.isFinite(height)) return null;
 	return { width: Math.max(TUTOR_MIN_WIDTH, width), height: Math.max(TUTOR_MIN_HEIGHT, height) };
 }
+
+// ─── Opening from the bubble and closing into it (owner's pick: "Morph") ─────
+
+/** How long the window takes to come out of the bubble, and to fold back into it. */
+export const MORPH_OPEN_MS = 260;
+export const MORPH_CLOSE_MS = 210;
+/** The easing of the sync strip and the message box. */
+export const MORPH_EASE = "cubic-bezier(0.2, 0.8, 0.2, 1)";
+
+export interface MorphBox { left: number; top: number; width: number; height: number }
+
+/**
+ * The window squeezed onto the bubble: the transform that puts the window's
+ * box exactly over the bubble's, the corner radius that makes that squeezed
+ * box look round, and the scale that keeps the bubble's icon its own size
+ * inside it. Animating from this to "no transform" (and back) is the morph;
+ * only transform and opacity move, so nothing is laid out again on the way.
+ * Null when either box has no size.
+ */
+export function morphStart(bubble: MorphBox, panel: MorphBox): { transform: string; borderRadius: string; iconTransform: string } | null {
+	if (!(bubble.width > 0 && bubble.height > 0 && panel.width > 0 && panel.height > 0)) return null;
+	const sx = bubble.width / panel.width;
+	const sy = bubble.height / panel.height;
+	const dx = bubble.left + bubble.width / 2 - (panel.left + panel.width / 2);
+	const dy = bubble.top + bubble.height / 2 - (panel.top + panel.height / 2);
+	const n = (value: number) => Number(value.toFixed(3));
+	return {
+		transform: `translate(${n(dx)}px, ${n(dy)}px) scale(${n(sx)}, ${n(sy)})`,
+		borderRadius: `${n(bubble.width / 2 / sx)}px / ${n(bubble.height / 2 / sy)}px`,
+		iconTransform: `scale(${n(1 / sx)}, ${n(1 / sy)})`,
+	};
+}

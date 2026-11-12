@@ -131,6 +131,10 @@ Five things the plan had left open, or that came out differently than the plan s
 4. **The iPhone status bar is left as it is for now** (`black-translucent`). The plan said dark clock text on a light theme. An iPhone offers no style with dark text that also lets the app draw under the clock, which the full-height session list and the tuned top spacing rely on. So on a light theme the home-screen app's clock is white and hard to read; a Safari tab isn't affected. To be decided in the phone-layout round, on the owner's real phone. The two other options shown: a dark strip behind the clock on light themes, or the iPhone's standard bar on light themes (the icon must be added again and the top spacing re-checked).
 5. **The icons for the fork's Settings rows stay** as picked: a cloud (Cloud), a notebook with a pen (Obsidian), a person (Account).
 
+## Asked for with the results (owner)
+
+- **The Tutor starts minimized** on a computer whenever a session opens, and **comes out of its bubble with a morph** when opened and closed. Computer only; the phone's animation is not to be changed yet. Details in `docs/side-tutor.md`.
+
 ## How it was checked
 
 - **Tests, typecheck, lint.** In the development sandbox every test passes except the four that fail there on untouched upstream too ("Development notes" below).

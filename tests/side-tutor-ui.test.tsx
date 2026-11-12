@@ -129,7 +129,7 @@ const posted: string[] = [];
 const ndjson = (lines: object[]) => new Response(lines.map((line) => `${JSON.stringify(line)}\n`).join(""), { status: 200 });
 
 let side: TutorSide | null = null;
-async function mountTutor(dictation?: FakeDictation, lesson: LhMessage[] = LESSON) {
+async function mountTutor(dictation?: FakeDictation, lesson: LhMessage[] = LESSON, { opened = true }: { opened?: boolean } = {}) {
 	posted.length = 0;
 	Object.assign(server, { posts: [], stops: [], send: null, end: null });
 	globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -174,6 +174,16 @@ async function mountTutor(dictation?: FakeDictation, lesson: LhMessage[] = LESSO
 		await settle();
 	};
 	await render(dictation);
+	// The tutor starts minimized (owner's ask). Most tests are about the open
+	// window, so on a computer they get it opened; `opened: false` leaves the bubble.
+	const phone = (dom.window as unknown as { matchMedia?: (q: string) => { matches: boolean } }).matchMedia?.("(max-width: 639.98px)").matches ?? false;
+	if (opened && !phone) {
+		const toggle = document.querySelector("[data-testid='side-tutor-toggle']") as HTMLElement | null;
+		if (toggle && !toggle.hasAttribute("data-held")) {
+			await act(async () => toggle.click());
+			await settle();
+		}
+	}
 	return Object.assign(host, { rerender: render, settle });
 }
 /** Minimizes the window and returns the bubble, wherever it is drawn. */
@@ -486,7 +496,89 @@ describe("minimized", () => {
 		assert.match(bubble.className, /rounded-full/);
 		assert.match(bubble.className, /size-13/);
 		assert.ok(bubble.querySelector("svg"));
-		assert.equal(storage.get("lh:side-tutor:open"), "false");
+		assert.equal(storage.get("lh:side-tutor:open"), undefined, "whether it is open is not remembered");
+	});
+
+	it("is how the tutor starts whenever a session opens, whatever was open before", async () => {
+		// An older version remembered "open"; that is no longer read.
+		storage.set("lh:side-tutor:open", "true");
+		dockAt(640, 900);
+		const host = await mountTutor(undefined, LESSON, { opened: false });
+		assert.equal(host.querySelector("[data-testid='side-tutor']"), null, "no window at first");
+		const bubble = document.querySelector("[data-testid='side-tutor-toggle']") as HTMLElement;
+		assert.ok(bubble, "the bubble");
+		await act(async () => bubble.click());
+		assert.ok(host.querySelector("[data-testid='side-tutor']"), "a press opens it");
+		assert.equal(storage.get("lh:side-tutor:open"), "true", "nothing is written about it");
+	});
+
+	it("the window comes out of the bubble and folds back into it (the morph), on a computer with motion allowed", async () => {
+		dockAt(640, 900);
+		type Run = { el: Element; frames: Record<string, unknown>[]; options: Record<string, unknown>; onfinish: (() => void) | null; cancelled: boolean; cancel(): void };
+		const runs: Run[] = [];
+		const proto = dom.window.HTMLElement.prototype as unknown as Record<string, unknown>;
+		const svgProto = Object.getPrototypeOf(document.createElementNS("http://www.w3.org/2000/svg", "svg")) as Record<string, unknown>;
+		// The window asks the browser whether it can animate at all.
+		const g = globalThis as unknown as { Element?: { prototype: Record<string, unknown> } };
+		const hadElement = g.Element;
+		g.Element = dom.window.Element as unknown as { prototype: Record<string, unknown> };
+		const elementProto = g.Element.prototype;
+		const before = { animate: elementProto.animate, rect: proto.getBoundingClientRect, svgAnimate: svgProto.animate };
+		const animate = function (this: Element, frames: Record<string, unknown>[], options: Record<string, unknown>) {
+			const run: Run = { el: this, frames, options, onfinish: null, cancelled: false, cancel() { run.cancelled = true; } };
+			runs.push(run);
+			return run;
+		};
+		elementProto.animate = animate;
+		svgProto.animate = animate;
+		proto.getBoundingClientRect = function (this: Element) {
+			const id = this.getAttribute("data-testid");
+			if (id === "side-tutor-toggle" || id === "side-tutor-bubble-place") return { left: 832, top: 568, width: 52, height: 52 };
+			if (id === "side-tutor") return { left: 470, top: 60, width: 352, height: 480 };
+			return { left: 0, top: 0, width: 0, height: 0 };
+		};
+		try {
+			const host = await mountTutor(undefined, LESSON, { opened: false });
+			await act(async () => (document.querySelector("[data-testid='side-tutor-toggle']") as HTMLElement).click());
+			const panel = host.querySelector("[data-testid='side-tutor']") as HTMLElement;
+			assert.ok(panel.querySelector("[data-testid='side-tutor-morph']"), "the bubble's grey lies over the window while it opens");
+			const opening = runs.find((run) => run.el === panel)!;
+			// The bubble's centre is (858, 594), the window's (646, 300): 212 right and 294 down, squeezed to 52 × 52.
+			assert.deepEqual(opening.frames[0], { transform: "translate(212px, 294px) scale(0.148, 0.108)", borderRadius: "176px / 240px" });
+			assert.match(String(opening.frames[1]!.transform), /scale\(1, 1\)/);
+			assert.equal(opening.options.duration, 260);
+			assert.equal(opening.options.easing, "cubic-bezier(0.2, 0.8, 0.2, 1)");
+			await act(async () => opening.onfinish?.());
+			assert.equal(panel.querySelector("[data-testid='side-tutor-morph']"), null, "the cover goes when the window is out");
+			assert.ok(document.querySelector("[data-testid='side-tutor-bubble-place']"), "an unseen stand-in keeps the bubble's place");
+
+			runs.length = 0;
+			await act(async () => (host.querySelector("[aria-label='Minimize the side tutor']") as HTMLElement).click());
+			assert.ok(host.querySelector("[data-testid='side-tutor']"), "still on screen while it folds back");
+			assert.equal(document.querySelector("[data-testid='side-tutor-toggle']"), null);
+			const closing = runs.find((run) => run.el === host.querySelector("[data-testid='side-tutor']"))!;
+			assert.match(String(closing.frames[1]!.transform), /^translate\(212px, 294px\) scale\(0\.148, 0\.108\)$/);
+			assert.equal(closing.options.duration, 210);
+			await act(async () => closing.onfinish?.());
+			assert.equal(host.querySelector("[data-testid='side-tutor']"), null, "then it is the bubble");
+			assert.ok(document.querySelector("[data-testid='side-tutor-toggle']"));
+
+			// Reduced motion: at once, as before.
+			Object.assign(dom.window, { matchMedia: (query: string) => ({ matches: query.includes("reduced-motion"), addEventListener() {}, removeEventListener() {} }) });
+			runs.length = 0;
+			await act(async () => (document.querySelector("[data-testid='side-tutor-toggle']") as HTMLElement).click());
+			assert.ok(host.querySelector("[data-testid='side-tutor']"));
+			assert.equal(host.querySelector("[data-testid='side-tutor-morph']"), null);
+			await act(async () => (host.querySelector("[aria-label='Minimize the side tutor']") as HTMLElement).click());
+			assert.equal(host.querySelector("[data-testid='side-tutor']"), null);
+			assert.equal(runs.length, 0, "nothing is animated");
+		} finally {
+			delete (dom.window as unknown as Record<string, unknown>).matchMedia;
+			elementProto.animate = before.animate;
+			if (hadElement) g.Element = hadElement; else delete g.Element;
+			svgProto.animate = before.svgAnimate;
+			proto.getBoundingClientRect = before.rect;
+		}
 	});
 
 	it("is drawn inside the dock, off to the side above the question bar, wherever the window was", async () => {

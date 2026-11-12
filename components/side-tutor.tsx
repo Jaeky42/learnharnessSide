@@ -36,7 +36,7 @@ import { useDockAnchor } from "@/components/phone/use-dock-anchor";
 import { plainEnterSends } from "@/components/phone/enter-key";
 import { joinDictation, type Dictation } from "@/components/dictation";
 import { SIDE_TUTOR_DICTATION_ID, SideTutorDictate, tutorOwnsDictation } from "@/components/side-tutor-dictation";
-import { resizeTutorRect, storedTutorSize, TUTOR_EDGE, TUTOR_RESIZE_EDGES, type TutorRect, type TutorResizeEdge, type TutorSize } from "@/components/side-tutor-window";
+import { MORPH_CLOSE_MS, MORPH_EASE, MORPH_OPEN_MS, morphStart, resizeTutorRect, storedTutorSize, TUTOR_EDGE, TUTOR_RESIZE_EDGES, type MorphBox, type TutorRect, type TutorResizeEdge, type TutorSize } from "@/components/side-tutor-window";
 import { CitationActionsContext } from "@/components/citation-chip";
 import { useServerResync } from "@/components/server-events";
 import type { useSideThread } from "@/components/use-side-thread";
@@ -96,7 +96,8 @@ const TYPING_ROW_VARS = {
 	"--lh-tutor-hint": "calc(var(--lh-tutor-text, var(--lh-prose-size)) * 0.875)",
 } as React.CSSProperties;
 
-const OPEN_KEY = "lh:side-tutor:open";
+/** The round bubble's look (the minimized tutor). */
+const BUBBLE_LOOK = "flex size-13 items-center justify-center rounded-full border border-border bg-card/85 shadow-[0_6px_18px_rgb(0_0_0/0.35)] backdrop-blur";
 const POS_KEY = "lh:side-tutor:pos";
 /** The size the window was last dragged to (owner's choice: remembered, like its position). */
 const SIZE_KEY = "lh:side-tutor:size";
@@ -188,8 +189,13 @@ export function SideTutor({ chatId, messages, side, dictation, held = false, ope
 	openRequest?: number;
 }) {
 	const [mounted, setMounted] = useState(false);
-	const [openWanted, setOpen] = useState(true);
-	const open = openWanted && !held;
+	// Minimized whenever a session opens (owner's ask): the open state belongs
+	// to this visit of the session and is not remembered.
+	const [openWanted, setOpen] = useState(false);
+	/** On a computer the window comes out of the bubble and folds back into it
+	 *  ("Morph", owner's pick). While it folds back it is still on screen. */
+	const [morph, setMorph] = useState<"opening" | "closing" | null>(null);
+	const open = (openWanted || morph === "closing") && !held;
 	const [pos, setPos] = useState<Pos>({ left: 0, top: DEFAULT_TOP });
 	/** The size it was resized to; null until then (the frame's own size). */
 	const [size, setSize] = useState<TutorSize | null>(null);
@@ -206,6 +212,12 @@ export function SideTutor({ chatId, messages, side, dictation, held = false, ope
 	const tutorDictating = tutorOwnsDictation(dictation);
 
 	const panelRef = useRef<HTMLDivElement>(null);
+	/** The minimized bubble, and (while the window is open on a computer) an
+	 *  unseen stand-in at the bubble's place: where the morph starts and ends. */
+	const bubbleRef = useRef<HTMLButtonElement>(null);
+	const placeRef = useRef<HTMLSpanElement>(null);
+	const coverRef = useRef<HTMLDivElement>(null);
+	const morphBox = useRef<MorphBox | null>(null);
 	const resizeRef = useRef<{ edge: TutorResizeEdge; x: number; y: number; start: TutorRect } | null>(null);
 	const scrollRef = useRef<HTMLDivElement>(null);
 	const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -224,7 +236,6 @@ export function SideTutor({ chatId, messages, side, dictation, held = false, ope
 
 	// Client-only preferences (no SSR mismatch).
 	useEffect(() => {
-		setOpen(isPhoneNow() ? false : readStored(OPEN_KEY, true));
 		const stored = storedTutorSize(readStored<unknown>(SIZE_KEY, null));
 		setSize(stored);
 		setPos(clampPos(readStored(POS_KEY, defaultPos()), Math.min(stored?.width ?? DEFAULT_WIDTH, window.innerWidth - 2 * EDGE)));
@@ -392,15 +403,71 @@ export function SideTutor({ chatId, messages, side, dictation, held = false, ope
 		return () => window.removeEventListener("resize", onResize);
 	}, [mounted, open]);
 
+	/** May the window morph right now? A computer, motion allowed, and a browser that animates. */
+	const canMorph = () =>
+		!isPhoneNow()
+		&& typeof Element !== "undefined" && typeof Element.prototype.animate === "function"
+		&& !window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+
 	const setOpenPersist = (next: boolean) => {
 		// Minimizing ends a dictation to the tutor; its words stay in the box.
 		if (!next && tutorDictating) dictation?.stop();
 		if (!next && panelRef.current) widthRef.current = panelRef.current.offsetWidth;
-		setOpen(next);
-		if (isPhoneNow()) return; // no auto-focus either: it would pop the keyboard up
-		writeStored(OPEN_KEY, next);
-		if (next) window.setTimeout(() => inputRef.current?.focus(), 0);
+		if (isPhoneNow()) { // no auto-focus either: it would pop the keyboard up
+			setOpen(next);
+			return;
+		}
+		if (next) {
+			// Out of the bubble, from where the bubble is now.
+			morphBox.current = bubbleRef.current?.getBoundingClientRect() ?? null;
+			setOpen(true);
+			setMorph(morphBox.current && canMorph() ? "opening" : null);
+			window.setTimeout(() => inputRef.current?.focus(), 0);
+			return;
+		}
+		// Back into the bubble's place; the window leaves when it has folded.
+		morphBox.current = placeRef.current?.getBoundingClientRect() ?? null;
+		if (openWanted && panelRef.current && morphBox.current && canMorph()) setMorph("closing");
+		else {
+			setMorph(null);
+			setOpen(false);
+		}
 	};
+
+	// The morph itself. Only transform and opacity move (side-tutor-window.ts).
+	useLayoutEffect(() => {
+		if (!morph) return;
+		const panel = panelRef.current;
+		const cover = coverRef.current;
+		const start = panel && morphBox.current ? morphStart(morphBox.current, panel.getBoundingClientRect()) : null;
+		const opening = morph === "opening";
+		const settle = () => {
+			if (!opening) setOpen(false);
+			setMorph(null);
+		};
+		if (!panel || !cover || !start) {
+			settle();
+			return;
+		}
+		const radius = (typeof window.getComputedStyle === "function" ? window.getComputedStyle(panel).borderTopLeftRadius : "") || "12px";
+		const small = { transform: start.transform, borderRadius: start.borderRadius };
+		const full = { transform: "translate(0px, 0px) scale(1, 1)", borderRadius: `${radius} / ${radius}` };
+		const ms = opening ? MORPH_OPEN_MS : MORPH_CLOSE_MS;
+		const runs = [
+			panel.animate(opening ? [small, full] : [full, small], { duration: ms, easing: MORPH_EASE, fill: opening ? "none" : "forwards" }),
+			// The bubble's own grey lies over the window and fades as the shape
+			// opens, so the bubble turns into the window with no dark moment.
+			cover.animate(opening ? [{ opacity: 1 }, { opacity: 0 }] : [{ opacity: 0 }, { opacity: 1 }], { duration: ms, easing: opening ? "ease-in" : "ease-out", fill: "forwards" }),
+		];
+		const icon = cover.firstElementChild;
+		if (icon) runs.push(icon.animate(opening ? [{ transform: start.iconTransform }, { transform: "scale(1, 1)" }] : [{ transform: "scale(1, 1)" }, { transform: start.iconTransform }], { duration: ms, easing: MORPH_EASE, fill: "forwards" }));
+		let live = true;
+		runs[0]!.onfinish = () => { if (live) settle(); };
+		return () => {
+			live = false;
+			for (const run of runs) run.cancel();
+		};
+	}, [morph]);
 
 	// "Ask" on a highlighted passage (the lesson's toolbar) opens the window.
 	const openRequestSeen = useRef(openRequest);
@@ -408,9 +475,16 @@ export function SideTutor({ chatId, messages, side, dictation, held = false, ope
 		if (openRequest === openRequestSeen.current) return;
 		openRequestSeen.current = openRequest;
 		if (held) return;
+		if (isPhoneNow()) {
+			setOpen(true);
+			return;
+		}
+		// Already open (or folding back): it stays, with no new morph.
+		if (bubbleRef.current) {
+			morphBox.current = bubbleRef.current.getBoundingClientRect();
+			setMorph(canMorph() ? "opening" : null);
+		} else setMorph(null);
 		setOpen(true);
-		if (isPhoneNow()) return;
-		writeStored(OPEN_KEY, true);
 		window.setTimeout(() => inputRef.current?.focus(), 0);
 	}, [openRequest, held]);
 
@@ -519,17 +593,31 @@ export function SideTutor({ chatId, messages, side, dictation, held = false, ope
 		}
 	};
 
+	// On a computer the bubble is drawn inside the dock, above its top right
+	// corner, which is the lesson's bottom right (owner's ask): it then keeps
+	// its place against the question bar exactly, while the lesson scrolls
+	// and while a question opens or folds. With no room above an opened
+	// question it sits under the top bar, as far right as here.
+	// On a held session there is no question bar to sit above (the dock is
+	// hidden): the greyed bubble keeps to the lesson's bottom right.
+	const onDock = !phone && !held && anchor.place === "above-dock" && anchor.dock !== null;
+	const bubbleStyle = (phone
+		? anchor.place === "above-dock"
+			? { top: anchor.top }
+			: {}
+		: onDock
+			? { right: BUBBLE_EDGE_GAP, bottom: `calc(100% + ${BUBBLE_BAR_GAP}px)`, WebkitAppRegion: "no-drag" }
+			: held
+				? { right: anchor.right + BUBBLE_EDGE_GAP, bottom: BUBBLE_BAR_GAP, WebkitAppRegion: "no-drag" }
+				: { right: anchor.right + BUBBLE_EDGE_GAP, top: BUBBLE_TOP, WebkitAppRegion: "no-drag" }) as React.CSSProperties;
+	// The dock lets clicks through to the lesson; the bubble takes its own.
+	const bubblePosition = onDock ? "absolute" : "fixed";
+	const atBubblePlace = (node: React.ReactElement) => (onDock && anchor.dock ? createPortal(node, anchor.dock) : node);
+
 	if (!open) {
-		// On a computer the bubble is drawn inside the dock, above its top right
-		// corner, which is the lesson's bottom right (owner's ask): it then keeps
-		// its place against the question bar exactly, while the lesson scrolls
-		// and while a question opens or folds. With no room above an opened
-		// question it sits under the top bar, as far right as here.
-		// On a held session there is no question bar to sit above (the dock is
-		// hidden): the greyed bubble keeps to the lesson's bottom right.
-		const onDock = !phone && !held && anchor.place === "above-dock" && anchor.dock !== null;
 		const bubble = (
 			<button
+				ref={bubbleRef}
 				type="button"
 				data-testid="side-tutor-toggle"
 				// PHONE: a round bubble above the dock, or in the top-right corner
@@ -547,21 +635,11 @@ export function SideTutor({ chatId, messages, side, dictation, held = false, ope
 					setOpenPersist(true);
 				}}
 				onKeyDown={(e) => e.stopPropagation()}
-				style={
-					(phone
-						? anchor.place === "above-dock"
-							? { top: anchor.top }
-							: {}
-						: onDock
-							? { right: BUBBLE_EDGE_GAP, bottom: `calc(100% + ${BUBBLE_BAR_GAP}px)`, WebkitAppRegion: "no-drag" }
-							: held
-								? { right: anchor.right + BUBBLE_EDGE_GAP, bottom: BUBBLE_BAR_GAP, WebkitAppRegion: "no-drag" }
-								: { right: anchor.right + BUBBLE_EDGE_GAP, top: BUBBLE_TOP, WebkitAppRegion: "no-drag" }) as React.CSSProperties
-				}
+				style={bubbleStyle}
 				className={cn(
-					"z-30 flex size-13 items-center justify-center rounded-full border border-border bg-card/85 text-muted-foreground shadow-[0_6px_18px_rgb(0_0_0/0.35)] backdrop-blur transition-colors",
+					BUBBLE_LOOK,
+					"z-30 text-muted-foreground transition-colors",
 					held ? "cursor-default opacity-40" : "hover:bg-accent hover:text-foreground",
-					// The dock lets clicks through to the lesson; the bubble takes its own.
 					onDock ? "pointer-events-auto absolute" : "fixed",
 				)}
 				aria-label="Open the side tutor"
@@ -574,12 +652,14 @@ export function SideTutor({ chatId, messages, side, dictation, held = false, ope
 				)}
 			</button>
 		);
-		return onDock && anchor.dock ? createPortal(bubble, anchor.dock) : bubble;
+		return atBubblePlace(bubble);
 	}
 
 	return (
 		<>
 		{phone && <div data-phone="backdrop" data-phone-layer="sheet" aria-hidden="true" onClick={() => setOpenPersist(false)} />}
+		{/* An unseen stand-in where the bubble will be: the place the window folds back into. */}
+		{!phone && atBubblePlace(<span ref={placeRef} aria-hidden="true" data-testid="side-tutor-bubble-place" style={bubbleStyle} className={cn("pointer-events-none invisible size-13", bubblePosition)} />)}
 		{/* The frame: on a computer it holds the window's place and size, and
 		    the resize zones around the window. On a phone it is no box at all
 		    (the sheet is placed by app/phone.css). */}
@@ -596,8 +676,14 @@ export function SideTutor({ chatId, messages, side, dictation, held = false, ope
 			aria-label="Side tutor"
 			onKeyDown={onPanelKeyDown}
 			style={(phone ? {} : { WebkitAppRegion: "no-drag" }) as React.CSSProperties}
-			className={cn("flex flex-col overflow-hidden rounded-xl border border-border shadow-xl backdrop-blur", phone ? cn("fixed z-30", WINDOW_SIZE) : "size-full")}
+			className={cn("flex flex-col overflow-hidden rounded-xl border border-border shadow-xl backdrop-blur", phone ? cn("fixed z-30", WINDOW_SIZE) : "relative size-full")}
 		>
+			{/* During the morph: the bubble's own grey and icon, fading into the window. */}
+			{morph && !phone && (
+				<div ref={coverRef} aria-hidden="true" data-testid="side-tutor-morph" className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-card text-muted-foreground">
+					<MessageCircleQuestionIcon className="size-6" />
+				</div>
+			)}
 			<div
 				className={cn("flex cursor-grab touch-none items-center gap-2 border-b border-border px-3 py-2 select-none active:cursor-grabbing", BAR_BG)}
 				onPointerDown={onDragStart}
