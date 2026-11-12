@@ -32,8 +32,8 @@
  * up, so the keyboard handling above is unchanged.
  */
 
-import { useEffect } from "react";
-import { useIsPhone } from "@/components/phone/use-phone";
+import { useEffect, useLayoutEffect } from "react";
+import { isBrowserNow, useIsPhone } from "@/components/phone/use-phone";
 
 /** Pure rule, exported for tests: what to apply for a visual viewport. */
 export function viewportFit(vv: { height: number; offsetTop: number; scale: number }): { height: number; top: number } | null {
@@ -124,8 +124,31 @@ function standaloneNow(): boolean {
 	return nav.standalone === true || window.matchMedia("(display-mode: standalone)").matches;
 }
 
+/** Pure rule, exported for tests: does this page get the home-screen app's
+ *  marker? In a browser only, at any width: on a phone app/phone.css moves the
+ *  top edges below iOS's blur with it, on a tablet (the computer layout)
+ *  app/tablet.css does (owner's iPad). Never in the desktop app. */
+export function standaloneMarker(env: { browser: boolean; standalone: boolean }): boolean {
+	return env.browser && env.standalone;
+}
+
+/** useLayoutEffect, silent during the server render. */
+const useIsoLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
+
 export function PhoneViewport() {
 	const phone = useIsPhone();
+	// The home-screen app's marker, at every width (body[data-lh-standalone]).
+	// A layout effect, so it is set before any component's first ordinary
+	// effect reads the top inset it gives (the Tutor's window places itself
+	// in one; this runtime mounts after the page).
+	useIsoLayoutEffect(() => {
+		const body = document.body;
+		if (standaloneMarker({ browser: isBrowserNow(), standalone: standaloneNow() })) body.dataset.lhStandalone = "";
+		else delete body.dataset.lhStandalone;
+		return () => {
+			delete body.dataset.lhStandalone;
+		};
+	}, []);
 	useEffect(() => {
 		const root = document.documentElement;
 		const body = document.body;
@@ -134,7 +157,6 @@ export function PhoneViewport() {
 			root.style.removeProperty("--lh-vvh");
 			body.style.removeProperty("--lh-vv-top");
 			delete body.dataset.lhKeyboard;
-			delete body.dataset.lhStandalone;
 			if (body.dataset.lhBleed !== undefined) {
 				delete body.dataset.lhBleed;
 				body.style.removeProperty("--lh-bleed");
@@ -158,9 +180,6 @@ export function PhoneViewport() {
 			// Safari's new height has arrived: the keyboard is gone.
 			if (closing && fit.height >= window.innerHeight - 1) endClosing();
 			const standalone = standaloneNow();
-			// The home-screen app's top edges sit lower (app/phone.css, --lh-safe-top).
-			if (standalone) body.dataset.lhStandalone = "";
-			else delete body.dataset.lhStandalone;
 			// Only while the keyboard is down: with it up the iPhone reports the
 			// visible height correctly, and adding the strip pushed the bottom of
 			// the app (and menus anchored there) 62 points under the keyboard
