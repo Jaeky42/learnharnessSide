@@ -101,7 +101,8 @@ export function flashcardsAuthority(): MapsAuthority {
 		rules: FLASHCARDS_RULES,
 		busy: () => files.busy(),
 		makeBackup: backup,
-		onTimeZone: (deviceId, zone) => takeTimeZone(deviceId, zone),
+		// A new zone: every schedule here is worked out again in it, as the PC works them out.
+		onTimeZone: (deviceId, zone) => { if (takeTimeZone(deviceId, zone)) files.rebuild(); },
 	}));
 }
 
@@ -118,6 +119,8 @@ export function flashcardsDesktop(): MapsDesktop {
 		now: Date.now,
 		clockOffset: measuredClockOffsetMs,
 		timeZone: localTimeZone,
+		// The zone goes to the server (first, or after this PC moved): the server works every schedule out again in it, and so does this PC.
+		onTimeZoneChange: () => { files.rebuild(); },
 		rules: FLASHCARDS_RULES,
 		path: FLASHCARDS_SYNC_PATH,
 		busy: () => files.busy(),

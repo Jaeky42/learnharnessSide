@@ -35,6 +35,7 @@ const { makeFlashcardsBackup } = await import("../src/store/sync/backup.ts");
 const { createMapsAuthority, createMapsDesktop, isAuthorityMapsState, isDesktopMapsState } = await import("../src/server/sync/maps-sync.ts");
 const { createFlashcardsFiles, flashcardsDataDir } = await import("../src/server/sync/flashcards-files.ts");
 const { authorityState, desktopState, FLASHCARDS_RULES, FLASHCARDS_SYNC_PATH } = await import("../src/server/sync/flashcards-engine.ts");
+const { takeTimeZone } = await import("../src/server/sync/flashcards-zone.ts");
 import type { SyncReply } from "../src/server/sync/client.ts";
 import type { FlashcardsFile } from "../src/core/sync/flashcards.ts";
 
@@ -62,7 +63,7 @@ function side(root: string, name: string, opts: { plugin?: boolean } = {}) {
 	return { name, dataDir, syncDir, files, device, announced, library };
 }
 
-function world(opts: { page?: { items: number; bytes: number }; serverPlugin?: boolean } = {}) {
+function world(opts: { page?: { items: number; bytes: number }; serverPlugin?: boolean; realZone?: boolean } = {}) {
 	const root = path.join(TMP, `w${++worlds}`);
 	const server = side(root, "server", { plugin: opts.serverPlugin });
 	const zones: Array<[string, string]> = [];
@@ -72,7 +73,12 @@ function world(opts: { page?: { items: number; bytes: number }; serverPlugin?: b
 		files: server.files,
 		state: authorityState(stateFile(path.join(server.syncDir, "flashcards.json"), isAuthorityMapsState), server.files),
 		now: () => clock.now, rules: FLASHCARDS_RULES, busy: () => server.files.busy(), makeBackup: backup(server.dataDir),
-		onTimeZone: (deviceId, zone) => zones.push([deviceId, zone]), page: opts.page,
+		onTimeZone: (deviceId, zone) => {
+			zones.push([deviceId, zone]);
+			// As flashcards-engine.ts does: this process takes the zone, and works every schedule out again in it.
+			if (opts.realZone && takeTimeZone(deviceId, zone, { syncDir: server.syncDir, now: clock.now })) server.files.rebuild();
+		},
+		page: opts.page,
 	});
 
 	function desktop(name: string, deviceId: string, o: { plugin?: boolean; zone?: () => string | null } = {}) {
@@ -91,7 +97,11 @@ function world(opts: { page?: { items: number; bytes: number }; serverPlugin?: b
 				const result = JSON.parse(JSON.stringify(authority.exchange(deviceId, body))) as { status: number; body: Record<string, unknown> };
 				return (result.status === 200 ? { ok: true, body: result.body } : { ok: false, reason: "refused", status: result.status, code: result.body.code ?? null, error: String(result.body.error), body: result.body }) as SyncReply<T>;
 			},
-			now: () => clock.now, clockOffset: () => 0, timeZone: o.zone ?? (() => "Europe/Stockholm"),
+			now: () => clock.now, clockOffset: () => 0, timeZone: o.zone ?? (() => "Europe/Stockholm"), onTimeZoneChange: () => {
+				// One process plays both sides: the PC works its schedules out in its own zone.
+				if (opts.realZone) process.env.TZ = (o.zone ?? (() => "Europe/Stockholm"))()!;
+				s.files.rebuild();
+			},
 			rules: FLASHCARDS_RULES, path: FLASHCARDS_SYNC_PATH, busy: () => s.files.busy(), makeBackup: backup(s.dataDir), page: opts.page,
 		});
 		return { ...s, sync, requests, setOnline: (value: boolean) => { online = value; } };
@@ -374,5 +384,35 @@ describe("Flashcards sync through the exchange", () => {
 		await settle(pc);
 		assert.deepEqual(w.zones, [["dev_aaaaaaaaaaaaaaaa", "Europe/Stockholm"], ["dev_aaaaaaaaaaaaaaaa", "America/New_York"]]);
 		assert.equal(pc.requests.filter((r) => r.timeZone).length, 2);
+	});
+
+	it("schedules agree across time zones: the server works every schedule out again in the PC's zone, and the PC in its own when it moves", async () => {
+		const before = process.env.TZ;
+		cleanups.push(() => { process.env.TZ = before; });
+		// 06:00 UTC: already the 5th's study day in UTC (day start 4:00), still the 4th's in New York (02:00).
+		clock.now = Date.UTC(2026, 4, 5, 6);
+		const w = world({ realZone: true });
+		let zone = "America/New_York";
+		const pc = w.desktop("pc", "dev_aaaaaaaaaaaaaaaa", { zone: () => zone });
+		process.env.TZ = "America/New_York";
+		await pc.device!.generate([{ id: "n_p", questions: ["P?"] }]);
+		await study(pc.device!, [4]);
+		// The server was used from a phone while it still ran in the zone it was started with.
+		process.env.TZ = "UTC";
+		await w.server.device!.generate([{ id: "n_s", questions: ["S?"] }]);
+		await study(w.server.device!, [4]);
+		const serverDue = w.server.library()!.propositions.n_s!.schedule;
+		await settle(pc);
+		assert.equal(process.env.TZ, "America/New_York", "the server's process follows the PC");
+		assert.notDeepEqual(w.server.library()!.propositions.n_s!.schedule, serverDue, "its own fact was worked out again in the PC's zone");
+		assert.deepEqual(view(pc.library()), view(w.server.library()), "the same schedules on both sides");
+		// The PC moves to Tokyo: it works its own schedules out again, the server takes the zone and does the same.
+		zone = "Asia/Tokyo";
+		process.env.TZ = "Asia/Tokyo";
+		clock.now += DAY;
+		await settle(pc);
+		assert.equal(process.env.TZ, "Asia/Tokyo");
+		assert.deepEqual(view(pc.library()), view(w.server.library()));
+		assert.deepEqual(w.zones.map(([, z]) => z), ["America/New_York", "Asia/Tokyo"]);
 	});
 });

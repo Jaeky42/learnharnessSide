@@ -8,6 +8,12 @@
  * every start, before the plugin works anything out (instrumentation.ts).
  * With two PCs in different zones, the most recently changed one counts.
  *
+ * Schedules depend on the zone they are worked out in (a review card is due
+ * at the day start of a local day). So when the zone changes, each side
+ * works every schedule out again in the new one (flashcards-engine.ts),
+ * and both sides agree: the server when it takes a new zone, the PC when it
+ * sends one (its first exchange, or after it moved to another zone).
+ *
  *   <data>/sync/time-zone.json   { version: 1, zone, from: <device id>, at }
  *
  * Nothing here runs on a server nobody paired with: the file only appears
@@ -64,15 +70,16 @@ export function applyTimeZone(zone: string): boolean {
 	return true;
 }
 
-/** The server's side: a paired desktop said its zone. Kept, and used at once. */
-export function takeTimeZone(deviceId: string, zone: string, options: { syncDir?: string; now?: number } = {}): void {
-	if (!isTimeZoneName(zone)) return;
+/** The server's side: a paired desktop said its zone. Kept, and used at once. True when it is a zone this server didn't keep or run in. */
+export function takeTimeZone(deviceId: string, zone: string, options: { syncDir?: string; now?: number } = {}): boolean {
+	if (!isTimeZoneName(zone)) return false;
 	const syncDir = options.syncDir ?? defaultSyncDir();
-	if (storedTimeZone(syncDir)?.zone !== zone) {
+	const changed = storedTimeZone(syncDir)?.zone !== zone;
+	if (changed) {
 		fs.mkdirSync(/* turbopackIgnore: true */ syncDir, { recursive: true });
 		writeFileAtomicSync(zoneFile(syncDir), `${JSON.stringify({ version: 1, zone, from: deviceId, at: options.now ?? Date.now() } satisfies TimeZoneRecord)}\n`);
 	}
-	applyTimeZone(zone);
+	return applyTimeZone(zone) || changed;
 }
 
 /** At start, before the plugins: the zone a paired desktop gave, if one ever did. */

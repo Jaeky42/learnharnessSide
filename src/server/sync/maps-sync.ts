@@ -189,14 +189,15 @@ export function createMapsAuthority(deps: {
 				const names = raw.vaultFolders.filter(isVaultFolderName).slice(0, MAX_VAULT_FOLDERS);
 				if (names.length > 0) deps.onVaultFolders?.(names);
 			}
-			if (typeof raw.timeZone === "string") deps.onTimeZone?.(deviceId, raw.timeZone);
 			if (deps.busy?.()) return { status: 409, body: { error: "The server is busy with this. Try again in a moment.", code: "busy" } };
 
-			const now = deps.now();
 			const stored = deps.state.read();
 			// Worked on a copy, so a step that fails midway leaves the table as it was saved.
 			const state: AuthorityMapsState = stored ? structuredClone(stored) : { version: 1, seq: 0, items: {}, devices: [] };
+			// Before anything this exchange may write.
 			if (deps.makeBackup && state.backup === undefined) state.backup = deps.makeBackup();
+			if (typeof raw.timeZone === "string") deps.onTimeZone?.(deviceId, raw.timeZone);
+			const now = deps.now();
 			let snapshot = deps.files.read();
 			noteOwnChanges(state, snapshot, now);
 
@@ -352,6 +353,8 @@ export function createMapsDesktop(deps: {
 	vaultFolders?: () => string[] | null;
 	/** This PC's time zone (IANA name), sent when it changes. */
 	timeZone?: () => string | null;
+	/** Called before the files are read when the zone is about to be sent (it differs from the one last sent, or none was). */
+	onTimeZoneChange?: () => void;
 	/** The instance: the settings and small files when not given. */
 	rules?: ExchangeRules;
 	/** Where the exchange is sent. */
@@ -410,6 +413,9 @@ export function createMapsDesktop(deps: {
 				state.backup = deps.makeBackup();
 				deps.state.write(state);
 			}
+			const zone = deps.timeZone?.() ?? null;
+			const sendZone = zone !== null && zone !== (state.zone ?? null);
+			if (sendZone) deps.onTimeZoneChange?.();
 			const snapshot = deps.files.read();
 			note(state, snapshot);
 			const now = deps.now();
@@ -424,8 +430,6 @@ export function createMapsDesktop(deps: {
 			}
 			const folders = deps.vaultFolders?.() ?? null;
 			const sendFolders = folders !== null && JSON.stringify(folders) !== JSON.stringify(state.folders);
-			const zone = deps.timeZone?.() ?? null;
-			const sendZone = zone !== null && zone !== (state.zone ?? null);
 
 			const pages = paginate(changes, page.items, page.bytes);
 			const replies: ReplyItem[] = [];

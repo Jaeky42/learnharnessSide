@@ -31,7 +31,7 @@ import fs from "node:fs";
 import path from "node:path";
 import pluginScheduler from "../../../plugins/flashcards/src/scheduler.cjs";
 import {
-	applyFlashcardsChanges, FLASHCARDS_FORMAT, FLASHCARDS_KINDS, isFlashcardsFile, isFlashcardsMemory, readFlashcards,
+	applyFlashcardsChanges, FLASHCARDS_FORMAT, FLASHCARDS_KINDS, isFlashcardsFile, isFlashcardsMemory, readFlashcards, rebuildFlashcards,
 	type FlashcardsFile, type FlashcardsMemory, type FlashcardsScheduler,
 } from "../../core/sync/flashcards.ts";
 import { itemHash } from "../../core/sync/maps.ts";
@@ -54,6 +54,13 @@ export interface FlashcardsFiles extends MapFiles {
 	busy(): boolean;
 	/** Is there a memory this side can read? */
 	memoryReadable(): boolean;
+	/**
+	 * Work every fact's schedule out again from its reviews, in this
+	 * process's time zone as it is now (after the zone changed: the other
+	 * side works them out in that zone too). One synchronous step, like
+	 * `apply`. True when the file changed.
+	 */
+	rebuild(): boolean;
 }
 
 /** inode, size and times; null when the file isn't there. */
@@ -180,9 +187,22 @@ export function createFlashcardsFiles(deps: {
 		}
 	}
 
+	function rebuild(): boolean {
+		const lib = library();
+		if (lib.state !== "ok") return false;
+		const file = rebuildFlashcards(lib.file, readMemory(), scheduler, deps.now());
+		if (file === lib.file) return false;
+		writeFileAtomicSync(libraryFile, JSON.stringify(file), { mode: 0o600 });
+		snapshot = null;
+		parsed = null;
+		deps.announce();
+		return true;
+	}
+
 	return {
 		read,
 		apply,
+		rebuild,
 		busy() {
 			const lib = library();
 			if (lib.state !== "ok") return false;
