@@ -62,7 +62,7 @@
  */
 
 import {
-	combine, DECK_ORDER_KEY, FLASHCARDS_DEFAULT_SETTINGS, FLASHCARDS_FORMAT, flashcardsKindOf, idOf, isFlashcardsItem, ordered, PERMANENT_KINDS, reviewSettings, same,
+	combine, DECK_ORDER_KEY, duplicateDeletions, FLASHCARDS_DEFAULT_SETTINGS, FLASHCARDS_FORMAT, flashcardsKindOf, idOf, isFlashcardsItem, membershipKey, membershipsByFact, ordered, PERMANENT_KINDS, reviewSettings, same,
 	SYNCED_FLASHCARDS_SETTINGS, type CueItem, type DeckItem, type FileItem, type Items, type MembershipItem, type Placement, type PropItem, type ReviewItem,
 } from "./flashcards-items.ts";
 import { byTime, countedReviews, replayProposition, type FlashcardsScheduler, type FlashcardsSchedule, type ReplayedReview, type ReplayResult } from "./flashcards-replay.ts";
@@ -112,18 +112,39 @@ export interface FlashcardsMemory {
 	items: Record<string, unknown>;
 	/** The ids of every review this device has had in its file. */
 	reviews: string[];
+	/** The file's `revision` this memory was made from (read) or wrote (apply). */
+	revision?: number;
 }
 
 export function isFlashcardsMemory(value: unknown): value is FlashcardsMemory {
 	const v = value as FlashcardsMemory | null;
-	return !!v && typeof v === "object" && v.version === 1 && !!v.items && typeof v.items === "object" && !Array.isArray(v.items) && Array.isArray(v.reviews);
+	return !!v && typeof v === "object" && v.version === 1 && !!v.items && typeof v.items === "object" && !Array.isArray(v.items) && Array.isArray(v.reviews)
+		&& (v.revision === undefined || Number.isSafeInteger(v.revision));
 }
 
-const toMemory = (items: Items, reviews: Iterable<string>): FlashcardsMemory => ({
+const toMemory = (items: Items, reviews: Iterable<string>, revision: number | undefined): FlashcardsMemory => ({
 	version: 1,
 	items: Object.fromEntries([...items].filter(([key]) => key[0] !== "r").sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))),
 	reviews: [...new Set(reviews)].sort(),
+	...(revision !== undefined ? { revision } : {}),
 });
+
+/**
+ * Can this file be what the memory saw, or something made from it since?
+ * The plugin only ever raises `revision` and never removes a review, so a
+ * file with a lower revision, or without a review the memory saw, was put
+ * back or replaced (a restored backup, a copy from elsewhere). Its
+ * differences from the memory are then NOT deletions made here: the memory
+ * is set aside, as if it were lost, and nothing is read as deleted.
+ */
+export function followsMemory(file: FlashcardsFile | null, memory: FlashcardsMemory | null): boolean {
+	if (!file || !memory) return true;
+	if (memory.revision !== undefined && file.revision < memory.revision) return false;
+	if (memory.reviews.length === 0) return true;
+	const ids = new Set<string>();
+	for (const r of file.reviews) if (r && typeof r.id === "string") ids.add(r.id);
+	return memory.reviews.every((id) => ids.has(id));
+}
 
 // ─── Reading ─────────────────────────────────────────────────────────────────
 
@@ -165,6 +186,12 @@ export interface FlashcardsRead {
 	memory: FlashcardsMemory;
 	/** Review keys this device had and its file no longer holds: leave them alone. */
 	missing: Set<string>;
+	/** The file doesn't follow the memory (`followsMemory`): the memory was set aside. */
+	stale: boolean;
+	/** Every item, also those the check left out (what an apply on this same file and memory starts from). */
+	all: Items;
+	/** The reviews the file lost, as `all` goes with them. */
+	lost: Set<string>;
 }
 
 /**
@@ -174,23 +201,26 @@ export interface FlashcardsRead {
  * an e (its reviews until now no longer count). `now` is this device's
  * clock (the clock its reviews are stamped with).
  */
-export function readFlashcards(file: FlashcardsFile | null, memory: FlashcardsMemory | null, now: number): FlashcardsRead {
-	const read = readAll(file, memory, now);
-	const items = new Map(read.items);
-	const missing = new Set(read.missing);
+export function readFlashcards(file: FlashcardsFile | null, memory: FlashcardsMemory | null, now: number, check: (key: string, value: unknown) => boolean = isFlashcardsItem): FlashcardsRead {
+	const stale = !followsMemory(file, memory);
+	const read = readAll(file, stale ? null : memory, now);
+	const all = new Map(read.items);
+	const lost = new Set(read.missing);
+	const items = read.items;
+	const missing = read.missing;
 	// Never send what the other side would refuse: such an item is left alone on both sides.
-	for (const [key, value] of items) if (!isFlashcardsItem(key, value)) { items.delete(key); missing.add(key); }
-	return { items, memory: read.memory, missing };
+	for (const [key, value] of items) if (!check(key, value)) { items.delete(key); missing.add(key); }
+	return { items, memory: read.memory, missing, stale, all, lost };
 }
 
 /** The same, with every item, also those that wouldn't be sent. */
-function readAll(file: FlashcardsFile | null, memory: FlashcardsMemory | null, now: number): FlashcardsRead {
+function readAll(file: FlashcardsFile | null, memory: FlashcardsMemory | null, now: number): Pick<FlashcardsRead, "items" | "memory" | "missing"> {
 	const known = memory ? new Map(Object.entries(memory.items)) : new Map<string, unknown>();
 	const { items, placement: expected } = combine(known);
 	const knownReviews = new Set(memory?.reviews ?? []);
 	if (!file) {
 		// No file but a memory: the file went missing. Say nothing went; the next write puts it back.
-		return { items, memory: toMemory(items, knownReviews), missing: new Set([...knownReviews].map((id) => `r|${id}`)) };
+		return { items, memory: toMemory(items, knownReviews, memory?.revision), missing: new Set([...knownReviews].map((id) => `r|${id}`)) };
 	}
 	let counter = 0;
 	const base = Math.round(now) * 1000;
@@ -233,6 +263,9 @@ function readAll(file: FlashcardsFile | null, memory: FlashcardsMemory | null, n
 		// Made again here after its deletion was noted: its own reviews count, however soon they came.
 		const epoch = items.get(`e|${p.id}`);
 		if (!was && typeof epoch === "number" && epoch >= created) items.set(`e|${p.id}`, created - 1);
+		// Deleted and made again before sync ever saw it: reviews from before it was made are of
+		// the fact that went, and don't count (the plugin started this one afresh).
+		if (epoch === undefined && (byFact.get(p.id) ?? []).some((r) => r.at < created)) items.set(`e|${p.id}`, created - 1);
 		if (!same(old, fact)) items.set(`p|${p.id}`, fact);
 		const ids = new Set<string>();
 		for (const c of cues) {
@@ -253,24 +286,32 @@ function readAll(file: FlashcardsFile | null, memory: FlashcardsMemory | null, n
 		for (const w of was.cues) { items.set(`k|${w.id}`, 1); items.delete(`c|${w.id}`); }
 	}
 
-	// Which decks each fact is in, and the order inside each deck.
-	const memberships = new Map<string, MembershipItem>();
-	for (const d of decks) for (const id of new Set(d.propositionIds)) {
+	// Which decks each fact is in (one item per fact and deck), and the order inside each deck.
+	const memberOf = membershipsByFact(items);
+	const inFile = new Map<string, Set<string>>();
+	for (const d of decks) for (const id of d.propositionIds) {
 		if (!present.has(id)) continue;
-		const old = items.get(`m|${id}`) as MembershipItem | undefined;
-		const next = memberships.get(id) ?? {};
-		next[d.id] = old?.[d.id] ?? stamp();
-		memberships.set(id, next);
+		const set = inFile.get(id) ?? new Set<string>();
+		set.add(d.id);
+		inFile.set(id, set);
 	}
 	for (const id of present) {
-		const next = memberships.get(id);
+		const here = inFile.get(id);
 		// A fact in no deck isn't something the plugin makes; keep what was known.
-		if (next && !same(next, items.get(`m|${id}`))) items.set(`m|${id}`, next);
+		if (!here) continue;
+		const known = memberOf.get(id) ?? new Map<string, MembershipItem>();
+		for (const deck of here) {
+			const old = known.get(deck);
+			if (!old || !old.in) items.set(membershipKey(deck, id), { in: true, s: old?.s ?? stamp() } satisfies MembershipItem);
+		}
+		// Taken out of a deck that is still here: that travels too.
+		for (const [deck, old] of known) if (old.in && !here.has(deck) && deckIds.has(deck)) items.set(membershipKey(deck, id), { in: false, s: old.s } satisfies MembershipItem);
 	}
+	const stampIn = (deck: string, id: string): number => (items.get(membershipKey(deck, id)) as MembershipItem | undefined)?.s ?? Infinity;
 	for (const d of decks) {
 		const list = [...new Set(d.propositionIds)].filter((id) => present.has(id));
 		const key = `q|${d.id}`;
-		if (!sameList(list, ordered(items.get(key), list, (id) => (items.get(`m|${id}`) as MembershipItem | undefined)?.[d.id] ?? Infinity))) items.set(key, list);
+		if (!sameList(list, ordered(items.get(key), list, (id) => stampIn(d.id, id)))) items.set(key, list);
 	}
 
 	for (const source of Object.values(file.fileSources ?? {})) {
@@ -279,14 +320,14 @@ function readAll(file: FlashcardsFile | null, memory: FlashcardsMemory | null, n
 		if (!same(record, items.get(`f|${source.id}`))) items.set(`f|${source.id}`, record);
 	}
 
-	const inFile = new Set<string>();
+	const reviewIds = new Set<string>();
 	for (const r of file.reviews) {
 		if (!r || typeof r.id !== "string") continue;
-		inFile.add(r.id);
+		reviewIds.add(r.id);
 		items.set(`r|${r.id}`, reviewItemOf(r));
 	}
-	const missing = new Set([...knownReviews].filter((id) => !inFile.has(id)).map((id) => `r|${id}`));
-	return { items, memory: toMemory(items, [...inFile, ...knownReviews]), missing };
+	const missing = new Set([...knownReviews].filter((id) => !reviewIds.has(id)).map((id) => `r|${id}`));
+	return { items, memory: toMemory(items, [...reviewIds, ...knownReviews], file.revision), missing };
 }
 
 // ─── Applying ────────────────────────────────────────────────────────────────
@@ -296,6 +337,8 @@ export interface FlashcardsApplied {
 	file: FlashcardsFile | null;
 	changed: boolean;
 	memory: FlashcardsMemory;
+	/** What a read of the written file with that memory gives (so the caller needn't read it again). */
+	read: FlashcardsRead;
 }
 
 /**
@@ -304,8 +347,26 @@ export interface FlashcardsApplied {
  * `combine`), every fact whose reviews changed gets its schedule worked out
  * again, and the file is written back with everything device-only kept.
  */
-export function applyFlashcardsChanges(file: FlashcardsFile | null, memory: FlashcardsMemory | null, changes: ReadonlyMap<string, unknown>, deps: { now: number; scheduler: FlashcardsScheduler }): FlashcardsApplied {
-	const read = readAll(file, memory, deps.now);
+export function applyFlashcardsChanges(
+	file: FlashcardsFile | null, memory: FlashcardsMemory | null, changes: ReadonlyMap<string, unknown>,
+	deps: {
+		now: number; scheduler: FlashcardsScheduler;
+		/**
+		 * Did the side these changes came from have this item (a card) before?
+		 * Two same-question cards meeting from two devices lose one only when the
+		 * sender never had this device's card. Without it, nothing is paired.
+		 */
+		senderHad?: (key: string) => boolean;
+		check?: (key: string, value: unknown) => boolean;
+		/**
+		 * A read of exactly this file with exactly this memory (its `all` and
+		 * `lost`), when the caller has one: it isn't worked out again.
+		 */
+		base?: Pick<FlashcardsRead, "all" | "lost">;
+	},
+): FlashcardsApplied {
+	const stale = !followsMemory(file, memory);
+	const read = deps.base && !stale ? { items: deps.base.all, missing: deps.base.lost } : readAll(file, stale ? null : memory, deps.now);
 	const before = read.items;
 	const items = new Map(before);
 	for (const [key, value] of changes) {
@@ -315,12 +376,18 @@ export function applyFlashcardsChanges(file: FlashcardsFile | null, memory: Flas
 			if (!PERMANENT_KINDS.has(kind)) items.delete(key);
 		} else items.set(key, value);
 	}
+	if (deps.senderHad) for (const id of duplicateDeletions(before, changes, deps.senderHad)) items.set(`k|${id}`, 1);
 	const { items: combined, placement } = combine(items);
 	const reviews = new Map<string, ReviewItem>();
 	for (const [key, value] of combined) if (key[0] === "r") reviews.set(idOf(key), value as ReviewItem);
 	const written = writeBack(file, placement, reviews, combined, before, deps.scheduler);
 	const memoryReviews = [...reviews.keys(), ...[...read.missing].map(idOf)];
-	return { file: written.file, changed: written.changed, memory: toMemory(combined, memoryReviews) };
+	const next = toMemory(combined, memoryReviews, written.file?.revision ?? file?.revision);
+	const check = deps.check ?? isFlashcardsItem;
+	const items2 = new Map(combined);
+	const missing = new Set(read.missing);
+	for (const [key, value] of items2) if (!check(key, value)) { items2.delete(key); missing.add(key); }
+	return { file: written.file, changed: written.changed, memory: next, read: { items: items2, memory: next, missing, stale, all: combined, lost: new Set(read.missing) } };
 }
 
 /**

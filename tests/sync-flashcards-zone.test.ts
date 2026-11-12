@@ -24,7 +24,7 @@ process.env.LH_DATA_DIR = path.join(TMP, "data");
 process.env.TZ = "UTC";
 
 const zone = await import("../src/server/sync/flashcards-zone.ts");
-const { createSyncLoop, CHANGE_MS, POLL_MS } = await import("../src/server/sync/loop.ts");
+const { createSyncLoop, CHANGE_MS, POLL_MS, flashcardsChanged } = await import("../src/server/sync/loop.ts");
 const { SYNC_ECHO } = await import("../src/server/sync/flashcards-engine.ts");
 import type { ServerEvent } from "../src/core/events.ts";
 const require = createRequire(import.meta.url);
@@ -68,6 +68,16 @@ describe("the server follows the PC's time zone", () => {
 		assert.equal(Intl.DateTimeFormat().resolvedOptions().timeZone, "America/New_York");
 		assert.equal(scheduler.studyDay(MOMENT, 0), "2026-05-04");
 		assert.equal(zone.storedTimeZone(SYNC)!.from, "dev_bbbbbbbbbbbbbbbb");
+	});
+
+	it("a zone is kept and set in its standard form", () => {
+		assert.equal(zone.standardZone("europe/stockholm"), "Europe/Stockholm");
+		assert.equal(zone.standardZone("Mars/Olympus"), null);
+		assert.equal(zone.takeTimeZone("dev_dddddddddddddddd", "europe/stockholm", { syncDir: SYNC, now: 4 }), true);
+		assert.equal(process.env.TZ, "Europe/Stockholm");
+		assert.equal(zone.storedTimeZone(SYNC)!.zone, "Europe/Stockholm");
+		assert.equal(zone.takeTimeZone("dev_dddddddddddddddd", "Europe/Stockholm", { syncDir: SYNC, now: 5 }), false, "the same zone again: nothing to work out again");
+		zone.takeTimeZone("dev_bbbbbbbbbbbbbbbb", "America/New_York", { syncDir: SYNC, now: 6 });
 	});
 
 	it("a name that isn't a zone is ignored", () => {
@@ -128,5 +138,11 @@ describe("the loop's Flashcards trigger", () => {
 		x.emit({ type: "plugin-message", pluginId: "flashcards", topic: "batch-changed" });
 		assert.deepEqual(x.timers.map((t) => t.ms), [CHANGE_MS]);
 		x.l.stop();
+	});
+
+	it("while a generation holds the exchange, its notices start no round", () => {
+		const event = { type: "plugin-message", pluginId: "flashcards", topic: "batch-changed" } as const;
+		assert.equal(flashcardsChanged(event, () => true), false);
+		assert.equal(flashcardsChanged(event, () => false), true);
 	});
 });

@@ -10,6 +10,7 @@
 
 import { readCloudPairing } from "../../store/sync/pairing.ts";
 import { serverModeEnabled } from "../server-auth.ts";
+import { startServerFlashcardsWatcher } from "./flashcards-engine.ts";
 import { startSyncLoop } from "./loop.ts";
 
 export function shouldAutostart(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -20,3 +21,7 @@ export function shouldAutostart(env: NodeJS.ProcessEnv = process.env): boolean {
 }
 
 if (shouldAutostart()) startSyncLoop();
+
+// The server notes its own Flashcards changes with their time (flashcards-engine.ts); it does
+// anything only once a PC has exchanged Flashcards with it.
+if (serverModeEnabled() && process.env.NODE_ENV !== "test" && process.env.NEXT_PHASE !== "phase-production-build") startServerFlashcardsWatcher();

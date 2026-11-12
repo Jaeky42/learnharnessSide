@@ -34,10 +34,11 @@ const { stateFile } = await import("../src/store/sync/state-file.ts");
 const { makeFlashcardsBackup } = await import("../src/store/sync/backup.ts");
 const { createMapsAuthority, createMapsDesktop, isAuthorityMapsState, isDesktopMapsState } = await import("../src/server/sync/maps-sync.ts");
 const { createFlashcardsFiles, flashcardsDataDir } = await import("../src/server/sync/flashcards-files.ts");
-const { authorityState, desktopState, FLASHCARDS_RULES, FLASHCARDS_SYNC_PATH } = await import("../src/server/sync/flashcards-engine.ts");
+const { authorityState, desktopState, FLASHCARDS_RULES, FLASHCARDS_SYNC_PATH, watchFlashcardsChanges } = await import("../src/server/sync/flashcards-engine.ts");
 const { takeTimeZone } = await import("../src/server/sync/flashcards-zone.ts");
 import type { SyncReply } from "../src/server/sync/client.ts";
 import type { FlashcardsFile } from "../src/core/sync/flashcards.ts";
+import type { ServerEvent } from "../src/core/events.ts";
 
 Date.now = () => clock.now;
 after(() => fs.rmSync(TMP, { recursive: true, force: true }));
@@ -47,7 +48,7 @@ let worlds = 0;
 const cleanups: Array<() => void> = [];
 afterEach(() => { for (const fn of cleanups.splice(0)) fn(); });
 
-type Body = { cursor: number; all: boolean; changes: Array<{ key: string }>; more?: boolean; timeZone?: string };
+type Body = { cursor: number; all: boolean; changes: Array<{ key: string; value?: unknown }>; more?: boolean; probe?: boolean; timeZone?: string };
 
 /** One side: a data folder, the plugin's back end on its Flashcards folder, and the sync files over it. */
 function side(root: string, name: string, opts: { plugin?: boolean } = {}) {
@@ -56,11 +57,19 @@ function side(root: string, name: string, opts: { plugin?: boolean } = {}) {
 	fs.mkdirSync(dataDir, { recursive: true });
 	fs.writeFileSync(path.join(dataDir, "plugins-state.json"), JSON.stringify({ version: 1, enabled: { flashcards: true } }));
 	const announced: number[] = [];
-	const files = createFlashcardsFiles({ dataDir, syncDir, now: () => clock.now, announce: () => announced.push(clock.now), scheduler });
+	const logged: string[] = [];
+	const files = createFlashcardsFiles({ dataDir, syncDir, now: () => clock.now, announce: () => announced.push(clock.now), scheduler, log: (line) => logged.push(line) });
 	const device = opts.plugin === false ? null : new Device(name, flashcardsDataDir(dataDir));
 	if (device) cleanups.push(() => device.dispose());
 	const library = (): FlashcardsFile | null => { try { return JSON.parse(fs.readFileSync(path.join(flashcardsDataDir(dataDir), "flashcards.json"), "utf8")) as FlashcardsFile; } catch { return null; } };
-	return { name, dataDir, syncDir, files, device, announced, library };
+	/** The snapshot this side keeps is what a fresh read of its files gives (nothing cached is wrong). */
+	const assertCacheSound = (): void => {
+		const kept = files.read();
+		const fresh = createFlashcardsFiles({ dataDir, syncDir, now: () => clock.now, announce: () => {}, scheduler, log: () => {} }).read();
+		const hashes = (s: typeof kept) => Object.fromEntries([...s.items].map(([key, item]) => [key, item.h]).sort(([a], [b]) => String(a).localeCompare(String(b))));
+		assert.deepEqual(hashes(kept), hashes(fresh), `${name}: the kept snapshot is a fresh read's`);
+	};
+	return { name, dataDir, syncDir, files, device, announced, library, logged, assertCacheSound };
 }
 
 function world(opts: { page?: { items: number; bytes: number }; serverPlugin?: boolean; realZone?: boolean } = {}) {
@@ -72,7 +81,7 @@ function world(opts: { page?: { items: number; bytes: number }; serverPlugin?: b
 	const authority = createMapsAuthority({
 		files: server.files,
 		state: authorityState(stateFile(path.join(server.syncDir, "flashcards.json"), isAuthorityMapsState), server.files),
-		now: () => clock.now, rules: FLASHCARDS_RULES, busy: () => server.files.busy(), makeBackup: backup(server.dataDir),
+		now: () => clock.now, rules: FLASHCARDS_RULES, busy: () => server.files.busy(), locked: () => server.files.locked(), makeBackup: backup(server.dataDir),
 		onTimeZone: (deviceId, zone) => {
 			zones.push([deviceId, zone]);
 			// As flashcards-engine.ts does: this process takes the zone, and works every schedule out again in it.
@@ -81,10 +90,11 @@ function world(opts: { page?: { items: number; bytes: number }; serverPlugin?: b
 		page: opts.page,
 	});
 
-	function desktop(name: string, deviceId: string, o: { plugin?: boolean; zone?: () => string | null } = {}) {
+	function desktop(name: string, deviceId: string, o: { plugin?: boolean; zone?: () => string | null; hold?: (body: Body) => Promise<void> } = {}) {
 		const s = side(root, name, o);
 		const requests: Body[] = [];
 		let online = true;
+		let zoneChanges = 0;
 		const sync = createMapsDesktop({
 			files: s.files,
 			state: desktopState(stateFile(path.join(s.syncDir, "flashcards-desktop.json"), isDesktopMapsState), s.files),
@@ -93,6 +103,7 @@ function world(opts: { page?: { items: number; bytes: number }; serverPlugin?: b
 				assert.equal(pathname, FLASHCARDS_SYNC_PATH);
 				if (!online) return { ok: false, reason: "offline" } as SyncReply<T>;
 				const body = JSON.parse(JSON.stringify(init.body)) as Body;
+				await o.hold?.(body);
 				requests.push(body);
 				const result = JSON.parse(JSON.stringify(authority.exchange(deviceId, body))) as { status: number; body: Record<string, unknown> };
 				return (result.status === 200 ? { ok: true, body: result.body } : { ok: false, reason: "refused", status: result.status, code: result.body.code ?? null, error: String(result.body.error), body: result.body }) as SyncReply<T>;
@@ -100,11 +111,12 @@ function world(opts: { page?: { items: number; bytes: number }; serverPlugin?: b
 			now: () => clock.now, clockOffset: () => 0, timeZone: o.zone ?? (() => "Europe/Stockholm"), onTimeZoneChange: () => {
 				// One process plays both sides: the PC works its schedules out in its own zone.
 				if (opts.realZone) process.env.TZ = (o.zone ?? (() => "Europe/Stockholm"))()!;
+				zoneChanges++;
 				s.files.rebuild();
 			},
-			rules: FLASHCARDS_RULES, path: FLASHCARDS_SYNC_PATH, busy: () => s.files.busy(), makeBackup: backup(s.dataDir), page: opts.page,
+			rules: FLASHCARDS_RULES, path: FLASHCARDS_SYNC_PATH, busy: () => s.files.busy(), locked: () => s.files.locked(), makeBackup: backup(s.dataDir), page: opts.page,
 		});
-		return { ...s, sync, requests, setOnline: (value: boolean) => { online = value; } };
+		return { ...s, sync, requests, setOnline: (value: boolean) => { online = value; }, zoneChanges: () => zoneChanges };
 	}
 	return { root, server, authority, zones, desktop, failBackups: (value: boolean) => { backupFails = value; } };
 }
@@ -311,9 +323,11 @@ describe("Flashcards sync through the exchange", () => {
 		fs.mkdirSync(path.dirname(file), { recursive: true });
 		const newer = JSON.stringify({ version: 2, revision: 3, settings: {}, decks: [{ id: "d", name: "Future", newLimit: 1, propositionIds: [] }], propositions: {}, reviews: [], batches: [] });
 		fs.writeFileSync(file, newer);
-		assert.deepEqual(await pc.sync.round(), { ok: true, sent: 0, applied: 0 });
+		// Nothing to send or take: no request at all, and nothing written.
+		assert.deepEqual(await pc.sync.round(), { ok: false, reason: "busy" });
 		assert.equal(fs.readFileSync(file, "utf8"), newer);
-		assert.deepEqual(pc.requests.flatMap((r) => r.changes), []);
+		assert.deepEqual(pc.requests, []);
+		assert.equal(fs.existsSync(pc.syncDir), false);
 		assert.equal(w.server.library()!.decks.length, 1, "nothing of it reached the server");
 	});
 
@@ -414,5 +428,259 @@ describe("Flashcards sync through the exchange", () => {
 		assert.equal(process.env.TZ, "Asia/Tokyo");
 		assert.deepEqual(view(pc.library()), view(w.server.library()));
 		assert.deepEqual(w.zones.map(([, z]) => z), ["America/New_York", "Asia/Tokyo"]);
+	});
+});
+
+describe("Flashcards sync: what a review of the wiring found", () => {
+	const facts = (lib: FlashcardsFile | null) => Object.keys(lib?.propositions ?? {}).sort();
+	const cards = (lib: FlashcardsFile | null) => Object.values(lib?.propositions ?? {}).flatMap((p) => p.cues.map((c) => c.id)).sort();
+
+	it("a library put back from its backup after the first sync deletes nothing anywhere, and gets everything back", async () => {
+		clock.now = new Date(2026, 4, 4, 9).getTime();
+		const w = world();
+		await w.server.device!.generate([{ id: "s1", questions: ["Phone card 1?"] }, { id: "s2", questions: ["Phone card 2?"] }]);
+		const pc = w.desktop("pc", "dev_aaaaaaaaaaaaaaaa");
+		await pc.device!.generate([{ id: "p1", questions: ["PC card 1?"], session: "session-2" }]);
+		await settle(pc);
+		const before = { server: cards(w.server.library()), pc: cards(pc.library()) };
+		assert.deepEqual(facts(w.server.library()), ["p1", "s1", "s2"]);
+		// The owner restores the PC's "before-first-flashcards-sync" copy of its library.
+		const backup = fs.readdirSync(path.join(path.dirname(pc.dataDir), "backups")).find((b) => b.startsWith("before-first-flashcards-sync"))!;
+		fs.copyFileSync(path.join(path.dirname(pc.dataDir), "backups", backup, "core-plugin-data", "flashcards", "flashcards.json"), path.join(flashcardsDataDir(pc.dataDir), "flashcards.json"));
+		await settle(pc);
+		assert.deepEqual(cards(w.server.library()), before.server, "nothing deleted on the server");
+		assert.deepEqual(cards(pc.library()), before.pc, "and the PC has it all again");
+		assert.equal(pc.logged.filter((line) => line.includes("put back or replaced")).length, 1, "said once in the log");
+		assert.deepEqual(view(pc.library()), view(w.server.library()));
+		// The plugin, still running on the old copy in memory, reads the file again and shows it all.
+		assert.equal((await pc.device!.state()).propositions.length, 3);
+	});
+
+	it("a crash between writing the library and its memory never deletes anything", async () => {
+		clock.now = new Date(2026, 4, 4, 9).getTime();
+		const w = world();
+		const pc = w.desktop("pc", "dev_aaaaaaaaaaaaaaaa");
+		await pc.device!.generate([{ id: "p1", questions: ["PC card?"] }]);
+		await settle(pc);
+		// The library written, its memory not: the memory from before is put back.
+		const memoryFiles = ["flashcards-memory.json", "flashcards-memory-reviews.json"].map((name) => path.join(pc.syncDir, name));
+		const old = memoryFiles.map((file) => fs.readFileSync(file));
+		await w.server.device!.generate([{ id: "s1", questions: ["Phone card?"] }]);
+		clock.now += 1000;
+		await pc.sync.round();
+		assert.deepEqual(facts(pc.library()), ["p1", "s1"]);
+		memoryFiles.forEach((file, i) => fs.writeFileSync(file, old[i]!));
+		await settle(pc);
+		assert.deepEqual(facts(pc.library()), ["p1", "s1"]);
+		assert.deepEqual(facts(w.server.library()), ["p1", "s1"]);
+		// The memory written, the library not (the library from before is back): the same as a library put back.
+		const libraryBefore = fs.readFileSync(path.join(flashcardsDataDir(pc.dataDir), "flashcards.json"));
+		await w.server.device!.generate([{ id: "s2", questions: ["Another phone card?"] }]);
+		clock.now += 1000;
+		await pc.sync.round();
+		fs.writeFileSync(path.join(flashcardsDataDir(pc.dataDir), "flashcards.json"), libraryBefore);
+		await settle(pc);
+		assert.deepEqual(facts(pc.library()), ["p1", "s1", "s2"]);
+		assert.deepEqual(facts(w.server.library()), ["p1", "s1", "s2"]);
+	});
+
+	it("the backups keep Flashcards sync's own files with the library", () => {
+		const dir = path.join(TMP, "backup-parts", "data");
+		fs.mkdirSync(path.join(dir, "core-plugin-data", "flashcards"), { recursive: true });
+		fs.mkdirSync(path.join(dir, "sync"), { recursive: true });
+		fs.writeFileSync(path.join(dir, "core-plugin-data", "flashcards", "flashcards.json"), "{}");
+		for (const name of ["flashcards-memory.json", "flashcards-memory-reviews.json", "flashcards-desktop.json", "maps-desktop.json"]) fs.writeFileSync(path.join(dir, "sync", name), "{}");
+		const target = makeFlashcardsBackup(dir, new Date(2026, 4, 4))!;
+		assert.deepEqual(fs.readdirSync(path.join(target, "sync")).sort(), ["flashcards-desktop.json", "flashcards-memory-reviews.json", "flashcards-memory.json"]);
+	});
+
+	it("a library that can't be read for a while: nothing is passed over, and the server's cards made meanwhile arrive after", async () => {
+		clock.now = new Date(2026, 4, 4, 9).getTime();
+		const w = world();
+		await w.server.device!.generate([{ id: "a1", questions: ["A?"] }]);
+		const pc = w.desktop("pc", "dev_aaaaaaaaaaaaaaaa", { plugin: false });
+		await settle(pc);
+		const file = path.join(flashcardsDataDir(pc.dataDir), "flashcards.json");
+		const keep = fs.readFileSync(file, "utf8");
+		fs.writeFileSync(file, JSON.stringify({ ...JSON.parse(keep), version: 2 }));
+		clock.now += 60_000;
+		await w.server.device!.generate([{ id: "b1", questions: ["B?"] }]);
+		const asked = pc.requests.length;
+		const stamps0 = stamps(pc.syncDir);
+		for (let i = 0; i < 3; i++) { clock.now += 10_000; assert.deepEqual(await pc.sync.round(), { ok: false, reason: "busy" }); }
+		assert.equal(pc.requests.length, asked, "no request while it can't be read");
+		assert.deepEqual(stamps(pc.syncDir), stamps0, "and nothing written");
+		fs.writeFileSync(file, keep);
+		await settle(pc);
+		assert.deepEqual(facts(pc.library()), ["a1", "b1"]);
+	});
+
+	it("a library locked from the start costs no request, saves no memory, and syncs whole once it can be read", async () => {
+		clock.now = new Date(2026, 4, 4, 9).getTime();
+		const w = world({ page: { items: 50, bytes: 1 << 20 } });
+		await w.server.device!.generate(Array.from({ length: 20 }, (_, i) => ({ id: `n${i}`, questions: [`q${i}a?`, `q${i}b?`] })));
+		const pc = w.desktop("pc", "dev_aaaaaaaaaaaaaaaa", { plugin: false });
+		const file = path.join(flashcardsDataDir(pc.dataDir), "flashcards.json");
+		fs.mkdirSync(path.dirname(file), { recursive: true });
+		fs.writeFileSync(file, JSON.stringify({ version: 2, revision: 3, settings: {}, decks: [], propositions: {}, reviews: [], batches: [] }));
+		for (let i = 0; i < 3; i++) { clock.now += 10_000; assert.deepEqual(await pc.sync.round(), { ok: false, reason: "busy" }); }
+		assert.equal(pc.requests.length, 0);
+		assert.equal(fs.existsSync(path.join(pc.syncDir, "flashcards-memory.json")), false);
+		fs.rmSync(file);
+		await settle(pc);
+		assert.equal(facts(pc.library()).length, 20);
+	});
+
+	it("a server whose library can't be read: one backup, one cheap request a round, nothing written there", async () => {
+		clock.now = new Date(2026, 4, 4, 9).getTime();
+		const w = world({ serverPlugin: false });
+		const file = path.join(flashcardsDataDir(w.server.dataDir), "flashcards.json");
+		fs.mkdirSync(path.dirname(file), { recursive: true });
+		fs.writeFileSync(file, "{\"version\":1, \"revision\": 3, \"decks\": [");
+		const pc = w.desktop("pc", "dev_aaaaaaaaaaaaaaaa");
+		await pc.device!.generate([{ id: "a1", questions: ["A?"] }]);
+		const server0 = stamps(path.dirname(w.server.dataDir));
+		for (let i = 0; i < 4; i++) { clock.now += 10_000; assert.deepEqual(await pc.sync.round(), { ok: false, reason: "busy" }); }
+		assert.deepEqual(stamps(path.dirname(w.server.dataDir)), server0, "no backup, no state, no memory on the server");
+		assert.equal(pc.requests.length, 4);
+		assert.deepEqual(pc.requests.slice(1).map((r) => [r.probe, r.changes.length]), [[true, 0], [true, 0], [true, 0]], "after the first, a probe with nothing in it");
+		fs.rmSync(file);
+		await settle(pc);
+		assert.deepEqual(facts(w.server.library()), ["a1"]);
+		assert.equal(fs.readdirSync(path.join(path.dirname(w.server.dataDir), "backups")).length, 1, "one backup, once it could start");
+	});
+
+	it("while every PC is away, the phone's changes keep their own time: a later change on the PC still wins", async () => {
+		clock.now = new Date(2026, 4, 4, 9).getTime();
+		const w = world();
+		const phone = w.server.device!;
+		await phone.generate([{ id: "a1", questions: ["A?"] }, { id: "a2", questions: ["B?"] }]);
+		const pc = w.desktop("pc", "dev_aaaaaaaaaaaaaaaa");
+		await settle(pc);
+		const deckId = (await phone.state()).decks[0]!.id;
+		pc.setOnline(false);
+		clock.now += DAY;
+		await phone.call("save-deck", { id: deckId, name: "Renamed on the phone (day 1)" });
+		// What the server's watcher does a moment after the plugin says it changed its library.
+		clock.now += 2000; w.authority.detect();
+		clock.now += DAY;
+		await pc.device!.call("save-deck", { id: deckId, name: "Renamed on the PC (day 2)" });
+		pc.sync.detect();
+		clock.now += DAY;
+		assert.ok(await phone.grade(3));
+		clock.now += 2000; w.authority.detect();
+		pc.setOnline(true);
+		await settle(pc);
+		assert.equal(w.server.library()!.decks[0]!.name, "Renamed on the PC (day 2)");
+		assert.equal(pc.library()!.decks[0]!.name, "Renamed on the PC (day 2)");
+	});
+
+	it("the watcher notes a change a little after the plugin says so, only where Flashcards sync has run, and never twice at once", () => {
+		let listener: ((event: ServerEvent) => void) | null = null;
+		const timers: Array<{ run: () => void; ms: number }> = [];
+		let active = false, detected = 0;
+		watchFlashcardsChanges({ subscribe: (fn) => { listener = fn; return () => {}; }, setTimer: (run, ms) => { timers.push({ run, ms }); return 0; }, active: () => active, detect: () => { detected++; } });
+		const say = (topic: string, data?: unknown) => listener!({ type: "plugin-message", pluginId: "flashcards", topic, data } as never);
+		say("changed");
+		assert.equal(timers.length, 0, "no timer where Flashcards sync never ran");
+		active = true;
+		say("changed", { by: "sync" });
+		assert.equal(timers.length, 0, "what sync wrote isn't a change made here");
+		say("batch-changed"); say("changed");
+		assert.deepEqual(timers.map((t) => t.ms), [2000]);
+		timers.shift()!.run();
+		assert.equal(detected, 1);
+	});
+
+	it("two PCs whose first exchanges overlap in pages: only the first brings its settings", async () => {
+		clock.now = new Date(2026, 4, 4, 9).getTime();
+		const w = world({ page: { items: 3, bytes: 1 << 20 } });
+		await w.server.device!.generate([{ id: "s1", questions: ["S?"] }]);
+		let release: () => void = () => {};
+		let held = false;
+		const gate = new Promise<void>((resolve) => { release = resolve; });
+		const one = w.desktop("one", "dev_aaaaaaaaaaaaaaaa", { hold: async (body) => { if (body.all && !held && body.cursor === 0 && body.changes.length > 0 && one.requests.length === 1) { held = true; await gate; } } });
+		const two = w.desktop("two", "dev_bbbbbbbbbbbbbbbb");
+		await one.device!.generate([{ id: "o1", questions: ["O1?", "O2?", "O3?"] }]);
+		await one.device!.call("save-settings", { retention: 0.8 });
+		await two.device!.generate([{ id: "t1", questions: ["T?"] }]);
+		await two.device!.call("save-settings", { retention: 0.95 });
+		const first = one.sync.round();
+		while (!held) await new Promise((resolve) => setImmediate(resolve));
+		assert.equal((await two.sync.round()).ok, true, "the second PC's first exchange runs while the first one's is part way");
+		release();
+		assert.equal((await first).ok, true);
+		await settle(one, two);
+		for (const s of [w.server, one, two]) assert.equal(s.library()!.settings.retention, 0.8, `${s.name}: the first PC's value`);
+		assert.deepEqual(facts(w.server.library()), ["o1", "s1", "t1"]);
+	});
+
+	it("same-question cards: one of a pair from two devices goes, a device's own two both stay", async () => {
+		clock.now = new Date(2026, 4, 4, 9).getTime();
+		const w = world();
+		await w.server.device!.generate([{ id: "n1", questions: ["Same?", "Phone's own?"] }]);
+		clock.now += MINUTE;
+		const pc = w.desktop("pc", "dev_aaaaaaaaaaaaaaaa");
+		await pc.device!.generate([{ id: "n1", questions: ["Same?", "PC's own?"] }]);
+		await pc.device!.call("create-cue", { requestId: "twice", propositionId: "n1", question: "PC's own? ", answer: "On purpose." });
+		await settle(pc);
+		const qs = (lib: FlashcardsFile | null) => lib!.propositions.n1!.cues.map((c) => c.question.trim()).sort();
+		assert.deepEqual(qs(w.server.library()), ["PC's own?", "PC's own?", "Phone's own?", "Same?"]);
+		assert.deepEqual(view(pc.library()), view(w.server.library()));
+		w.server.assertCacheSound(); pc.assertCacheSound();
+	});
+
+	it("a generation stuck for 15 minutes holds the exchange no longer", async () => {
+		clock.now = new Date(2026, 4, 4, 9).getTime();
+		const w = world();
+		const pc = w.desktop("pc", "dev_aaaaaaaaaaaaaaaa");
+		await settle(pc);
+		const server = w.server.device!;
+		server.graph.propositions.push(graphNode("n_s"));
+		const plan = await server.call<{ id: string }>("preflight", { propositionIds: ["n_s"] });
+		await server.call("start-generation", { preflightId: plan.id, requestId: randomUUID() });
+		await new Promise((resolve) => setImmediate(resolve));
+		assert.equal(w.server.files.busy(), true);
+		clock.now += 14 * MINUTE;
+		assert.equal(w.server.files.busy(), true);
+		clock.now += 2 * MINUTE;
+		assert.equal(w.server.files.busy(), false);
+		assert.equal(w.server.logged.filter((line) => line.includes("no progress for 15 minutes")).length, 1);
+		assert.equal((await pc.sync.round()).ok, true);
+	});
+
+	it("the PC works its schedules out again once per zone, also while the server keeps answering busy", async () => {
+		clock.now = new Date(2026, 4, 4, 9).getTime();
+		const w = world();
+		const pc = w.desktop("pc", "dev_aaaaaaaaaaaaaaaa");
+		await pc.device!.generate([{ id: "p1", questions: ["P?"] }]);
+		const server = w.server.device!;
+		server.graph.propositions.push(graphNode("n_s"));
+		const plan = await server.call<{ id: string }>("preflight", { propositionIds: ["n_s"] });
+		await server.call("start-generation", { preflightId: plan.id, requestId: randomUUID() });
+		await new Promise((resolve) => setImmediate(resolve));
+		for (let i = 0; i < 3; i++) { clock.now += 10_000; assert.deepEqual(await pc.sync.round(), { ok: false, reason: "busy" }); }
+		assert.equal(pc.zoneChanges(), 1);
+	});
+
+	it("after an exchange the kept snapshot is what a fresh read gives (the apply's own, not read again)", async (t) => {
+		clock.now = new Date(2026, 4, 4, 9).getTime();
+		const w = world();
+		const pc = w.desktop("pc", "dev_aaaaaaaaaaaaaaaa");
+		await pc.device!.generate([{ id: "p1", questions: ["P?", "P2?"] }, { id: "p2", questions: ["Q?"] }]);
+		await w.server.device!.generate([{ id: "s1", questions: ["S?"] }]);
+		await study(pc.device!, [3, 4]);
+		await settle(pc);
+		w.server.assertCacheSound(); pc.assertCacheSound();
+		await study(w.server.device!, [3]);
+		clock.now += 1000;
+		await pc.sync.round();
+		const reads: string[] = [];
+		const real = fs.readFileSync;
+		t.mock.method(fs, "readFileSync", (...args: Parameters<typeof fs.readFileSync>) => { if (String(args[0]).endsWith("flashcards.json")) reads.push(String(args[0])); return real(...args); });
+		pc.files.read();
+		t.mock.restoreAll();
+		assert.deepEqual(reads, [], "the library the apply wrote isn't parsed again");
+		w.server.assertCacheSound(); pc.assertCacheSound();
 	});
 });

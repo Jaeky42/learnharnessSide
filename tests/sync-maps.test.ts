@@ -65,17 +65,17 @@ function memoryFiles(clock: () => number) {
 }
 
 let worlds = 0;
-function world() {
+function world(opts: { page?: { items: number; bytes: number } } = {}) {
 	const root = path.join(TMP, `w${++worlds}`);
 	/** The true time. Each side reads it through its own (possibly wrong) clock. */
 	let time = MONDAY;
 	const server = memoryFiles(() => time);
 	const folders: string[][] = [];
 	let serverState = stateFile(path.join(root, "server", "sync", "maps.json"), isAuthorityMapsState);
-	let authority = createMapsAuthority({ files: server.files, state: serverState, now: () => time, onVaultFolders: (names) => folders.push(names) });
+	let authority = createMapsAuthority({ files: server.files, state: serverState, now: () => time, onVaultFolders: (names) => folders.push(names), page: opts.page });
 
-	function desktop(deviceId: string, opts: { skewMs?: number } = {}) {
-		const skew = opts.skewMs ?? 0;
+	function desktop(deviceId: string, o: { skewMs?: number; hold?: (body: { changes: unknown[]; more?: boolean }) => Promise<void> } = {}) {
+		const skew = o.skewMs ?? 0;
 		const local = () => time + skew;
 		const side = memoryFiles(local);
 		let online = true;
@@ -88,7 +88,8 @@ function world() {
 			identity: () => ({ server: "https://learn.example.com", deviceId }),
 			request: async <T>(_pathname: string, init: { method?: string; body?: unknown } = {}) => {
 				if (!online) return { ok: false, reason: "offline" } as SyncReply<T>;
-				const body = JSON.parse(JSON.stringify(init.body)) as { changes: unknown[]; all: boolean; vaultFolders?: string[] };
+				const body = JSON.parse(JSON.stringify(init.body)) as { changes: unknown[]; all: boolean; more?: boolean; vaultFolders?: string[] };
+				await o.hold?.(body);
 				requests.push({ changes: body.changes.length, all: body.all, ...(body.vaultFolders ? { vaultFolders: body.vaultFolders } : {}) });
 				const result = authority.exchange(deviceId, body);
 				hooks.duringRequest?.();
@@ -100,6 +101,7 @@ function world() {
 			// Measured against the server whenever it was last reached.
 			clockOffset: () => -skew,
 			vaultFolders: () => vault,
+			page: opts.page,
 		});
 		return { ...side, sync, requests, hooks, stateFile: path.join(root, deviceId, "sync", "maps-desktop.json"), setOnline: (value: boolean) => { online = value; }, setVault: (names: string[] | null) => { vault = names; } };
 	}
@@ -761,5 +763,30 @@ describe("a setting the app no longer keeps (appearance.mode, gone since upstrea
 		w.pass(10_000);
 		assert.deepEqual(await laptop.sync.round(), { ok: true, sent: 0, applied: 0 });
 		assert.deepEqual(await desk.sync.round(), { ok: true, sent: 0, applied: 0 });
+	});
+});
+
+describe("first exchanges that come in pages", () => {
+	it("two desktops whose first exchanges overlap: only the first brings its settings", async () => {
+		const w = world({ page: { items: 2, bytes: 1 << 20 } });
+		let release: () => void = () => {};
+		const gate = new Promise<void>((resolve) => { release = resolve; });
+		let held = false, pages = 0;
+		// Held after its first page reached the server, before its second.
+		const one = w.desktop("dev_aaaaaaaaaaaaaaaa", { hold: async () => { if (++pages === 2) { held = true; await gate; } } });
+		const two = w.desktop("dev_bbbbbbbbbbbbbbbb");
+		for (const [key, a, b] of [["s|appearance.theme", "rose-pine", "nord"], ["s|dictation.language", "sv", "de"], ["s|graph.enabled", true, false]] as const) { one.set(key, a); two.set(key, b); }
+		w.server.set("s|appearance.theme", "dracula");
+		const first = one.sync.round();
+		while (!held) await new Promise((resolve) => setImmediate(resolve));
+		assert.equal((await two.sync.round()).ok, true);
+		release();
+		assert.equal((await first).ok, true);
+		await two.sync.round();
+		for (const side of [w.server, one, two]) {
+			assert.equal(side.get("s|appearance.theme"), "rose-pine");
+			assert.equal(side.get("s|dictation.language"), "sv");
+			assert.equal(side.get("s|graph.enabled"), true);
+		}
 	});
 });

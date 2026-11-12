@@ -62,7 +62,13 @@ export interface MapFiles {
 	 * passed. A file that refuses the change keeps what it had; the caller
 	 * reads again to see what is really there.
 	 */
-	apply(changes: ReadonlyMap<string, unknown>): void;
+	apply(changes: ReadonlyMap<string, unknown>, context?: ApplyContext): void;
+}
+
+/** What the exchange knows about the changes it hands over. */
+export interface ApplyContext {
+	/** Did the side these changes came from already have this item (its value as this side has it)? */
+	senderHad(key: string): boolean;
 }
 
 function mtimeOf(file: string): number | null {

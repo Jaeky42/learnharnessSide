@@ -146,9 +146,9 @@ export class Device {
 		return result;
 	}
 
-	/** What MapFiles.apply() would do. */
-	apply(changes: ReadonlyMap<string, unknown>): boolean {
-		const result = applyFlashcardsChanges(this.file(), this.memory, changes, { now: clock.now, scheduler });
+	/** What MapFiles.apply() would do. `senderHad`: what the side the changes came from already had. */
+	apply(changes: ReadonlyMap<string, unknown>, senderHad?: (key: string) => boolean): boolean {
+		const result = applyFlashcardsChanges(this.file(), this.memory, changes, { now: clock.now, scheduler, senderHad });
 		if (result.changed) {
 			fs.writeFileSync(path.join(this.directory, "flashcards.json"), JSON.stringify(result.file));
 			this.writes++;
@@ -188,7 +188,9 @@ export class Hub {
 		}
 		const changes = new Map<string, unknown>();
 		for (const [key, { value }] of this.table) if (!here.missing.has(key) && itemHash(value) !== itemHash(here.items.get(key) ?? null)) changes.set(key, structuredClone(value));
-		if (changes.size > 0) device.apply(changes);
+		// The hub had what this device agreed on with it before this round.
+		const agreedBefore = new Set(device.agreed.keys());
+		if (changes.size > 0) device.apply(changes, (key) => agreedBefore.has(key));
 		for (const [key, { value }] of this.table) device.agreed.set(key, itemHash(value));
 		return { sent, taken: changes.size };
 	}

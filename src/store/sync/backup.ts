@@ -10,7 +10,8 @@
  * graph, the helper jobs, the settings, the prompt overrides, the custom
  * themes, the notes home-folder records, and the built-in plugins' state
  * and data (plugins-state.json, core-plugin-data/; per device, never
- * synced, but kept with the rest). Not community plugin code, no keys or
+ * synced, but kept with the rest), and Flashcards sync's own files under
+ * sync/ when there are any (a library restored with them is whole). Not community plugin code, no keys or
  * sign-ins (they live beside the data folder, not in it), and not the
  * Obsidian vault. Restoring is done by hand.
  */
@@ -18,7 +19,10 @@
 import fs from "node:fs";
 import path from "node:path";
 
-const PARTS = ["chats", "graph", "jobs", "settings.json", "prompts", "themes", path.join("notes", "sessions"), "plugins-state.json", "core-plugin-data"];
+/** Flashcards sync's own files, kept with its library so a restored backup is whole (flashcards-files.ts). */
+const FLASHCARDS_SYNC_PARTS = ["flashcards-memory.json", "flashcards-memory-reviews.json", "flashcards.json", "flashcards-desktop.json"].map((name) => path.join("sync", name));
+
+const PARTS = ["chats", "graph", "jobs", "settings.json", "prompts", "themes", path.join("notes", "sessions"), "plugins-state.json", "core-plugin-data", ...FLASHCARDS_SYNC_PARTS];
 
 function localDate(now: Date): string {
 	const pad = (n: number) => String(n).padStart(2, "0");
@@ -50,8 +54,11 @@ export function makeFirstSyncBackup(dataDir: string, now: Date = new Date()): st
  *
  *   backups/before-first-flashcards-sync 2026-11-20/core-plugin-data/flashcards/
  *
- * Returns the backup folder, or null when there is no Flashcards folder yet
- * (nothing to keep). A throw means no backup: Flashcards sync doesn't start.
+ * With it, Flashcards sync's own files from <data>/sync/ when there are any
+ * (the memory and the exchange's state), so the library and what sync knew
+ * of it come back together. Returns the backup folder, or null when there
+ * is no Flashcards folder yet (nothing to keep). A throw means no backup:
+ * Flashcards sync doesn't start.
  */
 export function makeFlashcardsBackup(dataDir: string, now: Date = new Date()): string | null {
 	const from = path.join(/* turbopackIgnore: true */ dataDir, "core-plugin-data", "flashcards");
@@ -64,5 +71,11 @@ export function makeFlashcardsBackup(dataDir: string, now: Date = new Date()): s
 	const to = path.join(/* turbopackIgnore: true */ target, "core-plugin-data", "flashcards");
 	fs.mkdirSync(/* turbopackIgnore: true */ path.dirname(to), { recursive: true });
 	fs.cpSync(/* turbopackIgnore: true */ from, to, { recursive: true });
+	for (const part of FLASHCARDS_SYNC_PARTS) {
+		const file = path.join(/* turbopackIgnore: true */ dataDir, part);
+		if (!fs.existsSync(/* turbopackIgnore: true */ file)) continue;
+		fs.mkdirSync(/* turbopackIgnore: true */ path.join(/* turbopackIgnore: true */ target, "sync"), { recursive: true });
+		fs.cpSync(/* turbopackIgnore: true */ file, path.join(/* turbopackIgnore: true */ target, part));
+	}
 	return target;
 }

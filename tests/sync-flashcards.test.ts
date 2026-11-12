@@ -117,6 +117,33 @@ describe("Flashcards sync: two devices apart", () => {
 		return { pc, server, hub };
 	}
 
+	it("combines a fact's decks: put in different decks on each side, it is in all of them; taken out of one, that travels", async () => {
+		clock.now = new Date(2026, 5, 1, 9).getTime();
+		const pc = device("pc"), server = device("server");
+		await pc.generate([{ id: "n_s", questions: ["Shared?"] }]);
+		share(pc, server);
+		await server.generate([{ id: "n_s", questions: ["Shared, asked on the phone?"] }]);
+		const put = async (d: Device, name: string) => {
+			await d.call("create-deck", { name });
+			const state = await d.state();
+			await d.call("set-memberships", { propositionId: "n_s", deckIds: [deckNamed(d, "Lesson one").id, state.decks.find((x) => x.name === name)!.id] });
+		};
+		await put(pc, "PC deck"); clock.now += MINUTE;
+		await put(server, "Phone deck"); clock.now += MINUTE;
+		const hub = new Hub();
+		hub.settle(pc, server);
+		sameEverywhere(pc, server);
+		const decksOf = (d: Device) => d.file()!.decks.filter((x) => x.propositionIds.includes("n_s")).map((x) => x.name).sort();
+		assert.deepEqual(decksOf(pc), ["Lesson one", "PC deck", "Phone deck"], "nothing the first sync combined is dropped");
+		// Taken out of two decks on the PC; put into a new one on the phone meanwhile: both stand.
+		await pc.call("set-memberships", { propositionId: "n_s", deckIds: [deckNamed(pc, "PC deck").id] });
+		await server.call("create-deck", { name: "Later deck" });
+		await server.call("set-memberships", { propositionId: "n_s", deckIds: [...server.file()!.decks.filter((x) => x.propositionIds.includes("n_s")).map((x) => x.id), deckNamed(server, "Later deck").id] });
+		hub.settle(pc, server);
+		sameEverywhere(pc, server);
+		assert.deepEqual(decksOf(server), ["Later deck", "PC deck"]);
+	});
+
 	it("keeps cards generated into a deck on one device and the deck's new name from the other", async () => {
 		const { pc, server, hub } = await paired();
 		await pc.generate([{ id: "n_3", questions: ["Three?"] }]);
@@ -221,7 +248,23 @@ describe("Flashcards sync: two devices apart", () => {
 		assert.equal(server.file()!.propositions.n_1!.schedule.reps, 1);
 	});
 
-	it("keeps one of two cards with the same question on one fact", async () => {
+	it("keeps both of two same-question cards a device made itself, there and everywhere", async () => {
+		const { pc, server, hub } = await paired();
+		await pc.call("create-cue", { requestId: "a1", propositionId: "n_2", question: "Twice?", answer: "One." });
+		await pc.call("create-cue", { requestId: "a2", propositionId: "n_2", question: "Twice? ", answer: "Two." });
+		hub.settle(pc, server);
+		sameEverywhere(pc, server);
+		assert.equal(server.file()!.propositions.n_2!.cues.filter((c) => c.question.trim() === "Twice?").length, 2);
+		// An edit that makes two questions equal keeps both too.
+		const p = (await server.state()).propositions.find((x) => x.id === "n_2")!;
+		const one = p.cues.find((c) => c.question === "Twice?")!;
+		await server.call("save-cue", { propositionId: "n_2", cueId: p.cues[0]!.id, question: one.question, answer: "Same now.", version: p.version });
+		hub.settle(pc, server);
+		sameEverywhere(pc, server);
+		assert.equal(pc.file()!.propositions.n_2!.cues.length, 3);
+	});
+
+	it("keeps one of two cards with the same question on one fact, made on two devices", async () => {
 		const { pc, server, hub } = await paired();
 		await pc.call("create-cue", { requestId: "a", propositionId: "n_2", question: "  Same?", answer: "From the PC." });
 		clock.now += MINUTE;
@@ -308,8 +351,8 @@ describe("Flashcards sync: the rules on their own", () => {
 		const items: Items = new Map<string, unknown>([
 			["d|deck-b", deck("Old name", 2, 50)], ["d|deck-a", deck("Newest name", 3, 90)], ["d|deck-c", deck("Other", 1, 10)],
 			["f|src-1", { name: "notes.md", fingerprint: "fp", deckId: "deck-b" }], ["f|src-2", { name: "notes.md", fingerprint: "fp", deckId: "deck-a" }],
-			["p|file:1", { ...fact(1), origin: "file", sourceId: "src-1" }], ["m|file:1", { "deck-b": 5 }], ["c|c1", { p: "file:1", q: "Q1", a: "A", s: 1 }],
-			["p|file:2", { ...fact(1), origin: "file", sourceId: "src-2" }], ["m|file:2", { "deck-a": 6 }], ["c|c2", { p: "file:2", q: "Q2", a: "A", s: 2 }],
+			["p|file:1", { ...fact(1), origin: "file", sourceId: "src-1" }], ["m|deck-b|file:1", { in: true, s: 5 }], ["c|c1", { p: "file:1", q: "Q1", a: "A", s: 1 }],
+			["p|file:2", { ...fact(1), origin: "file", sourceId: "src-2" }], ["m|deck-a|file:2", { in: true, s: 6 }], ["c|c2", { p: "file:2", q: "Q2", a: "A", s: 2 }],
 		]);
 		const { items: out, placement } = combine(items);
 		assert.deepEqual(placement.decks.map((d) => [d.id, d.item.name, d.members]), [["deck-c", "Other", []], ["deck-b", "Newest name", ["file:1", "file:2"]]]);
@@ -357,7 +400,8 @@ describe("Flashcards sync: the rules on their own", () => {
 		for (const d of [a, b]) { d.apply(new Map(all)); results.add(JSON.stringify(view(d.file()))); }
 		assert.equal(results.size, 1);
 		const one = JSON.parse([...results][0]!) as ReturnType<typeof view>;
-		assert.equal(one.propositions.n_1!.cues.filter((c) => c.question === "1?").length, 1);
+		// Pairing two same-question cards is the exchange's decision (who had what), not the items': none here.
+		assert.equal(one.propositions.n_1!.cues.filter((c) => c.question === "1?").length, 2);
 		assert.equal(one.decks.filter((d) => d.sourceId === "session-1").length, 1);
 	});
 
@@ -375,7 +419,7 @@ describe("Flashcards sync: the rules on their own", () => {
 		assert.equal(flashcardsFormatTooNew(2), true);
 	});
 
-	it("never takes a deletion of a review, a fact or a deck from a missing value, and reports reviews its file lost", () => {
+	it("never takes a deletion of a review, a fact or a deck from a missing value, and sets the memory aside for a file that lost a review", () => {
 		const file = emptyFlashcardsFile();
 		file.decks.push({ id: "d1", name: "D", newLimit: 20, propositionIds: ["n_1"] });
 		file.propositions.n_1 = { id: "n_1", origin: "graph", name: "F", statement: "S", cues: [{ id: "c1", question: "Q?", answer: "A", latestRating: null }], schedule: scheduler.createSchedule(5), firstReviewedAt: null, learningCueId: null, version: 1 };
@@ -386,8 +430,10 @@ describe("Flashcards sync: the rules on their own", () => {
 		const withReview = applyFlashcardsChanges(file, first.memory, new Map([["r|r1", { p: "n_1", c: "c1", rating: 3, at: 100, deckIds: ["d1"], settings: { retention: 0.9 } }]]), { now: 30, scheduler });
 		assert.equal(withReview.file!.reviews.length, 1);
 		assert.equal(withReview.file!.propositions.n_1!.schedule.reps, 1);
+		// The file without that review can't follow the memory (put back, or replaced): nothing is read as deleted.
 		const lost = readFlashcards(file, withReview.memory, 40);
-		assert.deepEqual([...lost.missing], ["r|r1"]);
+		assert.equal(lost.stale, true);
+		assert.deepEqual([...lost.items.keys()].filter((key) => /^[xke]\|/.test(key)), []);
 		// An odd value in the file isn't sent (the other side would refuse the whole exchange), and isn't taken as gone.
 		const odd = structuredClone(file);
 		odd.settings.retention = 5;

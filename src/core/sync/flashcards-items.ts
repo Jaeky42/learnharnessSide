@@ -14,7 +14,8 @@
  *   q|<deck id>    the order of the facts in a deck, once changed (fact ids)
  *   p|<fact id>    a fact (proposition): { origin, name, statement, snapshot?, sourceId?, created }
  *   e|<fact id>    the fact was deleted at this time: earlier reviews don't count (ms)
- *   m|<fact id>    which decks the fact is in: { <deck id>: s }
+ *   m|<deck id>|<fact id>
+ *                  the fact in that deck, or taken out of it: { in, s }
  *   c|<card id>    a card (cue): { p: fact id, q: question, a: answer, s }
  *   k|<card id>    the card was deleted (1): final, whatever was edited later
  *   u|<fact id>    the order of a fact's cards, once changed (card ids)
@@ -40,10 +41,14 @@
  *   reviews count (a review of a card that is still there always counts).
  *   A fact is alive while it has a card. Its moment of making (`created`)
  *   travels, so a fact nobody reviewed yet has the same schedule everywhere.
- * - Membership (m) is per fact, the deck's name and limit (d) per deck, and
- *   orders are items of their own: cards generated into a deck on one
- *   device and the deck renamed on the other touch different items, and
- *   both stay.
+ * - Membership (m) is per fact AND deck, the deck's name and limit (d) per
+ *   deck, and orders are items of their own: cards generated into a deck on
+ *   one device and the deck renamed on the other touch different items, and
+ *   both stay. A fact put into a deck on one device and into another deck
+ *   on the other is in both afterwards (nothing a first sync combines is
+ *   dropped); taking it out of a deck is an item of its own ({ in: false })
+ *   and travels like any change. If every deck a fact was in took it out,
+ *   it stays where it was put last (a fact is never left in no deck).
  * - Order: an order item only exists once someone really reordered (o, q,
  *   u). Adding at the end changes no order item; what an order doesn't
  *   know follows it, in the order it was added (the stamp `s`, then the
@@ -53,8 +58,12 @@
  *   same uploaded file (fingerprint), are joined: the earliest made (s,
  *   then id) stays; name and limit come from the most recently changed (at,
  *   then id).
- * - The same question, word for word after trimming, twice on one fact:
- *   the earlier card (s, then id) stays, the other gets a k.
+ * - The same question, word for word after trimming, twice on one fact,
+ *   when the two cards meet for the first time from two devices (one
+ *   device had one, the other device had the other, neither had both): the
+ *   earlier card (s, then id) stays, the other gets a k. The device that
+ *   takes in the second card decides (`duplicateDeletions`). Two cards a
+ *   device already holds together are both kept, there and everywhere.
  *
  * `s` is a stamp: when the device that made the thing first saw it (ms ×
  * 1000 + a counter, so things seen in one look keep their order). `at` on a
@@ -109,7 +118,31 @@ export interface PropItem { origin: string; name: string; statement: string; sna
 export interface CueItem { p: string; q: string; a: string; s: number }
 export interface ReviewItem { p: string; c: string; rating: number; at: number; deckIds: string[]; settings: Record<string, unknown> }
 export interface FileItem { name: string; fingerprint: string; deckId: string }
-export type MembershipItem = Record<string, number>;
+export interface MembershipItem { in: boolean; s: number }
+
+/** m|<deck id>|<fact id>: the key of one fact's place in one deck. */
+export const membershipKey = (deck: string, fact: string): string => `m|${deck}|${fact}`;
+
+/** The deck and the fact of a membership key, or null. */
+export function membershipOf(key: string): { deck: string; fact: string } | null {
+	if (key[0] !== "m" || key[1] !== "|") return null;
+	const at = key.indexOf("|", 2);
+	if (at < 0) return null;
+	return { deck: key.slice(2, at), fact: key.slice(at + 1) };
+}
+
+/** Every membership, by fact: deck → entry. */
+export function membershipsByFact(items: Items): Map<string, Map<string, MembershipItem>> {
+	const out = new Map<string, Map<string, MembershipItem>>();
+	for (const [key, value] of items) {
+		const ref = membershipOf(key);
+		if (!ref) continue;
+		let decks = out.get(ref.fact);
+		if (!decks) { decks = new Map(); out.set(ref.fact, decks); }
+		decks.set(ref.deck, value as MembershipItem);
+	}
+	return out;
+}
 
 export type Items = Map<string, unknown>;
 
@@ -186,7 +219,7 @@ function isValue(kind: FlashcardsKind, id: string, v: unknown): boolean {
 		case "p": return isObject(v) && ["graph", "file", "manual"].includes(v.origin as string) && typeof v.name === "string" && typeof v.statement === "string"
 			&& (v.snapshot === undefined || isObject(v.snapshot)) && (v.sourceId === undefined || isId(v.sourceId)) && isTime(v.created);
 		case "e": return isTime(v);
-		case "m": return isObject(v) && Object.keys(v).length <= 10_000 && Object.entries(v).every(([deck, s]) => isId(deck) && isTime(s));
+		case "m": return isObject(v) && typeof v.in === "boolean" && isTime(v.s) && Object.keys(v).length === 2;
 		case "c": return isObject(v) && isId(v.p) && isText(v.q) && isText(v.a) && isTime(v.s);
 		case "r": return isObject(v) && isId(v.p) && isId(v.c) && Number.isInteger(v.rating) && (v.rating as number) >= 1 && (v.rating as number) <= 4
 			&& isTime(v.at) && Array.isArray(v.deckIds) && v.deckIds.length <= 10_000 && v.deckIds.every(isId) && isReviewSettings(v.settings);
@@ -197,7 +230,10 @@ function isValue(kind: FlashcardsKind, id: string, v: unknown): boolean {
 const isKey = (key: string): boolean => {
 	const kind = flashcardsKindOf(key);
 	const id = idOf(key);
-	return key.length <= MAX_KEY && !!kind && (kind === "s" ? (SYNCED_FLASHCARDS_SETTINGS as readonly string[]).includes(id) : isId(id));
+	if (key.length > MAX_KEY || !kind) return false;
+	if (kind === "s") return (SYNCED_FLASHCARDS_SETTINGS as readonly string[]).includes(id);
+	if (kind === "m") { const ref = membershipOf(key)!; return !!ref && isId(ref.deck) && isId(ref.fact); }
+	return isId(id);
 };
 
 /**
@@ -275,28 +311,18 @@ export function combine(input: Items): { items: Items; placement: Placement } {
 		list.push({ id, item });
 		liveCues.set(item.p, list);
 	}
-	// The same question twice on one fact: the earlier card stays.
-	for (const [p, list] of liveCues) {
-		list.sort((a, b) => byStamp({ s: a.item.s, id: a.id }, { s: b.item.s, id: b.id }));
-		const seen = new Set<string>();
-		const kept = list.filter(({ id, item }) => {
-			const question = item.q.trim();
-			if (!seen.has(question)) { seen.add(question); return true; }
-			items.set(`k|${id}`, 1);
-			items.delete(`c|${id}`);
-			return false;
-		});
-		liveCues.set(p, kept);
-	}
+	for (const list of liveCues.values()) list.sort((a, b) => byStamp({ s: a.item.s, id: a.id }, { s: b.item.s, id: b.id }));
 
 	// Facts that are alive: they have a fact item and a card.
 	const alive = new Set<string>();
 	for (const [p, list] of liveCues) if (list.length > 0 && items.has(`p|${p}`)) alive.add(p);
+	const memberOf = membershipsByFact(items);
+	const entriesOf = (p: string): Map<string, MembershipItem> => memberOf.get(p) ?? new Map();
 
 	// Decks that may be in the file: not deleted, or deleted but still holding a fact.
 	const deckIds = [...items.keys()].filter((key) => key[0] === "d" && key[1] === "|").map(idOf).sort();
 	const holders = new Map<string, number>();
-	for (const p of alive) for (const deck of Object.keys(get<MembershipItem>(`m|${p}`) ?? {})) holders.set(deck, (holders.get(deck) ?? 0) + 1);
+	for (const p of alive) for (const [deck, entry] of entriesOf(p)) if (entry.in) holders.set(deck, (holders.get(deck) ?? 0) + 1);
 	const candidates = deckIds.filter((id) => !items.has(`x|${id}`) || (holders.get(id) ?? 0) > 0);
 
 	// Twin decks: the same session or source, or the same uploaded file.
@@ -332,25 +358,33 @@ export function combine(input: Items): { items: Items; placement: Placement } {
 	}
 	const target = (deck: string): string => joined.get(deck) ?? deck;
 
-	// Memberships follow a join. A deck that hasn't arrived yet is kept in the list.
+	// Memberships follow a join: a fact in a joined deck is in the deck it was joined into
+	// (with the earliest stamp), unless that deck already says where the fact stands.
 	for (const p of alive) {
-		const key = `m|${p}`;
-		const membership = get<MembershipItem>(key);
-		if (!membership) continue;
-		// The deck it was joined into keeps its own stamp; otherwise the earliest of the joined ones.
-		const next: MembershipItem = {};
-		for (const [deck, s] of Object.entries(membership)) if (target(deck) === deck) next[deck] = s;
-		for (const [deck, s] of Object.entries(membership)) {
+		const entries = entriesOf(p);
+		const moved = new Map<string, number>();
+		for (const [deck, entry] of entries) {
 			const to = target(deck);
-			if (to !== deck && membership[to] === undefined) next[to] = Math.min(next[to] ?? Infinity, s);
+			if (to !== deck && entry.in && !entries.has(to)) moved.set(to, Math.min(moved.get(to) ?? Infinity, entry.s));
 		}
-		if (!same(next, membership)) items.set(key, next);
+		for (const [to, s] of moved) {
+			const value: MembershipItem = { in: true, s };
+			items.set(membershipKey(to, p), value);
+			entries.set(to, value);
+			memberOf.set(p, entries);
+		}
 	}
 
-	// Placed facts: alive, in at least one deck that exists.
+	// Placed facts: alive, in at least one deck that exists. Taken out of every deck it was
+	// in: it stays in the one it was put in last (a fact is never left in no deck).
 	const deckOf = new Map<string, string[]>();
+	const placedIn = new Map<string, string[]>();
+	const exists = (deck: string): boolean => items.has(`d|${deck}`) && !joined.has(deck);
 	for (const p of [...alive].sort()) {
-		const decks = Object.keys(get<MembershipItem>(`m|${p}`) ?? {}).filter((deck) => items.has(`d|${deck}`) && !joined.has(deck)).sort();
+		const entries = [...entriesOf(p)].filter(([deck]) => exists(deck));
+		let decks = entries.filter(([, entry]) => entry.in).map(([deck]) => deck).sort();
+		if (decks.length === 0 && entries.length > 0) decks = [entries.sort(([a, x], [b, y]) => y.s - x.s || (a < b ? -1 : a > b ? 1 : 0))[0]![0]];
+		placedIn.set(p, decks);
 		for (const deck of decks) deckOf.set(deck, [...(deckOf.get(deck) ?? []), p]);
 	}
 
@@ -359,7 +393,7 @@ export function combine(input: Items): { items: Items; placement: Placement } {
 	for (const id of liveDecks) items.delete(`x|${id}`);
 	const deckOrder = ordered(items.get(DECK_ORDER_KEY), liveDecks, (id) => get<DeckItem>(`d|${id}`)!.s);
 	const decks: PlacedDeck[] = deckOrder.map((id) => {
-		const members = ordered(items.get(`q|${id}`), deckOf.get(id) ?? [], (p) => get<MembershipItem>(`m|${p}`)?.[id] ?? Infinity);
+		const members = ordered(items.get(`q|${id}`), deckOf.get(id) ?? [], (p) => entriesOf(p).get(id)?.s ?? Infinity);
 		return { id, item: get<DeckItem>(`d|${id}`)!, members };
 	});
 
@@ -371,7 +405,7 @@ export function combine(input: Items): { items: Items; placement: Placement } {
 		const stamps = new Map(cues.map(({ id, item }) => [id, item.s]));
 		const order = ordered(items.get(`u|${p}`), cues.map(({ id }) => id), (id) => stamps.get(id)!);
 		const byId = new Map(cues.map((cue) => [cue.id, cue]));
-		const inDecks = Object.keys(get<MembershipItem>(`m|${p}`)!).filter((d) => live.has(d)).sort();
+		const inDecks = (placedIn.get(p) ?? []).filter((d) => live.has(d));
 		props.set(p, { id: p, item: get<PropItem>(`p|${p}`)!, decks: inDecks, cues: order.map((id) => byId.get(id)!) });
 	}
 
@@ -391,4 +425,39 @@ export function combine(input: Items): { items: Items; placement: Placement } {
 	for (const [key, value] of items) if (key[0] === "e" && key[1] === "|") epochs.set(idOf(key), value as number);
 
 	return { items, placement: { settings, decks, props, files, epochs, joined } };
+}
+
+/**
+ * Two cards with the same question (after trimming) on one fact that meet
+ * here for the first time from two devices: this device holds one, the
+ * other arrives, and the side that sent it never had this device's card
+ * (`senderHad`). The later of the two (s, then id) gets a k. Cards that
+ * arrive together, or a device's own two cards, are never paired: a device
+ * that holds both meant to.
+ */
+export function duplicateDeletions(before: Items, incoming: ReadonlyMap<string, unknown>, senderHad: (key: string) => boolean): string[] {
+	const local = new Map<string, Array<{ id: string; item: CueItem }>>();
+	for (const [key, value] of before) {
+		if (key[0] !== "c" || key[1] !== "|") continue;
+		const id = idOf(key);
+		if (before.has(`k|${id}`) || incoming.get(`k|${id}`) === 1) continue;
+		const item = value as CueItem;
+		const list = local.get(item.p) ?? [];
+		list.push({ id, item });
+		local.set(item.p, list);
+	}
+	const losers = new Set<string>();
+	for (const [key, value] of incoming) {
+		if (key[0] !== "c" || key[1] !== "|" || value === null || value === undefined || before.has(key)) continue;
+		const id = idOf(key);
+		if (before.has(`k|${id}`) || incoming.get(`k|${id}`) === 1) continue;
+		const item = value as CueItem;
+		for (const mine of local.get(item.p) ?? []) {
+			if (losers.has(mine.id) || mine.item.q.trim() !== item.q.trim() || senderHad(`c|${mine.id}`)) continue;
+			const later = byStamp({ s: mine.item.s, id: mine.id }, { s: item.s, id }) < 0 ? id : mine.id;
+			losers.add(later);
+			if (later === id) break;
+		}
+	}
+	return [...losers].sort();
 }

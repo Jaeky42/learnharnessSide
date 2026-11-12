@@ -10,7 +10,7 @@
 
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
-import { rebuildFlashcards, readFlashcards, replayProposition, FLASHCARDS_DEFAULT_SETTINGS, type FlashcardsMemory } from "../src/core/sync/flashcards.ts";
+import { applyFlashcardsChanges, rebuildFlashcards, readFlashcards, replayProposition, FLASHCARDS_DEFAULT_SETTINGS, type FlashcardsMemory } from "../src/core/sync/flashcards.ts";
 import { clock, DAY, Device, MINUTE, pluginDefaults, scheduler } from "./sync-flashcards-harness.ts";
 
 Date.now = () => clock.now;
@@ -98,6 +98,26 @@ describe("the replay equals the plugin's own schedule", () => {
 		assert.ok(file.reviews.filter((r) => r.propositionId === "n_x").length > file.reviews.filter((r) => r.propositionId === "n_x" && r.at > (memory!.items["e|n_x"] as number)).length, "old reviews are kept");
 		assert.notEqual(file.propositions.n_x!.cues[0]!.id, p.cues[0]!.id);
 		assert.equal(JSON.stringify(rebuildFlashcards(file, memory, scheduler)), JSON.stringify(file));
+	});
+
+	it("when a fact is deleted and made again before the sync ever looked (its first sync)", async () => {
+		clock.now = new Date(2026, 1, 2, 8).getTime();
+		const d = device("pc");
+		await d.generate([{ id: "n1", questions: ["What is n1?"] }]);
+		for (let i = 0; i < 6; i++) { await d.grade(3); clock.now += 8 * DAY; }
+		await d.call("delete-deck", { id: (await d.state()).decks[0]!.id });
+		clock.now += DAY;
+		await d.generate([{ id: "n1", questions: ["What is n1, again?"] }]);
+		await study(d, [1, 3], 10 * MINUTE);
+		const file = d.file()!;
+		assert.ok(file.reviews.filter((r) => r.propositionId === "n1").length > 2, "the old fact's reviews are still in the file");
+		// No memory: as at a first sync, and on a device with no library that takes it all.
+		assert.equal(JSON.stringify(rebuildFlashcards(file, null, scheduler)), JSON.stringify(file));
+		const read = readFlashcards(file, null, clock.now);
+		assert.equal(typeof read.items.get("e|n1"), "number", "the old reviews are set apart");
+		const taken = applyFlashcardsChanges(null, null, read.items, { now: clock.now, scheduler });
+		assert.deepEqual(taken.file!.propositions.n1!.schedule, file.propositions.n1!.schedule);
+		assert.equal(taken.file!.propositions.n1!.schedule.reps, 2);
 	});
 
 	it("when a fact is deleted and made again between two looks of the sync", async () => {

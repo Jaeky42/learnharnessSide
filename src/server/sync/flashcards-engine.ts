@@ -16,21 +16,26 @@
  *   - a PC with no Flashcards file brings no settings at its first sync;
  *   - a side with a generation under way holds its Flashcards exchange: the
  *     PC skips it that round, the server answers "busy";
- *   - a memory that is missing while the exchange's state is there: this
+ *   - a memory that is missing while the exchange's state is there, or a
+ *     library that doesn't follow its memory (put back, replaced): this
  *     side's records are lost, and everything is sent again (the server
  *     starts its table afresh, as a server that lost its records does);
+ *     nothing in such a library counts as deleted. A library that can't be
+ *     read changes none of this: nothing is sent, taken or written then;
+ *   - a generation that shows no change for 15 minutes holds nothing;
  *   - each side copies its Flashcards folder aside right before its first
  *     Flashcards exchange; with no copy, no Flashcards sync.
  */
 
+import fs from "node:fs";
 import path from "node:path";
 import { PATHS } from "../../../config.ts";
-import { emit } from "../../core/events.ts";
+import { emit, subscribe, type ServerEvent } from "../../core/events.ts";
 import { checkFlashcardsChange, flashcardsKindOf } from "../../core/sync/flashcards.ts";
 import { makeFlashcardsBackup } from "../../store/sync/backup.ts";
 import { readCloudPairing } from "../../store/sync/pairing.ts";
 import { stateFile, type StateFile } from "../../store/sync/state-file.ts";
-import { measuredClockOffsetMs, syncRequest } from "./client.ts";
+import { activePairing, measuredClockOffsetMs, syncRequest } from "./client.ts";
 import { syncStateDir } from "./engine.ts";
 import { createFlashcardsFiles, FLASHCARDS_PLUGIN_ID, type FlashcardsFiles } from "./flashcards-files.ts";
 import { localTimeZone, takeTimeZone } from "./flashcards-zone.ts";
@@ -59,21 +64,86 @@ export function announceFlashcardsChanged(): void {
 	emit("plugin-message", { pluginId: FLASHCARDS_PLUGIN_ID, topic: "changed", data: SYNC_ECHO });
 }
 
-/** A server whose memory is gone has lost its records: it starts its table afresh. */
-export function authorityState(inner: StateFile<AuthorityMapsState>, files: Pick<FlashcardsFiles, "memoryReadable">): StateFile<AuthorityMapsState> {
-	return { read: () => { const state = inner.read(); return state && !files.memoryReadable() ? null : state; }, write: inner.write, exists: inner.exists };
-}
-
-/** A desktop whose memory is gone sends everything again. */
-export function desktopState(inner: StateFile<DesktopMapsState>, files: Pick<FlashcardsFiles, "memoryReadable">): StateFile<DesktopMapsState> {
+/**
+ * A server whose records are lost (no memory for a library it can read, or
+ * a library that doesn't follow its memory: put back or replaced) starts its
+ * table afresh: every PC sends everything once. Its backup was made already
+ * and isn't made again. A library it can't read changes nothing here.
+ */
+export function authorityState(inner: StateFile<AuthorityMapsState>, files: Pick<FlashcardsFiles, "records">): StateFile<AuthorityMapsState> {
 	return {
 		read: () => {
 			const state = inner.read();
-			return state && state.synced && !files.memoryReadable() ? { ...state, synced: false, cursor: 0, known: {}, pending: {} } : state;
+			if (!state) return state;
+			const records = files.records();
+			return records === "lost" || records === "stale" ? { version: 1, seq: 0, items: {}, devices: [], ...(state.backup !== undefined ? { backup: state.backup } : {}) } : state;
 		},
 		write: inner.write,
 		exists: inner.exists,
 	};
+}
+
+/** A desktop whose records are lost (as above) sends everything again; the server's values stand where both have an item. */
+export function desktopState(inner: StateFile<DesktopMapsState>, files: Pick<FlashcardsFiles, "records">): StateFile<DesktopMapsState> {
+	return {
+		read: () => {
+			const state = inner.read();
+			if (!state) return state;
+			const records = files.records();
+			const lost = (records === "lost" && state.synced) || records === "stale";
+			return lost ? { ...state, synced: false, cursor: 0, known: {}, pending: {} } : state;
+		},
+		write: inner.write,
+		exists: inner.exists,
+	};
+}
+
+/**
+ * This side's own Flashcards changes are noted with the time they were made
+ * (a little after the plugin says so), not only when the next exchange
+ * comes: the server's, while every PC is away, would otherwise all get the
+ * time of the last one found. Only where Flashcards sync has run (`active`);
+ * nothing happens, and no timer is set, anywhere else.
+ */
+export function watchFlashcardsChanges(deps: {
+	subscribe: (listener: (event: ServerEvent) => void) => () => void;
+	setTimer: (run: () => void, ms: number) => unknown;
+	active: () => boolean;
+	detect: () => void;
+	delayMs?: number;
+}): () => void {
+	let waiting = false;
+	return deps.subscribe((event) => {
+		if (waiting || !isFlashcardsChange(event) || !deps.active()) return;
+		waiting = true;
+		deps.setTimer(() => {
+			waiting = false;
+			try { deps.detect(); } catch (error) { console.error(`[LearnHarness] Flashcards sync: ${error instanceof Error ? error.message : String(error)}`); }
+		}, deps.delayMs ?? 2_000);
+	});
+}
+
+/** Flashcards changed its library here (cards a generation adds come as `batch-changed`); what sync wrote doesn't count. */
+export function isFlashcardsChange(event: ServerEvent): boolean {
+	return event.type === "plugin-message" && event.pluginId === FLASHCARDS_PLUGIN_ID && (event.topic === "changed" || event.topic === "batch-changed") && !isSyncEcho(event.data);
+}
+
+const engineTimer = (run: () => void, ms: number): unknown => { const handle = setTimeout(run, ms); handle.unref?.(); return handle; };
+
+/** The server's watcher (autostart.ts): active once a PC has exchanged Flashcards with it. */
+export function startServerFlashcardsWatcher(): void {
+	if (engine().watching) return;
+	engine().watching = true;
+	const stateOf = path.join(/* turbopackIgnore: true */ syncStateDir(), "flashcards.json");
+	watchFlashcardsChanges({ subscribe, setTimer: engineTimer, active: () => fs.existsSync(/* turbopackIgnore: true */ stateOf), detect: () => flashcardsAuthority().detect() });
+}
+
+/** A paired desktop's watcher (loop.ts): notes its changes while the server can't be reached too. */
+export function startDesktopFlashcardsWatcher(): void {
+	if (engine().watching) return;
+	engine().watching = true;
+	const stateOf = path.join(/* turbopackIgnore: true */ syncStateDir(), "flashcards-desktop.json");
+	watchFlashcardsChanges({ subscribe, setTimer: engineTimer, active: () => activePairing() !== null && fs.existsSync(/* turbopackIgnore: true */ stateOf), detect: () => flashcardsDesktop().detect() });
 }
 
 function backup(): string | null {
@@ -84,12 +154,17 @@ function backup(): string | null {
 	}
 }
 
-interface FlashcardsEngine { files?: FlashcardsFiles; authority?: MapsAuthority; desktop?: MapsDesktop }
+interface FlashcardsEngine { files?: FlashcardsFiles; authority?: MapsAuthority; desktop?: MapsDesktop; watching?: boolean }
 const globals = globalThis as typeof globalThis & { __lhFlashcardsSync?: FlashcardsEngine };
 const engine = (): FlashcardsEngine => (globals.__lhFlashcardsSync ??= {});
 
 export function flashcardsFiles(): FlashcardsFiles {
 	return (engine().files ??= createFlashcardsFiles({ dataDir: PATHS.data, syncDir: syncStateDir(), now: Date.now, announce: announceFlashcardsChanged }));
+}
+
+/** Is a generation holding this side's Flashcards exchange? (The loop doesn't start a round for its notices then.) */
+export function flashcardsBusy(): boolean {
+	try { return flashcardsFiles().busy(); } catch { return false; }
 }
 
 export function flashcardsAuthority(): MapsAuthority {
@@ -100,6 +175,7 @@ export function flashcardsAuthority(): MapsAuthority {
 		now: Date.now,
 		rules: FLASHCARDS_RULES,
 		busy: () => files.busy(),
+		locked: () => files.locked(),
 		makeBackup: backup,
 		// A new zone: every schedule here is worked out again in it, as the PC works them out.
 		onTimeZone: (deviceId, zone) => { if (takeTimeZone(deviceId, zone)) files.rebuild(); },
@@ -119,11 +195,13 @@ export function flashcardsDesktop(): MapsDesktop {
 		now: Date.now,
 		clockOffset: measuredClockOffsetMs,
 		timeZone: localTimeZone,
-		// The zone goes to the server (first, or after this PC moved): the server works every schedule out again in it, and so does this PC.
+		// The zone goes to the server (first, or after this PC moved): the server works every schedule
+		// out again in it, and so does this PC, once per zone (not again while the server is busy).
 		onTimeZoneChange: () => { files.rebuild(); },
 		rules: FLASHCARDS_RULES,
 		path: FLASHCARDS_SYNC_PATH,
 		busy: () => files.busy(),
+		locked: () => files.locked(),
 		makeBackup: backup,
 	}));
 }

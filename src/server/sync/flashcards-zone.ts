@@ -43,6 +43,17 @@ export function isTimeZoneName(value: unknown): value is string {
 	}
 }
 
+/** A zone's name in its standard form ("europe/stockholm" → "Europe/Stockholm"), or null when it isn't one. */
+export function standardZone(value: unknown): string | null {
+	if (!isTimeZoneName(value)) return null;
+	try {
+		const zone = new Intl.DateTimeFormat(undefined, { timeZone: value }).resolvedOptions().timeZone;
+		return isTimeZoneName(zone) ? zone : null;
+	} catch {
+		return null;
+	}
+}
+
 /** This process's own zone, as a desktop sends it. */
 export function localTimeZone(): string | null {
 	try {
@@ -62,24 +73,44 @@ export function storedTimeZone(syncDir = defaultSyncDir()): TimeZoneRecord | nul
 	}
 }
 
-/** Run this process in `zone` from now on. True when it changed. */
-export function applyTimeZone(zone: string): boolean {
-	if (!isTimeZoneName(zone) || process.env.TZ === zone) return false;
+/**
+ * Run this process in `zone` from now on. True when it changed. If the
+ * process doesn't then report that zone (Node without the zone data), it
+ * goes back to what it was, and says so in the log.
+ */
+export function applyTimeZone(name: string): boolean {
+	const zone = standardZone(name);
+	if (!zone || process.env.TZ === zone) return false;
+	const before = process.env.TZ;
 	process.env.TZ = zone;
+	let now: string | null = null;
+	try { now = Intl.DateTimeFormat().resolvedOptions().timeZone; } catch { now = null; }
+	if (now !== zone) {
+		if (before === undefined) delete process.env.TZ; else process.env.TZ = before;
+		console.error(`[LearnHarness] Flashcards sync: this server couldn't switch to the time zone ${zone}, and keeps the one it had.`);
+		return false;
+	}
 	console.log(`[LearnHarness] Flashcards sync: this server now keeps time in ${zone}, the paired desktop app's time zone.`);
 	return true;
 }
 
-/** The server's side: a paired desktop said its zone. Kept, and used at once. True when it is a zone this server didn't keep or run in. */
-export function takeTimeZone(deviceId: string, zone: string, options: { syncDir?: string; now?: number } = {}): boolean {
-	if (!isTimeZoneName(zone)) return false;
+/**
+ * The server's side: a paired desktop said its zone. Used at once and kept
+ * (only when this process really runs in it). True when it is a zone this
+ * server didn't keep or run in: its schedules are then worked out again.
+ */
+export function takeTimeZone(deviceId: string, name: string, options: { syncDir?: string; now?: number } = {}): boolean {
+	const zone = standardZone(name);
+	if (!zone) return false;
+	const applied = applyTimeZone(zone);
+	if (process.env.TZ !== zone) return false;
 	const syncDir = options.syncDir ?? defaultSyncDir();
 	const changed = storedTimeZone(syncDir)?.zone !== zone;
 	if (changed) {
 		fs.mkdirSync(/* turbopackIgnore: true */ syncDir, { recursive: true });
 		writeFileAtomicSync(zoneFile(syncDir), `${JSON.stringify({ version: 1, zone, from: deviceId, at: options.now ?? Date.now() } satisfies TimeZoneRecord)}\n`);
 	}
-	return applyTimeZone(zone) || changed;
+	return applied || changed;
 }
 
 /** At start, before the plugins: the zone a paired desktop gave, if one ever did. */

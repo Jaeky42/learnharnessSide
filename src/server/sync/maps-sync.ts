@@ -131,8 +131,21 @@ export function isAuthorityMapsState(value: unknown): value is AuthorityMapsStat
 	return !!v && typeof v === "object" && v.version === 1 && typeof v.seq === "number" && !!v.items && typeof v.items === "object" && Array.isArray(v.devices);
 }
 
+
 export interface MapsAuthority {
 	exchange(deviceId: string, body: unknown): AuthorityReply;
+	/**
+	 * Note what changed in the server's own files, with the time it changed,
+	 * without a desktop asking (Flashcards: shortly after the plugin says its
+	 * library changed, so a change made on the phone keeps its own time while
+	 * every PC is away). Does nothing before the first exchange ever.
+	 */
+	detect(): void;
+}
+
+/** Copied on write: the saved table stays as it was until the exchange has done its work. */
+function copyOf(state: AuthorityMapsState): AuthorityMapsState {
+	return { ...state, items: { ...state.items }, devices: [...state.devices], ...(state.firsts ? { firsts: { ...state.firsts } } : {}) };
 }
 
 export function createMapsAuthority(deps: {
@@ -147,6 +160,8 @@ export function createMapsAuthority(deps: {
 	rules?: ExchangeRules;
 	/** True while this side can't take part: the desktop is told "busy" and tries again next round. */
 	busy?: () => boolean;
+	/** True while this side's files can't be read at all: the desktop is told "locked", and checks cheaply next time. */
+	locked?: () => boolean;
 	/** Made once, right before this side's first exchange; a throw stops the exchange. */
 	makeBackup?: () => string | null;
 	page?: { items: number; bytes: number };
@@ -161,21 +176,41 @@ export function createMapsAuthority(deps: {
 	 */
 	const underway = new Map<string, Map<string, string>>();
 
-	/** What changed in the server's own files since the table was last brought up to date. */
-	function noteOwnChanges(state: AuthorityMapsState, snapshot: MapSnapshot, now: number): void {
-		for (const key of new Set([...snapshot.items.keys(), ...Object.keys(state.items)])) {
-			if (!usable(rules, snapshot, key)) continue;
-			const h = hashOf(snapshot, key);
+	/** The items of the server's own files that differ from the table (looked at without changing anything). */
+	function ownChanges(items: AuthorityMapsState["items"], snapshot: MapSnapshot): string[] {
+		const out: string[] = [];
+		const look = (key: string): void => {
+			if (usable(rules, snapshot, key) && (items[key]?.h ?? ABSENT) !== hashOf(snapshot, key)) out.push(key);
+		};
+		for (const key of snapshot.items.keys()) look(key);
+		for (const key in items) if (!snapshot.items.has(key)) look(key);
+		return out;
+	}
+
+	/** What changed in the server's own files since the table was last brought up to date. True when something did. */
+	function noteOwnChanges(state: AuthorityMapsState, snapshot: MapSnapshot, now: number, keys = ownChanges(state.items, snapshot)): boolean {
+		for (const key of keys) {
 			const known = state.items[key];
-			if ((known?.h ?? ABSENT) === h) continue;
 			// A change found here is newer than what the table had, whatever the file's time says.
-			state.items[key] = { h, t: Math.max(changedAt(rules, snapshot, key, now), (known?.t ?? -1) + 1), seq: ++state.seq };
+			state.items[key] = { h: hashOf(snapshot, key), t: Math.max(changedAt(rules, snapshot, key, now), (known?.t ?? -1) + 1), seq: ++state.seq };
 		}
+		return keys.length > 0;
 	}
 
 	return {
+		detect() {
+			if (deps.busy?.() || deps.locked?.()) return;
+			const stored = deps.state.read();
+			if (!stored) return;
+			const snapshot = deps.files.read();
+			const keys = ownChanges(stored.items, snapshot);
+			if (keys.length === 0) return;
+			const state = copyOf(stored);
+			noteOwnChanges(state, snapshot, deps.now(), keys);
+			deps.state.write(state);
+		},
 		exchange(deviceId, body) {
-			const raw = (body ?? {}) as { cursor?: unknown; all?: unknown; changes?: unknown; more?: unknown; vaultFolders?: unknown; timeZone?: unknown };
+			const raw = (body ?? {}) as { cursor?: unknown; all?: unknown; changes?: unknown; more?: unknown; probe?: unknown; vaultFolders?: unknown; timeZone?: unknown };
 			if (typeof raw.cursor !== "number" || !Number.isInteger(raw.cursor) || raw.cursor < 0 || !Array.isArray(raw.changes) || raw.changes.length > MAX_CHANGES) {
 				return bad(rules.malformed);
 			}
@@ -190,29 +225,39 @@ export function createMapsAuthority(deps: {
 				if (names.length > 0) deps.onVaultFolders?.(names);
 			}
 			if (deps.busy?.()) return { status: 409, body: { error: "The server is busy with this. Try again in a moment.", code: "busy" } };
+			if (deps.locked?.()) return { status: 409, body: { error: "The server can't read this right now.", code: "locked" } };
+			// "Can you take part again?": answered without reading or writing anything.
+			if (raw.probe === true) return { status: 200, body: { cursor: raw.cursor, items: [], time: deps.now() } };
 
 			const stored = deps.state.read();
-			// Worked on a copy, so a step that fails midway leaves the table as it was saved.
-			const state: AuthorityMapsState = stored ? structuredClone(stored) : { version: 1, seq: 0, items: {}, devices: [] };
+			let state: AuthorityMapsState = stored ?? { version: 1, seq: 0, items: {}, devices: [] };
+			let dirty = !stored;
+			/** Copied on the first change, so a step that fails midway leaves the table as it was saved. */
+			const edit = (): AuthorityMapsState => { if (state === stored) state = copyOf(stored); dirty = true; return state; };
 			// Before anything this exchange may write.
-			if (deps.makeBackup && state.backup === undefined) state.backup = deps.makeBackup();
+			if (deps.makeBackup && state.backup === undefined) edit().backup = deps.makeBackup();
 			if (typeof raw.timeZone === "string") deps.onTimeZone?.(deviceId, raw.timeZone);
 			const now = deps.now();
 			let snapshot = deps.files.read();
-			noteOwnChanges(state, snapshot, now);
+			const own = ownChanges(state.items, snapshot);
+			if (own.length > 0) noteOwnChanges(edit(), snapshot, now, own);
 
 			const first = !state.devices.includes(deviceId);
 			const progress = state.firsts?.[deviceId];
-			// Only the first desktop this server ever synced with brings its values.
-			const later = first && (progress ? progress.later : state.devices.length > 0);
+			// Only the first desktop this server ever synced with brings its values; one part
+			// way through its first exchange (in pages) counts as that first one too.
+			const others = state.devices.length > 0 || Object.keys(state.firsts ?? {}).some((id) => id !== deviceId);
+			const later = first && (progress ? progress.later : others);
 			// A desktop the server doesn't know yet must say everything it has.
 			if (first && raw.all !== true) {
-				deps.state.write(state);
+				if (dirty) deps.state.write(state);
 				return { status: 409, body: { error: "Send everything once first.", code: "send_all" } };
 			}
 			const cursor = raw.cursor > state.seq ? 0 : raw.cursor;
 			/** More of the desktop's changes follow, in further requests of this exchange. */
 			const more = raw.more === true;
+			/** Has this desktop already had the server's value of an item (it has seen up to `cursor`)? */
+			const desktopHad = (key: string): boolean => { const known = state.items[key]; return !!known && known.h !== ABSENT && known.seq <= cursor; };
 
 			const sent = new Map<string, string>();
 			const taken = new Map<string, { value: unknown; t: number }>();
@@ -228,7 +273,7 @@ export function createMapsAuthority(deps: {
 					if (rules.kindOf(change.key) === "s") {
 						// The server's setting stands. One it doesn't have set is noted as
 						// such, so the answer below puts the new PC back to the default too.
-						if (!known) state.items[change.key] = { h: ABSENT, t: now, seq: ++state.seq };
+						if (!known) edit().items[change.key] = { h: ABSENT, t: now, seq: ++state.seq };
 					} else if (!here) {
 						taken.set(change.key, { value: change.value, t: known ? Math.max(t, known.t + 1) : t });
 					}
@@ -244,23 +289,28 @@ export function createMapsAuthority(deps: {
 				}
 			}
 			if (taken.size > 0) {
-				deps.files.apply(new Map([...taken].map(([key, change]) => [key, change.value])));
+				deps.files.apply(new Map([...taken].map(([key, change]) => [key, change.value])), { senderHad: desktopHad });
 				// What is really there now: a file may have refused or adjusted a value.
 				snapshot = deps.files.read();
+				const target = edit();
 				for (const [key, change] of taken) {
-					if (usable(rules, snapshot, key)) state.items[key] = { h: hashOf(snapshot, key), t: change.t, seq: ++state.seq };
+					if (usable(rules, snapshot, key)) target.items[key] = { h: hashOf(snapshot, key), t: change.t, seq: ++target.seq };
 				}
 			}
 			if (first && more) {
-				state.firsts = { ...state.firsts, [deviceId]: { later, sent: [...settingsSent] } };
+				const sentBefore = progress?.sent ?? [];
+				if (!progress || progress.later !== later || settingsSent.size !== sentBefore.length) {
+					edit().firsts = { ...state.firsts, [deviceId]: { later, sent: [...settingsSent] } };
+				}
 			} else if (first) {
-				state.devices.push(deviceId);
-				if (state.firsts) {
-					delete state.firsts[deviceId];
-					if (Object.keys(state.firsts).length === 0) delete state.firsts;
+				const target = edit();
+				target.devices.push(deviceId);
+				if (target.firsts) {
+					delete target.firsts[deviceId];
+					if (Object.keys(target.firsts).length === 0) delete target.firsts;
 				}
 			}
-			deps.state.write(state);
+			if (dirty) deps.state.write(state);
 
 			const before = underway.get(deviceId) ?? new Map<string, string>();
 			for (const [key, h] of sent) before.set(key, h);
@@ -279,10 +329,13 @@ export function createMapsAuthority(deps: {
 			// While the desktop's changes are still coming, only they are answered.
 			let replyCursor = cursor;
 			let truncated = false;
-			if (!more) {
-				const since = Object.entries(state.items)
-					.filter(([key, known]) => known.seq > cursor && !sent.has(key) && usable(rules, snapshot, key))
-					.sort((a, b) => a[1].seq - b[1].seq);
+			if (!more && cursor < state.seq) {
+				const since: Array<[string, { h: string; t: number; seq: number }]> = [];
+				for (const key in state.items) {
+					const known = state.items[key]!;
+					if (known.seq > cursor && !sent.has(key) && usable(rules, snapshot, key)) since.push([key, known]);
+				}
+				since.sort((a, b) => a[1].seq - b[1].seq);
 				let size = 0;
 				for (const [key, known] of since) {
 					if (items.length >= page.items || size >= page.bytes) { truncated = true; break; }
@@ -290,7 +343,7 @@ export function createMapsAuthority(deps: {
 					replyCursor = known.seq;
 				}
 				if (!truncated) replyCursor = state.seq;
-			}
+			} else if (!more) replyCursor = state.seq;
 			if (more || truncated) underway.set(deviceId, before); else underway.delete(deviceId);
 			return { status: 200, body: { cursor: replyCursor, items, time: deps.now(), ...(truncated ? { more: true } : {}) } };
 		},
@@ -341,6 +394,8 @@ export interface MapsDesktop {
 
 type ReplyItem = { key: string; t: number; same?: boolean; value?: unknown };
 
+const copyOfDesktop = (state: DesktopMapsState): DesktopMapsState => ({ ...state, known: { ...state.known }, pending: { ...state.pending } });
+
 export function createMapsDesktop(deps: {
 	files: MapFiles;
 	state: StateFile<DesktopMapsState>;
@@ -353,14 +408,16 @@ export function createMapsDesktop(deps: {
 	vaultFolders?: () => string[] | null;
 	/** This PC's time zone (IANA name), sent when it changes. */
 	timeZone?: () => string | null;
-	/** Called before the files are read when the zone is about to be sent (it differs from the one last sent, or none was). */
-	onTimeZoneChange?: () => void;
+	/** Called before the files are read when the zone is about to be sent (it differs from the one last sent, or none was); once per zone. */
+	onTimeZoneChange?: (zone: string) => void;
 	/** The instance: the settings and small files when not given. */
 	rules?: ExchangeRules;
 	/** Where the exchange is sent. */
 	path?: string;
 	/** True while this side can't take part: the round is skipped ("busy") and tried again next round. */
 	busy?: () => boolean;
+	/** True while this side's files can't be read at all: the round is skipped, with no request and nothing written. */
+	locked?: () => boolean;
 	/** Made once, right before this side's first exchange with a server; a throw stops the round. */
 	makeBackup?: () => string | null;
 	page?: { items: number; bytes: number };
@@ -369,6 +426,10 @@ export function createMapsDesktop(deps: {
 	const page = deps.page ?? { items: PAGE_ITEMS, bytes: PAGE_BYTES };
 	const route = deps.path ?? "/api/sync/maps";
 	let running: Promise<MapsRound> | null = null;
+	/** The server said it can't read its own files: next time, ask cheaply first. */
+	let serverLocked = false;
+	/** The zone `onTimeZoneChange` was last called for: once per zone, also while the server keeps answering "busy". */
+	let announcedZone: string | null = null;
 
 	/** The state for the server this desktop is paired with, or null. */
 	function current(): DesktopMapsState | null {
@@ -384,8 +445,8 @@ export function createMapsDesktop(deps: {
 		// To the second is plenty, and keeps a quiet round from rewriting the record.
 		if (measured !== null && Math.abs(measured - state.offset) >= 1000) { state.offset = measured; changed = true; }
 		const now = deps.now();
-		for (const key of new Set([...snapshot.items.keys(), ...Object.keys(state.known), ...Object.keys(state.pending)])) {
-			if (!usable(rules, snapshot, key)) continue;
+		const look = (key: string): void => {
+			if (!usable(rules, snapshot, key)) return;
 			const h = hashOf(snapshot, key);
 			if ((state.known[key] ?? ABSENT) === h) {
 				if (state.pending[key]) { delete state.pending[key]; changed = true; }
@@ -393,7 +454,10 @@ export function createMapsDesktop(deps: {
 				state.pending[key] = { h, t: changedAt(rules, snapshot, key, now) + state.offset };
 				changed = true;
 			}
-		}
+		};
+		for (const key of snapshot.items.keys()) look(key);
+		for (const key of Object.keys(state.known)) if (!snapshot.items.has(key)) look(key);
+		for (const key of Object.keys(state.pending)) if (!snapshot.items.has(key) && !(key in state.known)) look(key);
 		return changed;
 	}
 
@@ -405,18 +469,28 @@ export function createMapsDesktop(deps: {
 		const identity = deps.identity();
 		if (!identity) return { ok: false, reason: "not-paired" };
 		if (deps.busy?.()) return { ok: false, reason: "busy" };
+		// Nothing here can be read (Flashcards: a library in a newer format, or damaged): nothing to send or take.
+		if (deps.locked?.()) return { ok: false, reason: "busy" };
+		if (serverLocked) {
+			const probe = await deps.request(route, { method: "POST", body: { cursor: 0, all: false, changes: [], probe: true } });
+			if (!probe.ok) return probe.reason === "refused" ? { ok: false, reason: "busy" } : { ok: false, reason: probe.reason };
+			serverLocked = false;
+		}
 		for (let attempt = 0; attempt < 2; attempt++) {
 			const stored = current();
 			// Worked on a copy: what arrives is agreed on only once it is in the files.
-			const state: DesktopMapsState = stored ? structuredClone(stored) : { version: 1, server: identity.server, deviceId: identity.deviceId, synced: false, cursor: 0, known: {}, pending: {}, folders: null, offset: 0 };
+			const state: DesktopMapsState = stored ? copyOfDesktop(stored) : { version: 1, server: identity.server, deviceId: identity.deviceId, synced: false, cursor: 0, known: {}, pending: {}, folders: null, offset: 0 };
 			if (deps.makeBackup && state.backup === undefined) {
 				state.backup = deps.makeBackup();
 				deps.state.write(state);
 			}
 			const zone = deps.timeZone?.() ?? null;
 			const sendZone = zone !== null && zone !== (state.zone ?? null);
-			if (sendZone) deps.onTimeZoneChange?.();
+			if (sendZone && announcedZone !== zone) { deps.onTimeZoneChange?.(zone); announcedZone = zone; }
 			const snapshot = deps.files.read();
+			// Some of the files can't be read this round: what they hold is left alone, and so is the
+			// place in the server's list, so nothing the server has for them is passed over.
+			const partial = snapshot.unreadable.size > 0;
 			note(state, snapshot);
 			const now = deps.now();
 			const changes: MapChange[] = [];
@@ -459,6 +533,7 @@ export function createMapsDesktop(deps: {
 				}
 				// Keep the times of what changed here; it goes when the server is back.
 				if (deps.state.exists() || Object.keys(state.pending).length > 0) deps.state.write(state);
+				if (failed.reason === "refused" && failed.code === "locked") { serverLocked = true; return { ok: false, reason: "busy" }; }
 				if (failed.reason === "refused" && failed.code === "busy") return { ok: false, reason: "busy" };
 				return { ok: false, reason: failed.reason };
 			}
@@ -483,14 +558,15 @@ export function createMapsDesktop(deps: {
 				if (state.pending[item.key] && state.pending[item.key]!.h === sent.get(item.key)) delete state.pending[item.key];
 			}
 			if (apply.size > 0) {
-				deps.files.apply(apply);
+				// The server had what this desktop agreed on with it before, and what it sent it now.
+				deps.files.apply(apply, { senderHad: (key) => key in knownBefore || sent.has(key) });
 				// What is really here now is what this desktop agrees to, so a value a
 				// file adjusted on the way in doesn't come back as a change of its own.
 				const after = deps.files.read();
 				for (const key of apply.keys()) if (usable(rules, after, key)) agree(state, key, hashOf(after, key));
 			}
-			state.cursor = cursor;
-			state.synced = true;
+			// Nothing passed over: the place in the server's list moves on.
+			if (!partial && latest.unreadable.size === 0) { state.cursor = cursor; state.synced = true; }
 			if (sendFolders) state.folders = folders;
 			if (sendZone) state.zone = zone;
 			note(state, deps.files.read());
@@ -502,10 +578,10 @@ export function createMapsDesktop(deps: {
 
 	return {
 		detect() {
-			if (running) return;
+			if (running || deps.locked?.()) return;
 			const stored = current();
 			if (!stored) return;
-			const state = structuredClone(stored);
+			const state = copyOfDesktop(stored);
 			if (note(state, deps.files.read())) deps.state.write(state);
 		},
 		round() {

@@ -21,7 +21,7 @@
 
 import { subscribe, type ServerEvent } from "../../core/events.ts";
 import { activePairing } from "./client.ts";
-import { isSyncEcho } from "./flashcards-engine.ts";
+import { flashcardsBusy, isFlashcardsChange, isSyncEcho, startDesktopFlashcardsWatcher } from "./flashcards-engine.ts";
 import { runSyncRound } from "./round.ts";
 
 export const POLL_MS = 10_000;
@@ -59,8 +59,9 @@ const CHANGES = new Set<ServerEvent["type"]>(["turn-settled", "record-changed", 
  * generation adds are announced as `batch-changed`. What sync itself wrote
  * into the library is announced too (for open pages), and isn't a change made here.
  */
-export function flashcardsChanged(event: ServerEvent): boolean {
-	return event.type === "plugin-message" && event.pluginId === "flashcards" && (event.topic === "changed" || event.topic === "batch-changed") && !isSyncEcho(event.data);
+export function flashcardsChanged(event: ServerEvent, busy: () => boolean = flashcardsBusy): boolean {
+	// While a generation holds the exchange, its many notices start no round: the one at its end does.
+	return isFlashcardsChange(event) && !busy();
 }
 
 export function createSyncLoop(deps: SyncLoopDeps): SyncLoop {
@@ -176,6 +177,8 @@ export function startSyncLoop(): SyncLoop {
 		clearTimer: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
 	}));
 	loop.start();
+	// Flashcards changes are noted with their own time, also while the server can't be reached.
+	startDesktopFlashcardsWatcher();
 	return loop;
 }
 
