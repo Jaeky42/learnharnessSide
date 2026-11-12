@@ -234,9 +234,11 @@ export function NotesTreeView({
 
 	const canDrag = !flat;
 
-	// PHONE: press and hold opens the row menu; hold, then move drags the row.
+	// TOUCH (a phone, and a tablet with the computer layout): press and hold
+	// opens the row menu; hold, then move drags the row. Only a finger in a
+	// browser sends these (components/phone/long-press.ts).
 	useEffect(() => {
-		if (!phone || !canDrag) return;
+		if (!canDrag) return;
 		const onHoldDrag = (event: Event) => {
 			const d = (event as CustomEvent<HoldDragDetail>).detail;
 			if (d.phase === "start") {
@@ -253,7 +255,7 @@ export function NotesTreeView({
 			document.removeEventListener(HOLD_DRAG_EVENT, onHoldDrag);
 			drag.cancel();
 		};
-	}, [phone, canDrag, drag]);
+	}, [canDrag, drag]);
 
 	// MOUSE (and pen): press a row and move. A press that doesn't move is the
 	// click it always was.

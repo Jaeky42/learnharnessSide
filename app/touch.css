@@ -17,4 +17,20 @@
 	html:not(.lh-electron) {
 		overscroll-behavior-y: none;
 	}
+
+	/* Press-and-hold rows (sessions, notes, folders): no text selection or
+	   iOS callout while holding. A tablet has no right-click, so a held
+	   finger opens the row's menu there too (components/phone/long-press.ts). */
+	html:not(.lh-electron) [data-phone-press] {
+		-webkit-user-select: none;
+		user-select: none;
+		-webkit-touch-callout: none;
+	}
+
+	/* Buttons that only appear on mouse hover stay visible where a finger
+	   can't hover: copy, expand diagram, and "move this section" in a note's
+	   Read view. The notes list's row menus open by press and hold. */
+	html:not(.lh-electron) :is([data-testid="md-copy"], [data-testid="md-mermaid-expand"], [title="Move this section to a new note"]) {
+		opacity: 1;
+	}
 }

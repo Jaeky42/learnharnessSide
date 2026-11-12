@@ -102,6 +102,26 @@ describe("the page never moves under a finger on a tablet (computer layout, in a
 	});
 });
 
+describe("which screens count as touch screens", () => {
+	it("the phone layout, or a wider browser screen that can be touched; never the desktop app", async () => {
+		const { isTouchScreenNow } = await import("../components/phone/use-phone.ts");
+		const media = (on: string[]) => Object.assign(dom.window, { matchMedia: (q: string) => ({ matches: on.some((x) => q.includes(x)), addEventListener() {}, removeEventListener() {} }) });
+		try {
+			media([]);
+			assert.equal(isTouchScreenNow(), false, "a computer with a mouse");
+			media(["any-pointer: coarse"]);
+			assert.equal(isTouchScreenNow(), true, "a tablet, also with a trackpad attached");
+			media(["max-width"]);
+			assert.equal(isTouchScreenNow(), true, "the phone layout, as before");
+			media(["any-pointer: coarse"]);
+			userAgent = "Mozilla/5.0 (Windows NT 10.0) Chrome/140.0.0.0 Electron/38.0.0 Safari/537.36";
+			assert.equal(isTouchScreenNow(), false, "the desktop app on a touch-screen PC");
+		} finally {
+			media([]);
+		}
+	});
+});
+
 describe("app/touch.css", () => {
 	const css = fs.readFileSync(path.join(import.meta.dirname, "..", "app", "touch.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
 
@@ -111,6 +131,11 @@ describe("app/touch.css", () => {
 		const selectors = [...css.matchAll(/([^{}@]+)\{[^{}]*\}/g)].map((m) => m[1]!.trim()).filter(Boolean);
 		assert.ok(selectors.length > 0);
 		for (const selector of selectors) assert.match(selector, /^html:not\(\.lh-electron\)/, selector);
+	});
+
+	it("press-and-hold rows can't be selected, and the hover-only buttons show (owner's choice)", () => {
+		assert.match(css, /html:not\(\.lh-electron\) \[data-phone-press\]\s*\{[^}]*user-select:\s*none;[^}]*-webkit-touch-callout:\s*none;/);
+		assert.match(css, /\[data-testid="md-copy"\][^{]*\[data-testid="md-mermaid-expand"\][^{]*\{\s*opacity:\s*1;/);
 	});
 
 	it("changes nothing about the layout: no width rule, and the page's bounce is off", () => {

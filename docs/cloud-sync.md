@@ -210,8 +210,13 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
   - **A tablet is still a touch screen** (owner's ask, iPad in landscape: a drag pulled the whole page down to refresh, as it once did on the phone). On every touch screen in a browser, at any width, the page itself never moves under a finger:
     - `app/touch.css` turns the page's bounce off (`overscroll-behavior-y: none` on the root, inside `@media (any-pointer: coarse)`, never in the desktop app);
     - the window lock (`components/phone/window-lock.ts`) no longer asks for the phone layout, only for a browser: a one-finger vertical drag that starts where nothing can scroll that way (the top bar, the message box, a panel at its end) is stopped. Panels scroll by themselves as before; sideways drags and pinches are left alone.
-    - The layout is untouched, and nothing else of the phone's touch handling applies on a tablet yet: no press and hold for row menus, no drag on an open question scrolling the lesson, hover-only buttons stay hover-only, Enter sends. Which of those a tablet should get is asked of the owner.
-    - Checked in a Chromium set up as a landscape iPad with real touch events, beside a normal computer (unchanged). Chromium has no pull-to-refresh; the owner's iPad is the proof. Tests: `tests/touch-tablet.test.ts`.
+    - **Three more of the phone's touch helpers apply there too** (owner's choice of the three offered):
+      - **a drag on the dock scrolls the lesson** (an open question, the message box): `use-dock-touch-scroll.ts` now asks for a touch screen (`useIsTouchScreen`: the phone layout, or a browser where `any-pointer: coarse` holds), not for the phone layout. The dock is the transcript's sibling at every width;
+      - **press and hold opens a row's menu** (sessions, notes, folders), and holding then moving drags a notes row: `long-press.ts` asks for a browser, and the notes list listens for the hold-drag at every width, beside its mouse drag. `app/touch.css` makes those rows unselectable;
+      - **hover-only buttons always show** (copy, expand diagram, "move this section"): `app/touch.css`.
+    - **Still as on a computer:** the layout, Enter sends, hover tooltips, the keyboard handling, and everything in the desktop app (also on a PC with a touch screen).
+    - **The Drawing Pad and a pen:** the pad draws from pen pointer events and ignores fingers; the lock only cancels a finger's page scroll. Tried in the iPad set-up with pen-type events: a stroke draws, the pen's eraser pass removes it, a finger drag draws nothing and no longer moves the page, and the Tutor's bubble stays reachable. A real Apple Pencil also sends touch events of its own; the owner's iPad is the proof.
+    - Checked in a Chromium set up as a landscape iPad with real touch events, beside a normal computer (unchanged: no bounce rule, copy button hidden until hover, rows selectable). Chromium has no pull-to-refresh; the owner's iPad is the proof. Tests: `tests/touch-tablet.test.ts`, `tests/phone-hold-drag.test.ts`.
 
 **Screens**
 

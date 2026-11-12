@@ -8,7 +8,8 @@
  * onContextMenu handler opens its menu; no row code changes.
  *
  * Details that matter:
- *   - only touch, only in the phone layout;
+ *   - only touch, and only in a browser: the phone layout, and a tablet
+ *     with the computer layout (owner's choice); never the desktop app;
  *   - moving the finger (a scroll) cancels;
  *   - lifting the finger after a hold sends no tap, so the row isn't also
  *     opened and menus that close on an outside press stay open;
@@ -23,7 +24,7 @@
  * the menu open, as before. The row's owner does the rest (notes-tree.tsx).
  */
 
-import { isPhoneNow } from "@/components/phone/use-phone";
+import { isBrowserNow } from "@/components/phone/use-phone";
 
 export const HOLD_MS = 500;
 /** How far (px) the finger may drift before the hold counts as a scroll. */
@@ -97,7 +98,9 @@ export function installLongPress(doc: Document = document): () => void {
 		cancelTimer();
 		endDrag("cancel", { x: e.clientX, y: e.clientY });
 		held = false;
-		if (e.pointerType !== "touch" || !e.isPrimary || !isPhoneNow()) return;
+		// Any touch screen in a browser: a phone, and a tablet with the computer
+		// layout, which has no right-click either (owner's choice). Never the desktop app.
+		if (e.pointerType !== "touch" || !e.isPrimary || !isBrowserNow()) return;
 		const hit = (e.target as Element | null)?.closest?.("[data-phone-press]") ?? null;
 		if (!hit) return;
 		row = hit;

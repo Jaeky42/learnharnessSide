@@ -115,15 +115,33 @@ describe("press and hold", () => {
 		assert.deepEqual(drags, []);
 	});
 
-	it("only on a phone, only for a finger, only on rows that ask for it", () => {
+	it("only for a finger, only on rows that ask for it", () => {
 		pointer("pointerdown", el("plain"), 100, 200);
 		mock.timers.tick(HOLD_MS);
 		pointer("pointerdown", el("label"), 100, 200, { pointerType: "mouse" });
 		mock.timers.tick(HOLD_MS);
+		assert.deepEqual(menus, []);
+	});
+
+	it("on a tablet too: a wider screen in a browser has no right-click either (owner's choice)", () => {
 		phone = false;
 		pointer("pointerdown", el("label"), 100, 200);
 		mock.timers.tick(HOLD_MS);
-		assert.deepEqual(menus, []);
+		assert.deepEqual(menus.map((m) => m.row), ["note"]);
+	});
+
+	it("never in the desktop app, also on a PC with a touch screen", () => {
+		phone = false;
+		const real = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+		Object.defineProperty(globalThis, "navigator", { configurable: true, value: { userAgent: "Mozilla/5.0 (Windows NT 10.0) Chrome/140.0.0.0 Electron/38.0.0 Safari/537.36" } });
+		try {
+			pointer("pointerdown", el("label"), 100, 200);
+			mock.timers.tick(HOLD_MS);
+			assert.deepEqual(menus, []);
+		} finally {
+			if (real) Object.defineProperty(globalThis, "navigator", real);
+			else delete (globalThis as { navigator?: unknown }).navigator;
+		}
 	});
 });
 

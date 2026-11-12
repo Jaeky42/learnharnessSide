@@ -23,6 +23,9 @@ export const PHONE_MAX_WIDTH = 640;
 export const PHONE_QUERY = "(max-width: 639.98px)";
 /** Touch is the main input (a finger, not a mouse or trackpad). */
 export const TOUCH_QUERY = "(pointer: coarse)";
+/** There is a touch screen, whatever else is attached (an iPad with a
+ *  trackpad still has one). app/touch.css uses the same query. */
+export const ANY_TOUCH_QUERY = "(any-pointer: coarse)";
 
 /** Pure rule, exported for tests. */
 export function isPhoneViewport(width: number, electron: boolean): boolean {
@@ -45,6 +48,15 @@ export function isBrowserNow(): boolean {
 	return typeof window !== "undefined" && !inElectron();
 }
 
+/** A touch screen in a browser: the phone layout, or a wider screen that can
+ *  be touched (a tablet, which gets the computer layout). The touch helpers
+ *  that don't depend on the layout ask this (owner's choice, iPad): a drag on
+ *  the dock scrolls the lesson, and with app/touch.css the hover-only
+ *  buttons show. */
+export function isTouchScreenNow(): boolean {
+	return isPhoneNow() || (isBrowserNow() && matches(ANY_TOUCH_QUERY));
+}
+
 /** Is the phone layout active right now? Safe outside React. */
 export function isPhoneNow(): boolean {
 	return !inElectron() && matches(PHONE_QUERY);
@@ -58,7 +70,7 @@ export function isTouchPhoneNow(): boolean {
 
 function subscribe(onChange: () => void): () => void {
 	if (typeof window === "undefined" || typeof window.matchMedia !== "function") return () => {};
-	const lists = [window.matchMedia(PHONE_QUERY), window.matchMedia(TOUCH_QUERY)];
+	const lists = [window.matchMedia(PHONE_QUERY), window.matchMedia(TOUCH_QUERY), window.matchMedia(ANY_TOUCH_QUERY)];
 	for (const l of lists) l.addEventListener("change", onChange);
 	return () => {
 		for (const l of lists) l.removeEventListener("change", onChange);
@@ -71,6 +83,11 @@ const never = () => false;
  *  hydration. */
 export function useIsPhone(): boolean {
 	return useSyncExternalStore(subscribe, isPhoneNow, never);
+}
+
+/** True on a touch screen in a browser, at any width (see isTouchScreenNow). */
+export function useIsTouchScreen(): boolean {
+	return useSyncExternalStore(subscribe, isTouchScreenNow, never);
 }
 
 /** True on a phone whose main input is touch (see isTouchPhoneNow). */

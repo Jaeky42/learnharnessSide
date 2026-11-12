@@ -48,7 +48,7 @@
  */
 
 import { useEffect, useRef, type RefObject } from "react";
-import { useIsPhone } from "@/components/phone/use-phone";
+import { useIsTouchScreen } from "@/components/phone/use-phone";
 
 /** Per-frame velocity decay of the fling after the finger lifts. */
 export const FLING_DECAY = 0.95;
@@ -143,13 +143,15 @@ export type DockTouchHooks = {
 };
 
 export function useDockTouchScroll(rootRef: RefObject<HTMLElement | null>, transcriptRef: RefObject<HTMLElement | null>, hooks: DockTouchHooks = {}) {
-	const phone = useIsPhone();
+	// A phone, and a tablet with the computer layout (owner's choice): the
+	// dock is the transcript's sibling at every width.
+	const touch = useIsTouchScreen();
 	const hooksRef = useRef(hooks);
 	hooksRef.current = hooks;
 	useEffect(() => {
 		const root = rootRef.current;
 		const transcript = transcriptRef.current;
-		if (!phone || !root || !transcript) return;
+		if (!touch || !root || !transcript) return;
 		const previousOverscroll = transcript.style.overscrollBehaviorY;
 		transcript.style.overscrollBehaviorY = "none";
 		let startX = 0;
@@ -255,5 +257,5 @@ export function useDockTouchScroll(rootRef: RefObject<HTMLElement | null>, trans
 			transcript.removeEventListener("touchstart", onTranscriptStart);
 			transcript.removeEventListener("scroll", onTranscriptScroll);
 		};
-	}, [phone, rootRef, transcriptRef]);
+	}, [touch, rootRef, transcriptRef]);
 }
