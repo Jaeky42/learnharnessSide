@@ -9,4 +9,61 @@
  * sits inside @media (max-width: 639.98px) AND under html:not(.lh-electron),
  * so nothing here can apply on a computer, a tablet or in the desktop app.
  * Unlayered, like phone.css. Loaded by app/layout.tsx.
+ *
+ * The plugin's names used here are pinned by
+ * tests/phone-rich-code-blocks.test.tsx: a rename upstream fails it.
  */
+
+/* SHRINK TO FIT (decision 7). The plugin lets a TikZ drawing keep its
+   natural size and scroll sideways in its own box
+   (`.rich-code-blocks--rendered[data-language="tikz"] > svg { max-width: none }`);
+   on a phone a drawing wider than the lesson shrinks to the lesson's width
+   instead. A drawing that already fits keeps its size. More specific than the
+   plugin's rule, so it wins whatever order the two sheets load in.
+   The enlarge button is components/phone/rich-drawing-frame.tsx. */
+@media (max-width: 639.98px) {
+	html:not(.lh-electron) .rich-code-blocks--rendered[data-language] > svg {
+		max-width: 100%;
+		height: auto;
+	}
+}
+
+/* WHILE A BLOCK IS DRAWN (decision 8): a box with a spinner, no words, in
+   place of the source the plugin shows until its picture is ready. The
+   plugin marks a drawn block `rich-code-blocks--rendered`; a block that
+   fails is removed by the plugin, and the host shows its error and the
+   source as today, so no spinner is left behind. Only blocks the host
+   mounted ([data-plugin-renderer]); the viewer's copy is not one. The box's
+   height is modest: the lesson may shift once when the picture arrives. */
+@media (max-width: 639.98px) {
+	html:not(.lh-electron) [data-plugin-renderer] .rich-code-blocks:not(.rich-code-blocks--rendered) {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		min-height: 7.5rem;
+		border: 1px dashed var(--border);
+		border-radius: 0.75rem;
+	}
+	html:not(.lh-electron) [data-plugin-renderer] .rich-code-blocks:not(.rich-code-blocks--rendered) > pre {
+		display: none;
+	}
+	html:not(.lh-electron) [data-plugin-renderer] .rich-code-blocks:not(.rich-code-blocks--rendered)::after {
+		content: "";
+		width: 1.5rem;
+		height: 1.5rem;
+		border: 2px solid var(--muted-foreground);
+		border-right-color: transparent;
+		border-radius: 9999px;
+		animation: lh-rich-drawing-spin 0.9s linear infinite;
+	}
+	@keyframes lh-rich-drawing-spin {
+		to { transform: rotate(360deg); }
+	}
+}
+
+/* With reduced motion the spinner stands still. */
+@media (max-width: 639.98px) and (prefers-reduced-motion: reduce) {
+	html:not(.lh-electron) [data-plugin-renderer] .rich-code-blocks:not(.rich-code-blocks--rendered)::after {
+		animation: none;
+	}
+}

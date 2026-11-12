@@ -45,6 +45,9 @@ export const SessionMermaidContext = createContext<{
 	openMermaid: (chart: string) => void;
 	openFigure: (svg: string, inverted: boolean) => void;
 	openImage?: (image: SessionImage) => void;
+	/** Fork (phone layout): a drawn Rich code blocks picture, as inline svg
+	 *  markup (components/phone/rich-drawing-frame.tsx). */
+	openDrawing?: (drawing: string) => void;
 } | null>(null);
 
 export function useSessionMermaid() {
@@ -87,17 +90,20 @@ export function MermaidOverlay({
 	chart,
 	svg: rawSvg,
 	image,
+	drawing,
 	inverted = false,
 	onClose,
 }: {
 	chart?: string;
 	svg?: string;
 	image?: SessionImage;
+	/** Fork: inline svg markup shown as it is, in the page (theme and fonts apply). */
+	drawing?: string;
 	inverted?: boolean;
 	onClose: () => void;
 }) {
 	// ── chart render (own instance, own ids); figure mode uses the raw svg ──
-	const [svg, setSvg] = useState<string | null>(rawSvg ?? null);
+	const [svg, setSvg] = useState<string | null>(rawSvg ?? drawing ?? null);
 	const [error, setError] = useState<string | null>(null);
 	const [attempt, setAttempt] = useState(0);
 	const { resolvedMode } = useAppearance();
@@ -107,8 +113,8 @@ export function MermaidOverlay({
 			setError(null);
 			return;
 		}
-		if (rawSvg !== undefined) {
-			setSvg(rawSvg);
+		if (rawSvg !== undefined || drawing !== undefined) {
+			setSvg(rawSvg ?? drawing!);
 			setError(null);
 			return;
 		}
@@ -126,7 +132,7 @@ export function MermaidOverlay({
 		return () => {
 			cancelled = true;
 		};
-	}, [rawSvg, chart, image, attempt, resolvedMode]);
+	}, [rawSvg, drawing, chart, image, attempt, resolvedMode]);
 
 	const rootRef = useRef<HTMLDivElement>(null);
 	const layer = useInteractionLayer({

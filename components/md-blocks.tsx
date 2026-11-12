@@ -44,6 +44,7 @@ import { blurAfterPointerClick } from "@/components/focus-hygiene";
 import { chartSize, useSessionMermaid } from "@/components/session-overlay";
 import { Hint } from "@/components/ui/hint";
 import { BUILTIN_MERMAID_LANGUAGE, PluginCodeBlock } from "@/components/plugin-renderers";
+import { PhoneRichDrawingFrame } from "@/components/phone/rich-drawing-frame";
 
 /** Local rendering profile for host-mounted, display-only Markdown. Ordinary
  * transcript rendering (including SSR/static Streamdown) stays interactive. */
@@ -277,7 +278,7 @@ export function MarkdownCode(props: ComponentProps<"code"> & ExtraProps) {
 			/>
 		</div>
 	);
-	return displayOnly ? fallback : <PluginCodeBlock language={language} source={source} meta={meta} incomplete={incomplete} fallback={fallback} />;
+	return displayOnly ? fallback : <PhoneRichDrawingFrame language={language}><PluginCodeBlock language={language} source={source} meta={meta} incomplete={incomplete} fallback={fallback} /></PhoneRichDrawingFrame>;
 }
 
 // ─── Key-idea callouts (the Streamdown `blockquote` override) ────────────────

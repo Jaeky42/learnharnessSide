@@ -1243,7 +1243,7 @@ export function Chat({
 	// Figure focus (2026-10-07): the figure card's fullscreen button — same
 	// overlay shell as mermaid, but carrying the raw svg + the card's invert
 	// state so the fullscreen view stays faithful to the toggled card.
-	const [figureFocus, setFigureFocus] = useState<{ svg: string; inverted: boolean } | { image: SessionImage } | null>(null);
+	const [figureFocus, setFigureFocus] = useState<{ svg: string; inverted: boolean } | { image: SessionImage } | { drawing: string } | null>(null);
 
 	// Overlay mirrors for the layered-Esc gate (owner 2026-10-04): the
 	// lh:kbd-abort-turn handler reads these at EVENT time — declared here
@@ -1622,6 +1622,7 @@ export function Chat({
 				openMermaid: setMermaidFocus,
 				openFigure: (svg, inverted) => setFigureFocus({ svg, inverted }),
 				openImage: image => setFigureFocus({ image }),
+				openDrawing: drawing => setFigureFocus({ drawing }),
 			}}
 		>
 		<JobsContext.Provider value={jobs}>
