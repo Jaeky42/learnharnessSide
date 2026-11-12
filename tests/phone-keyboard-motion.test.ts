@@ -27,6 +27,10 @@ import {
 	recallKeyboard,
 	rememberKeyboard,
 	type HeightReport,
+	TOUCH_FOCUS_MS,
+	focusFromTouch,
+	focusLost,
+	heightEventInFrame,
 } from "../components/phone/phone-viewport.tsx";
 
 /** A scripted clock: frames every 16 ms, timers on the same clock. */
@@ -387,5 +391,68 @@ describe("what doesn't glide", () => {
 		motion.report(android(FULL, true));
 		motion.report(android(FULL - KEYBOARD, true));
 		assert.equal(applied.at(-1)?.px, FULL - KEYBOARD);
+	});
+});
+
+describe("only the learner's own tap is met in step", () => {
+	/** A tiny tree: a box with a line inside it, a wrapper around it, and a link elsewhere. */
+	const node = (name: string, parent: { kids: unknown[] } | null = null) => {
+		const n = {
+			name,
+			kids: [] as unknown[],
+			contains(other: unknown): boolean {
+				return other === n || n.kids.some((k) => (k as { contains(o: unknown): boolean }).contains(other));
+			},
+		};
+		parent?.kids.push(n);
+		return n;
+	};
+	const wrapper = node("wrapper");
+	const box = node("box", wrapper);
+	const line = node("line", box);
+	const link = node("link");
+	const at = (target: unknown, ms: number) => ({ target: target as Node, at: ms });
+	it("a touch that ended on the box, inside it, or on what holds it, just before the focus", () => {
+		assert.equal(focusFromTouch(at(box, 1000), box as unknown as Node, 1004), true);
+		assert.equal(focusFromTouch(at(line, 1000), box as unknown as Node, 1010), true, "a line inside the notes editor");
+		assert.equal(focusFromTouch(at(wrapper, 1000), box as unknown as Node, 1010), true, "the padding around the message box");
+		assert.equal(focusFromTouch(at(box, 1000), box as unknown as Node, 1000 + TOUCH_FOCUS_MS), true);
+	});
+	it("not a focus by code: no touch, a touch elsewhere (the Home link before autoFocus), or one too long ago", () => {
+		assert.equal(focusFromTouch(null, box as unknown as Node, 1000), false, "the message box after a dictation");
+		assert.equal(focusFromTouch(at(link, 1000), box as unknown as Node, 1080), false, "a navigation, then autoFocus");
+		assert.equal(focusFromTouch(at(box, 1000), box as unknown as Node, 1001 + TOUCH_FOCUS_MS), false);
+		assert.equal(focusFromTouch(at(box, 1000), box as unknown as Node, 900), false);
+		assert.equal(focusFromTouch(at(null, 1000), box as unknown as Node, 1001), false);
+	});
+	it("by code the motion isn't asked to predict, so nothing moves until Safari reports", () => {
+		const { c, motion, report, last } = rig({ remembered: KEYBOARD });
+		motion.report(report(FULL, { typing: false }));
+		motion.report(report(FULL, { typing: true })); // focus() not called
+		c.advance(1600);
+		assert.equal(last(), FULL);
+		motion.report(report(FULL - KEYBOARD, { typing: true }));
+		c.advance(CATCH_UP_MS / 3);
+		assert.ok((last() ?? 0) < FULL && (last() ?? 0) > FULL - KEYBOARD, "the catch-up glide");
+	});
+});
+
+describe("a focused box that disappears without a blur", () => {
+	const textarea = { tagName: "TEXTAREA" };
+	const body = { tagName: "BODY" };
+	it("counts as a blur when nothing typeable has focus any more, or the box left the page", () => {
+		assert.equal(focusLost(true, { isConnected: true }, body), true, "WebKit: the box removed, focus on the body");
+		assert.equal(focusLost(true, { isConnected: false }, textarea), true, "removed, even if something else looks typeable");
+		assert.equal(focusLost(true, { isConnected: true }, textarea), false);
+		assert.equal(focusLost(true, null, { tagName: "DIV", isContentEditable: true }), false);
+		assert.equal(focusLost(false, null, body), false);
+	});
+});
+
+describe("the height event", () => {
+	it("may be rendered at once only when sent from a glide's own frame", () => {
+		assert.equal(heightEventInFrame(Object.assign(new Event("x"), { detail: { frame: true } })), true);
+		assert.equal(heightEventInFrame(Object.assign(new Event("x"), { detail: { frame: false } })), false);
+		assert.equal(heightEventInFrame(new Event("x")), false);
 	});
 });

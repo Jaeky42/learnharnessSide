@@ -258,6 +258,11 @@ export function installTutorSheetSwipe(sheet: HTMLElement, options: SheetSwipeOp
 	return {
 		slideAway() {
 			if (closing) return true;
+			// The keyboard goes as the slide starts: WebKit sends no blur when a
+			// focused box is removed (whatwg/html#1569), so the typing box would
+			// otherwise keep the keyboard's state until the next focus.
+			const active = sheet.ownerDocument.activeElement as HTMLElement | null;
+			if (active && active !== sheet.ownerDocument.body && sheet.contains(active)) active.blur?.();
 			if (!motionAllowed(sheet)) return false;
 			drag = null;
 			halt();

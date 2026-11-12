@@ -23,7 +23,8 @@
  */
 
 import { useEffect, useState } from "react";
-import { PHONE_HEIGHT_EVENT } from "@/components/phone/phone-viewport";
+import { flushSync } from "react-dom";
+import { heightEventInFrame, PHONE_HEIGHT_EVENT } from "@/components/phone/phone-viewport";
 
 /** The top bar's height and the bubble's size (app/phone.css), in px. */
 const TOP_BAR = 60;
@@ -84,10 +85,16 @@ export function useDockAnchor(active: boolean): PlacedAnchor {
 		window.visualViewport?.addEventListener("resize", schedule);
 		// The app's height glides with the iPhone keyboard (phone-viewport.tsx),
 		// moving the dock every frame without resizing it: follow in the same
-		// frame.
-		window.addEventListener(PHONE_HEIGHT_EVENT, measure);
+		// frame. A state update made here would render after this frame's
+		// paint, a frame or two behind the dock, so from a glide's own frame
+		// (never inside a React render) it is rendered at once.
+		const onHeight = (e: Event) => {
+			if (heightEventInFrame(e)) flushSync(measure);
+			else measure();
+		};
+		window.addEventListener(PHONE_HEIGHT_EVENT, onHeight);
 		return () => {
-			window.removeEventListener(PHONE_HEIGHT_EVENT, measure);
+			window.removeEventListener(PHONE_HEIGHT_EVENT, onHeight);
 			cancelAnimationFrame(frame);
 			window.clearInterval(poll);
 			ro.disconnect();

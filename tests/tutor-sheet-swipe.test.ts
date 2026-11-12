@@ -265,6 +265,26 @@ describe("the touch driver", () => {
 		assert.deepEqual(t.calls, ["gone"]);
 	});
 
+	it("the typing box loses its focus as the slide starts, with or without motion; a box outside the sheet keeps it", () => {
+		for (const motion of [true, false]) {
+			const t = setup({ motion });
+			const box = t.el("box");
+			let blurred = 0;
+			Object.defineProperty(t.sheet.ownerDocument, "activeElement", { get: () => box, configurable: true });
+			Object.assign(box, { blur: () => { blurred++; } });
+			t.swipe.slideAway();
+			assert.equal(blurred, 1, motion ? "at the start of the slide" : "closing at once");
+		}
+		const t = setup();
+		const outside = t.sheet.ownerDocument.createElement("textarea") as unknown as HTMLElement;
+		t.sheet.ownerDocument.body.appendChild(outside as unknown as Node);
+		let blurred = 0;
+		Object.defineProperty(t.sheet.ownerDocument, "activeElement", { get: () => outside, configurable: true });
+		Object.assign(outside, { blur: () => { blurred++; } });
+		t.swipe.slideAway();
+		assert.equal(blurred, 0);
+	});
+
 	it("asked to open while it slides away, it comes back up and stays", () => {
 		const t = setup();
 		t.swipe.slideAway();

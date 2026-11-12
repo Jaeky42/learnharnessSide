@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
-import { createPortal } from "react-dom";
+import { createPortal, flushSync } from "react-dom";
 import { isPhoneNow, isTouchPhoneNow } from "@/components/phone/use-phone";
-import { PHONE_HEIGHT_EVENT, phoneLayoutHeight } from "@/components/phone/phone-viewport";
+import { heightEventInFrame, PHONE_HEIGHT_EVENT, phoneLayoutHeight } from "@/components/phone/phone-viewport";
 import { INTERACTION_LAYER_Z_BASE } from "./host-dialog";
 import { InteractionLayerOwner, useInteractionLayer, useInteractionLayers, type CloseOutcome, type CloseReason } from "./interaction-layers";
 
@@ -311,8 +311,13 @@ export function MenuShell({
 		// filtering the list), so it stays attached to its anchor.
 		window.visualViewport?.addEventListener("resize", rePlace);
 		// PHONE: the app's height glides with the keyboard (phone-viewport.tsx),
-		// moving the anchor every frame: re-place in the same frame.
-		window.addEventListener(PHONE_HEIGHT_EVENT, place);
+		// moving the anchor every frame: re-place in the same frame (rendered at
+		// once from a glide's own frame, or it would land after its paint).
+		const onHeight = (e: Event) => {
+			if (heightEventInFrame(e)) flushSync(place);
+			else place();
+		};
+		window.addEventListener(PHONE_HEIGHT_EVENT, onHeight);
 		const contentObserver = isPhoneNow() && menuRef.current ? new ResizeObserver(rePlace) : null;
 		if (contentObserver && menuRef.current) for (const child of Array.from(menuRef.current.children)) contentObserver.observe(child);
 		return () => {
@@ -320,7 +325,7 @@ export function MenuShell({
 			window.removeEventListener("scroll", rePlace, true);
 			window.removeEventListener("resize", rePlace);
 			window.visualViewport?.removeEventListener("resize", rePlace);
-			window.removeEventListener(PHONE_HEIGHT_EVENT, place);
+			window.removeEventListener(PHONE_HEIGHT_EVENT, onHeight);
 			contentObserver?.disconnect();
 		};
 	}, [anchorRef, anchorTestid, preferredSide, align]);

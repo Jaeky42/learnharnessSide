@@ -180,8 +180,47 @@ export const KEYBOARD_MAX_SHARE = 0.6;
 export const KEYBOARD_STORE_KEY = "lh:phone:keyboard";
 /** Sent on window whenever the app's height changes (every frame of a
  *  glide), so what places itself from it (menus, the Tutor's bubble)
- *  follows. phoneLayoutHeight() is the height of that moment. */
+ *  follows. phoneLayoutHeight() is the height of that moment. Its detail is
+ *  a PhoneHeightDetail: `frame` is true when it is sent from a glide's own
+ *  animation frame (never from inside a React render or commit), so a
+ *  listener may render at once there (flushSync) and land in that frame. */
 export const PHONE_HEIGHT_EVENT = "lh:phone-height";
+export type PhoneHeightDetail = { frame: boolean };
+/** Pure, exported for tests: may a PHONE_HEIGHT_EVENT listener render at
+ *  once (flushSync)? Only for an event sent from a glide's frame. */
+export function heightEventInFrame(e: Event): boolean {
+	const detail = (e as CustomEvent<PhoneHeightDetail | undefined>).detail;
+	return detail?.frame === true;
+}
+
+/** A focus counts as the learner's own tap when a touch ended on the
+ *  focused box (or inside it, or on what holds it) at most this long before.
+ *  iOS shows the keyboard for a tap on a box, but not for a box focused by
+ *  code outside a tap (autoFocus after a navigation, the message box
+ *  refocused after a dictation): predicting a keyboard there shrank the app
+ *  for 1.5 s for nothing. On an iPhone the focus comes right after touchend
+ *  (with the compatibility mousedown), a few ms; 500 leaves room for a busy
+ *  page. navigator.userActivation isn't used: its transient activation lasts
+ *  for seconds after any tap and survives async code, so a tap on Home
+ *  followed by the topic box's autoFocus would count. */
+export const TOUCH_FOCUS_MS = 500;
+
+/** Pure rule, exported for tests: is this focus the learner's own tap on
+ *  the box (so the keyboard is coming and can be met in step)? */
+export function focusFromTouch(touch: { target: Node | null; at: number } | null, focused: Node | null, now: number): boolean {
+	if (!touch || !touch.target || !focused) return false;
+	if (now - touch.at > TOUCH_FOCUS_MS || now < touch.at) return false;
+	return touch.target === focused || focused.contains(touch.target) || touch.target.contains(focused);
+}
+
+/** Pure rule, exported for tests: the state says a text box has focus but
+ *  none has (it was removed while focused: WebKit sends no blur then,
+ *  whatwg/html#1569). Treated as a blur, so nothing stays stuck. */
+export function focusLost(typing: boolean, typingEl: { isConnected: boolean } | null, active: { tagName: string; type?: string; isContentEditable?: boolean } | null): boolean {
+	if (!typing) return false;
+	if (typingEl && !typingEl.isConnected) return true;
+	return !typingTarget(active);
+}
 
 /** WHAT A GLIDE MOVES. Changing --lh-vvh on <html> makes the browser work out
  *  the style of every element again, since custom properties are inherited:
@@ -506,6 +545,8 @@ export function PhoneViewport() {
 			for (const [el, prop] of moved) el.style.removeProperty(prop);
 			moved.clear();
 		};
+		/** True while a glide's own frame runs (PHONE_HEIGHT_EVENT's detail). */
+		let inFrame = false;
 		const paint = (px: number, moving: boolean) => {
 			layoutNow = px;
 			const value = `${px}px`;
@@ -522,7 +563,7 @@ export function PhoneViewport() {
 				root.style.setProperty("--lh-vvh", value);
 				settle();
 			}
-			window.dispatchEvent(new Event(PHONE_HEIGHT_EVENT));
+			window.dispatchEvent(new CustomEvent<PhoneHeightDetail>(PHONE_HEIGHT_EVENT, { detail: { frame: inFrame } }));
 		};
 		const clear = () => {
 			settle();
@@ -545,7 +586,15 @@ export function PhoneViewport() {
 		const motion = createKeyboardMotion({
 			apply: paint,
 			now: () => performance.now(),
-			frame: (cb) => window.requestAnimationFrame(cb),
+			frame: (cb) =>
+				window.requestAnimationFrame(() => {
+					inFrame = true;
+					try {
+						cb();
+					} finally {
+						inFrame = false;
+					}
+				}),
 			cancelFrame: (id) => window.cancelAnimationFrame(id),
 			later: (cb, ms) => window.setTimeout(cb, ms),
 			cancelLater: (id) => window.clearTimeout(id),
@@ -559,6 +608,13 @@ export function PhoneViewport() {
 			},
 		});
 		let typing = typingTarget(document.activeElement as HTMLElement | null);
+		/** The text box that has focus, while typing. */
+		let typingEl: Element | null = typing ? document.activeElement : null;
+		/** The learner's last touch: where it ended, and when (focusFromTouch). */
+		let lastTouch: { target: Node | null; at: number } | null = null;
+		const onTouchEnd = (e: TouchEvent) => {
+			lastTouch = { target: e.target as Node | null, at: performance.now() };
+		};
 		let closing = false;
 		let closingTimer = 0;
 		const endClosing = () => {
@@ -593,6 +649,8 @@ export function PhoneViewport() {
 			};
 		};
 		const sync = () => {
+			// A focused box removed from the page (WebKit sends no blur): a blur.
+			if (focusLost(typing, typingEl, document.activeElement as HTMLElement | null)) changeTyping(false, null);
 			const m = measure();
 			if (!m) return;
 			const { fit, standalone } = m;
@@ -625,13 +683,12 @@ export function PhoneViewport() {
 		// Synchronous, not on the next frame: these events arrive just before
 		// the browser paints, so following them at once keeps the app from
 		// showing one frame in the wrong place while the keyboard slides.
-		const onFocus = (e: FocusEvent) => {
-			// Focus moving straight to another text box keeps the keyboard up.
-			if (e.type === "focusout" && typingTarget(e.relatedTarget as HTMLElement | null)) return;
-			const next = e.type === "focusin" && typingTarget(e.target as HTMLElement | null);
+		/** A text box took focus (next) or lost it; false when nothing changed. */
+		const changeTyping = (next: boolean, focused: Element | null): boolean => {
 			if (next) endClosing();
-			if (next === typing) return;
+			if (next === typing) return false;
 			typing = next;
+			typingEl = next ? focused : null;
 			if (!next && vv.height < window.innerHeight - 1) {
 				// The keyboard is closing: head for the full height now, not when
 				// Safari reports it after the slide (layoutHeight).
@@ -642,11 +699,24 @@ export function PhoneViewport() {
 					sync();
 				}, CLOSING_MAX_MS);
 			}
-			if (next) {
-				// In step: start toward the remembered keyboard at once.
+			// In step: start toward the remembered keyboard at once, but only for
+			// the learner's own tap; a box focused by code brings no keyboard on
+			// an iPhone, so the app waits for Safari's report as the first time.
+			if (next && focusFromTouch(lastTouch, focused, performance.now())) {
 				const m = measure();
 				if (m) motion.focus(m);
 			}
+			return true;
+		};
+		const onFocus = (e: FocusEvent) => {
+			// Focus moving straight to another text box keeps the keyboard up.
+			if (e.type === "focusout" && typingTarget(e.relatedTarget as HTMLElement | null)) return;
+			const target = e.target as HTMLElement | null;
+			const next = e.type === "focusin" && typingTarget(target);
+			// The box that had focus was removed without a blur: end that first,
+			// so this focus is a new one.
+			if (next && typing && typingEl && typingEl !== target && !typingEl.isConnected) changeTyping(false, null);
+			if (!changeTyping(next, next ? target : null)) return;
 			sync();
 		};
 		sync();
@@ -655,7 +725,9 @@ export function PhoneViewport() {
 		window.addEventListener("scroll", sync, { passive: true });
 		document.addEventListener("focusin", onFocus);
 		document.addEventListener("focusout", onFocus);
+		document.addEventListener("touchend", onTouchEnd, { capture: true, passive: true });
 		return () => {
+			document.removeEventListener("touchend", onTouchEnd, { capture: true });
 			vv.removeEventListener("resize", sync);
 			vv.removeEventListener("scroll", sync);
 			window.removeEventListener("scroll", sync);
