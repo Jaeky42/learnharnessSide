@@ -45,7 +45,17 @@
  * that throw first, and holds the question open, sliding again whenever a
  * slide ends short of the bottom, until the lesson is at its bottom, or the
  * learner touches or wheels again (a new touch still stops the slide), or
+ * scrolls by mouse on the lesson or by key (a touch laptop), or
  * REVEAL_HOLD_MS has passed. Elsewhere it is one slide, as before.
+ *
+ * A TAP ON THE QUESTION DURING THE SLIDE (for the owner to review): a touch
+ * on the dock while the lesson slides to the bottom still stops the slide at
+ * once, but holds the question open until the touch is known. Ends as a tap
+ * (it never moved, by dragDecision): the reveal is taken up again, so the box
+ * that was tapped stays and the lesson ends at the bottom. Moves, lasts past
+ * TAP_MS or gets a second finger: let go, and the question folds as before.
+ * A touch on the lesson itself is unchanged: it stops the slide, and that is
+ * that.
  *
  * NO BOUNCE AT THE ENDS (found with the scroll readout on the owner's
  * iPhone). When the lesson overshot its bottom, Safari's rubber-band spring
@@ -170,11 +180,32 @@ export function replayTap(movingAtStart: boolean, durationMs: number): boolean {
 }
 
 export type DockTouchHooks = {
-	/** Every touch on the dock or the transcript, before anything else. */
-	onTouchStart?: () => void;
+	/** Every touch on the dock or the transcript, before anything else. `hold`
+	 *  is true for one finger on the DOCK while the lesson slides to the
+	 *  bottom: the slide stops at once, but the question stays held until
+	 *  onTouchSettled says whether the touch was a tap. */
+	onTouchStart?: (hold: boolean) => void;
 	/** Is the transcript sliding to the bottom right now? */
 	isSliding?: () => boolean;
+	/** A held dock touch is known: a tap (take the reveal up again) or not
+	 *  (a drag, a long press, a second finger: let go, as a touch did before). */
+	onTouchSettled?: (tap: boolean) => void;
 };
+
+/** The keys that scroll the lesson when it or the page has the focus. */
+export const SCROLL_KEYS = new Set(["PageUp", "PageDown", "ArrowUp", "ArrowDown", "Home", "End", " "]);
+
+/** Pure rule, exported for tests: does this key press scroll the lesson (and
+ *  so let go of a reveal, as a touch does)? Only a scrolling key, and only
+ *  while the focus is on the page itself or inside the lesson; a text box,
+ *  the question's own controls and menus keep their keys. */
+export function keyScrollsLesson(key: string, target: EventTarget | null, lesson: Element, doc: Document): boolean {
+	if (!SCROLL_KEYS.has(key)) return false;
+	if (target === doc || target === doc.body || target === doc.documentElement) return true;
+	if (!(target instanceof Element) || !lesson.contains(target) || leaveAlone(target)) return false;
+	// Space on a button or a link in the lesson presses it.
+	return key !== " " || !target.closest('button, a[href], [role="button"], summary');
+}
 
 /** The longest a reveal holds the question open on a touch screen, in ms. A
  *  slide from far up takes about 2 s; this leaves room for a lesson that was
@@ -264,17 +295,42 @@ export function useDockTouchScroll(rootRef: RefObject<HTMLElement | null>, trans
 		const onInput = () => {
 			motion.inputAt = performance.now();
 		};
+		// A dock touch that stopped a slide and holds the question (onTouchSettled).
+		let held = false;
+		let heldX = 0;
+		let heldY = 0;
+		let heldPencil = false;
+		const settleHeld = (tap: boolean) => {
+			if (!held) return;
+			held = false;
+			hooksRef.current.onTouchSettled?.(tap);
+		};
 		const onTranscriptStart = () => {
 			onInput();
 			stopFling();
-			hooksRef.current.onTouchStart?.();
+			settleHeld(false);
+			hooksRef.current.onTouchStart?.(false);
 		};
 		const onStart = (e: TouchEvent) => {
 			onInput();
-			movingAtStart = frame !== 0 || performance.now() - lastScrollAt < 100 || !!hooksRef.current.isSliding?.();
+			const sliding = !!hooksRef.current.isSliding?.();
+			movingAtStart = frame !== 0 || performance.now() - lastScrollAt < 100 || sliding;
 			startT = e.timeStamp;
 			stopFling();
-			hooksRef.current.onTouchStart?.();
+			settleHeld(false);
+			const first = e.touches[0];
+			if (sliding && e.touches.length === 1 && first) {
+				// A tap on the question while the lesson slides to the bottom
+				// (a reveal, or the slide after reaching it) mustn't fold the
+				// question out from under the finger: hold it, and end the
+				// running reveal without letting go of the question.
+				held = true;
+				heldX = first.clientX;
+				heldY = first.clientY;
+				heldPencil = isPencilTouch(first);
+				revealIdRef.current++;
+			}
+			hooksRef.current.onTouchStart?.(held);
 			if (e.touches.length !== 1 || leaveAlone(e.target)) {
 				mode = "idle";
 				return;
@@ -290,6 +346,9 @@ export function useDockTouchScroll(rootRef: RefObject<HTMLElement | null>, trans
 		};
 		const onMove = (e: TouchEvent) => {
 			const t = e.touches[0];
+			// The held touch moved: it is a drag, decided as for any drag, and
+			// it lets go before it moves the lesson, so it folds as before.
+			if (held && (e.touches.length !== 1 || !t || dragDecision(t.clientX - heldX, t.clientY - heldY, true, () => false, heldPencil) !== "wait")) settleHeld(false);
 			if (mode === "idle" || mode === "native" || e.touches.length !== 1 || !t) return;
 			if (mode === "pending") {
 				const decision = dragDecision(t.clientX - startX, t.clientY - startY, e.cancelable, (dy) => innerCanTake(scrollersUnder(target, root), dy), pencil);
@@ -308,6 +367,12 @@ export function useDockTouchScroll(rootRef: RefObject<HTMLElement | null>, trans
 			transcript.scrollTop -= step;
 		};
 		const onEnd = (e: TouchEvent) => {
+			const tap = e.type === "touchend" && e.touches.length === 0 && e.timeStamp - startT <= TAP_MS;
+			endTouch(e);
+			// After a replayed click, so what the tap pressed acts first.
+			settleHeld(tap);
+		};
+		const endTouch = (e: TouchEvent) => {
 			if (mode === "pending" && e.type === "touchend" && replayTap(movingAtStart, e.timeStamp - startT) && target instanceof HTMLElement) {
 				mode = "idle";
 				if (e.cancelable) e.preventDefault();
@@ -343,15 +408,28 @@ export function useDockTouchScroll(rootRef: RefObject<HTMLElement | null>, trans
 		// A touch on the transcript itself stops a fling, as native scrolling does.
 		transcript.addEventListener("touchstart", onTranscriptStart, { passive: true });
 		transcript.addEventListener("scroll", onTranscriptScroll, { passive: true });
-		// A wheel (an iPad's trackpad) lets go of a reveal, as a touch does.
+		// Scrolling by other means lets go of a reveal, as a touch does: a wheel
+		// (an iPad's trackpad), a mouse on the lesson or its scrollbar (a touch
+		// laptop), the scrolling keys.
+		const onPointerDown = (e: PointerEvent) => {
+			if (e.pointerType === "mouse") onInput();
+		};
+		const onKeyDown = (e: KeyboardEvent) => {
+			if (keyScrollsLesson(e.key, e.target, transcript, document)) onInput();
+		};
 		root.addEventListener("wheel", onInput, { passive: true });
 		transcript.addEventListener("wheel", onInput, { passive: true });
+		transcript.addEventListener("pointerdown", onPointerDown, { passive: true });
+		document.addEventListener("keydown", onKeyDown, true);
 		return () => {
 			transcript.style.overscrollBehaviorY = previousOverscroll;
 			stopFling();
+			settleHeld(false);
 			motion.stop = () => {};
 			root.removeEventListener("wheel", onInput);
 			transcript.removeEventListener("wheel", onInput);
+			transcript.removeEventListener("pointerdown", onPointerDown);
+			document.removeEventListener("keydown", onKeyDown, true);
 			root.removeEventListener("touchstart", onStart);
 			root.removeEventListener("touchmove", onMove);
 			root.removeEventListener("touchend", onEnd);

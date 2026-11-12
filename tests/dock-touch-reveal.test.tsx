@@ -83,10 +83,11 @@ function fakeScroller(el: HTMLElement) {
 }
 const distance = () => scrollHeight - CLIENT_H - top;
 
-type Probe = { expanded: () => boolean; intent: () => boolean; slides: number };
+type Probe = { expanded: () => boolean; intent: () => boolean; slides: number; options: number };
 let probe: Probe;
 
-/** chat.tsx's wiring around the dock, copied: `old` is suppressFoldDuringReveal before this fix. */
+/** chat.tsx's wiring around the dock, copied: `old` is the wiring before these fixes
+ *  (one slide, and every touch lets go of the question). */
 function Harness({ old = false }: { old?: boolean }) {
 	const stick = useStickToBottom({ initial: "instant", resize: "smooth" });
 	const { scrollToBottom, stopScroll, state: stickState, isAtBottom } = stick;
@@ -99,13 +100,23 @@ function Harness({ old = false }: { old?: boolean }) {
 	const expandIntentRef = useRef(false);
 	const intentTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 	const dockReveal = useDockTouchScroll(blockRef, stick.scrollRef, {
-		onTouchStart: () => {
+		onTouchStart: (hold) => {
 			if (!stickState.animation && !expandIntentRef.current) return;
 			stopScroll();
 			clearTimeout(intentTimerRef.current);
-			expandIntentRef.current = false;
+			expandIntentRef.current = old ? false : hold;
 		},
 		isSliding: () => !!stickState.animation || expandIntentRef.current,
+		onTouchSettled: (tap) => {
+			if (old) return;
+			if (tap) {
+				void suppressFoldDuringReveal();
+				return;
+			}
+			expandIntentRef.current = false;
+			const el = stick.scrollRef.current;
+			if (el && expandedRef.current && !atBottomRef.current && el.scrollHeight - el.clientHeight - el.scrollTop > COLLAPSE_DIST) setExpanded(false);
+		},
 	});
 	const slide = () => {
 		probe.slides++;
@@ -134,7 +145,7 @@ function Harness({ old = false }: { old?: boolean }) {
 		setExpanded(true);
 		void suppressFoldDuringReveal();
 	};
-	probe = { expanded: () => expandedRef.current, intent: () => expandIntentRef.current, slides: probe?.slides ?? 0 };
+	probe = { expanded: () => expandedRef.current, intent: () => expandIntentRef.current, slides: probe?.slides ?? 0, options: probe?.options ?? 0 };
 	useEffect(() => {
 		const el = stick.scrollRef.current;
 		if (!el) return;
@@ -162,6 +173,13 @@ function Harness({ old = false }: { old?: boolean }) {
 			</div>
 			<div ref={blockRef} id="dock">
 				<button id="bar" type="button" onClick={expandAndReveal}>Answer</button>
+				{expanded && (
+					<div id="question">
+						<p id="text">The question</p>
+						<div id="box" contentEditable="true" suppressContentEditableWarning>thinking</div>
+						<button id="option" type="button" onClick={() => probe.options++}>An option</button>
+					</div>
+				)}
 			</div>
 		</div>
 	);
@@ -192,7 +210,7 @@ const $ = (id: string) => dom.document.getElementById(id)!;
 
 let root: Root | null = null;
 async function mount(old = false) {
-	probe = { expanded: () => false, intent: () => false, slides: 0 };
+	probe = { expanded: () => false, intent: () => false, slides: 0, options: 0 };
 	scrollHeight = 10000;
 	top = 0;
 	rafQueue = [];
@@ -303,6 +321,156 @@ describe("a tap on the folded question ends at the bottom, open (touch screen)",
 		await act(async () => {
 			touch("touchend", $("lesson"));
 		});
+	});
+
+	it("a tap on the lesson during the slide stops it, and it stays stopped (no reveal taken up again)", async () => {
+		await mount();
+		await tapBar();
+		await run(4);
+		const stoppedAt = distance();
+		await act(async () => {
+			touch("touchstart", $("lesson"));
+			clock += 40;
+			touch("touchend", $("lesson"));
+		});
+		await run(100);
+		assert.equal(probe.slides, 1);
+		assert.ok(distance() >= stoppedAt - 40, `stopped where it was (${stoppedAt} → ${distance()})`);
+	});
+
+	/** One finger on the dock: down, then up `ms` later; Safari's click unless cancelled. */
+	async function tapOn(id: string, ms = 40) {
+		await act(async () => {
+			touch("touchstart", $(id));
+			clock += ms;
+			const end = touch("touchend", $(id), 300, clock);
+			if (!end.defaultPrevented) ($(id) as HTMLElement).click();
+		});
+	}
+
+	it("the old rule: a tap on the question's thinking box while the lesson slides folds the question from under the finger", async () => {
+		await mount(true);
+		await tapBar();
+		await run(4);
+		await tapOn("box");
+		await run(20);
+		assert.equal(probe.expanded(), false);
+		assert.ok(distance() > COLLAPSE_DIST);
+	});
+
+	it("a tap on the question's thinking box while the lesson slides: the reveal is taken up again, the box stays, it ends at the bottom", async () => {
+		await mount();
+		await tapBar();
+		await run(4);
+		assert.ok(distance() > COLLAPSE_DIST, "still sliding");
+		await tapOn("box");
+		assert.ok($("box"), "the box is still there");
+		const folded = await run(400);
+		assert.deepEqual(folded, [], "never folded");
+		assert.ok(distance() <= 2, `at the bottom (${distance()} px)`);
+		assert.ok($("box"));
+		assert.equal(probe.intent(), false);
+	});
+
+	it("a drag from the same place lets go and folds, as before", async () => {
+		await mount();
+		await tapBar();
+		await run(4);
+		const stoppedAt = distance();
+		// Touch events keep going to the element first touched.
+		const box = $("box");
+		await act(async () => {
+			touch("touchstart", box, 300);
+		});
+		await act(async () => {
+			touch("touchmove", box, 320, clock + 16);
+		});
+		assert.equal(probe.expanded(), false, "folded once it moved");
+		assert.equal(probe.intent(), false);
+		await act(async () => {
+			touch("touchend", box, 320, clock + 60);
+		});
+		await run(60);
+		assert.equal(probe.slides, 1, "no reveal taken up again");
+		assert.ok(distance() >= stoppedAt - 40);
+	});
+
+	it("a long press on the question during the slide lets go, as before", async () => {
+		await mount();
+		await tapBar();
+		await run(4);
+		await tapOn("text", 700);
+		await run(40);
+		assert.equal(probe.slides, 1);
+		assert.equal(probe.expanded(), false);
+	});
+
+	it("a tap on an option while the lesson slides is pressed once, and the reveal is taken up again", async () => {
+		await mount();
+		await tapBar();
+		await run(4);
+		await tapOn("option");
+		assert.equal(probe.options, 1, "replayed once; Safari's own click is cancelled");
+		assert.deepEqual(await run(400), []);
+		assert.ok(distance() <= 2);
+	});
+
+	it("a mouse on the lesson (its scrollbar) during the hold lets go: the learner's scroll isn't pulled back", async () => {
+		await mount();
+		await tapBar();
+		await run(4);
+		await act(async () => {
+			const e = new dom.window.Event("pointerdown", { bubbles: true });
+			Object.assign(e, { pointerType: "mouse" });
+			$("lesson").dispatchEvent(e);
+		});
+		// The scrollbar dragged up: the slide ends there, as for a wheel.
+		for (let i = 0; i < 3; i++) {
+			scroller.scrollTop = top - 200;
+			await run(3);
+		}
+		await run(4);
+		const at = distance();
+		await run(90);
+		assert.equal(probe.slides, 1, "not slid again");
+		assert.ok(at > COLLAPSE_DIST && distance() >= at - 1, `left where the learner put it (${at} → ${distance()})`);
+		assert.equal(probe.expanded(), false, "and the question folds, as for any scroll up");
+	});
+
+	it("a scrolling key during the hold lets go: the learner's scroll isn't pulled back", async () => {
+		await mount();
+		await tapBar();
+		await run(4);
+		await act(async () => {
+			const e = new dom.window.Event("keydown", { bubbles: true });
+			Object.assign(e, { key: "PageUp" });
+			dom.document.body.dispatchEvent(e);
+		});
+		scroller.scrollTop = top - 540;
+		await run(10);
+		const at = distance();
+		await run(90);
+		assert.equal(probe.slides, 1);
+		assert.ok(at > COLLAPSE_DIST && distance() >= at - 1, `left where the learner put it (${at} → ${distance()})`);
+	});
+
+	it("which keys count: scrolling keys on the page or in the lesson, never in a text box or Space on a button", async () => {
+		const { keyScrollsLesson } = await import("../components/phone/use-dock-touch-scroll.ts");
+		await mount();
+		const doc = dom.document as unknown as Document;
+		const lesson = $("lesson");
+		const inLesson = dom.document.createElement("p");
+		const button = dom.document.createElement("button");
+		const box = dom.document.createElement("textarea");
+		lesson.append(inLesson, button, box);
+		assert.equal(keyScrollsLesson("PageUp", doc.body, lesson, doc), true);
+		assert.equal(keyScrollsLesson("ArrowDown", inLesson, lesson, doc), true);
+		assert.equal(keyScrollsLesson(" ", doc.body, lesson, doc), true);
+		assert.equal(keyScrollsLesson(" ", button, lesson, doc), false, "Space presses the button");
+		assert.equal(keyScrollsLesson("ArrowUp", button, lesson, doc), true);
+		assert.equal(keyScrollsLesson("PageUp", box, lesson, doc), false, "a text box keeps its keys");
+		assert.equal(keyScrollsLesson("PageUp", $("box"), lesson, doc), false, "outside the lesson (the question)");
+		assert.equal(keyScrollsLesson("a", doc.body, lesson, doc), false);
 	});
 
 	it("a tap whose wobble became a short drag: its throw is stopped, the slide only goes down", async () => {

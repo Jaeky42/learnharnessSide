@@ -2728,14 +2728,26 @@ export function DockOverlay({
 	// slide, as a wheel does (owner's find: a swipe then was pulled back in),
 	// and lets the question fold again. A reveal counts from the moment it
 	// starts, before the slide's first frame.
+	// TOUCH (fork): a touch on the dock itself keeps the question held until
+	// it is known (`hold`): a tap takes the reveal up again, anything else lets
+	// go and folds as the fold machine would have.
 	const dockReveal = useDockTouchScroll(blockRef, scrollRef, {
-		onTouchStart: () => {
+		onTouchStart: (hold) => {
 			if (!stickState.animation && !expandIntentRef.current) return;
 			stopScroll();
 			clearTimeout(intentTimerRef.current);
-			expandIntentRef.current = false;
+			expandIntentRef.current = hold;
 		},
 		isSliding: () => !!stickState.animation || expandIntentRef.current,
+		onTouchSettled: (tap) => {
+			if (tap) {
+				void suppressFoldDuringReveal();
+				return;
+			}
+			expandIntentRef.current = false;
+			const el = scrollRef.current;
+			if (el && expandedRef.current && !atBottomRef.current && el.scrollHeight - el.clientHeight - el.scrollTop > COLLAPSE_DIST) setExpanded(false);
+		},
 	});
 
 	// Explicit expand (bar click): the smooth scroll to the bottom takes
