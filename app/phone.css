@@ -629,3 +629,44 @@
 		animation: none;
 	}
 }
+
+@media (max-width: 639.98px) {
+	/* ── Plugins (upstream 0.6.0): hidden on a phone for now (owner: "Hide
+	   the ways in, park plugin questions"; components/phone/phone-plugins.ts).
+	   The ways in: the lesson's top-bar plugin buttons (the Drawing Pad's
+	   among them), the sidebar's plugin entries (Flashcards…) and the
+	   graph's plugin buttons. */
+	html:not(.lh-electron) :is([data-testid="plugin-top-bar-actions"], [data-testid="plugin-graph-actions"], [data-testid="sidebar-actions"] > [data-plugin-action]) {
+		display: none;
+	}
+	/* Teaching and Practice stay stacked, as before the merge (the grid
+	   goes to two columns when plugin entries fill it). */
+	html:not(.lh-electron) [data-testid="sidebar-actions"] {
+		grid-template-columns: minmax(0, 1fr);
+	}
+
+	/* ── Settings list: text rows, the label at the left and › at the
+	   right, as before the merge (upstream's rows gained an icon). */
+	html:not(.lh-electron) [data-phone="settings"] [data-testid="settings-nav"] > button > svg {
+		display: none;
+	}
+
+	/* ── Settings → Appearance (upstream 0.6.0): usable on a phone, not
+	   redesigned. The theme cards and the color rows take one column; three
+	   cards (or two color rows) side by side don't fit the panel's width. */
+	html:not(.lh-electron) [data-phone="settings"] :is([data-testid="row-theme"], [data-testid="group-colors"]) > .grid {
+		grid-template-columns: minmax(0, 1fr);
+	}
+
+	/* ── Dialogs (HostDialog, upstream 0.6.0): the dim and the box follow
+	   the visible height (--lh-vvh), like Settings above: in the home-screen
+	   app inset: 0 stops short of the bottom, and 85vh is taller than what
+	   the keyboard leaves. */
+	html:not(.lh-electron) [data-interaction-layer][role="dialog"] > div > div.fixed {
+		bottom: auto;
+		height: var(--lh-vvh, 100dvh);
+	}
+	html:not(.lh-electron) [data-interaction-layer][role="dialog"] > div > div.fixed > * {
+		max-height: calc(var(--lh-vvh, 100dvh) * 0.85);
+	}
+}

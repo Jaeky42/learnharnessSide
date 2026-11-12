@@ -299,6 +299,56 @@ describe("model menu order (fork)", async () => {
 	});
 });
 
+describe("upstream 0.6.0 on a phone", async () => {
+	const { isPluginSettingsSection } = await import("../components/phone/phone-plugins.ts");
+	/** The declarations of the rule whose selector list contains `needle`. */
+	const ruleWith = (needle: string) => {
+		for (const media of blocks(css)) for (const rule of blocks(media.body)) if (rule.prelude.includes(needle)) return rule.body;
+		return "";
+	};
+	/** The declarations of the rule whose whole selector is `selector`. */
+	const ruleFor = (selector: string) => {
+		for (const media of blocks(css)) for (const rule of blocks(media.body)) if (rule.prelude === `html:not(.lh-electron) ${selector}`) return rule.body;
+		return "";
+	};
+
+	it("hides every way into a plugin: the top bar's buttons, the sidebar's entries and the graph's buttons", () => {
+		const hide = ruleWith('[data-testid="plugin-top-bar-actions"]');
+		assert.match(hide, /display: none;/);
+		for (const way of ['[data-testid="plugin-graph-actions"]', '[data-testid="sidebar-actions"] > [data-plugin-action]']) {
+			assert.ok(ruleWith(way) === hide, `${way} is hidden with the others`);
+		}
+		assert.match(ruleFor('[data-testid="sidebar-actions"]'), /grid-template-columns: minmax\(0, 1fr\);/, "Teaching and Practice stay stacked");
+	});
+
+	it("the plugin sections of Settings are the management rows and every plugin's own page", () => {
+		assert.equal(isPluginSettingsSection("core-plugins"), true);
+		assert.equal(isPluginSettingsSection("plugins"), true);
+		assert.equal(isPluginSettingsSection("plugin:flashcards"), true);
+		for (const own of ["keys", "appearance", "general", "cloud", "account", "obsidian"]) assert.equal(isPluginSettingsSection(own), false, own);
+	});
+
+	it("Settings rows read as before the merge: no icon, the label at the left", () => {
+		assert.match(ruleWith('[data-testid="settings-nav"] > button > svg'), /display: none;/);
+	});
+
+	it("the theme cards and the color rows of Appearance take one column", () => {
+		assert.match(ruleWith('[data-testid="row-theme"]'), /grid-template-columns: minmax\(0, 1fr\);/);
+		assert.ok(ruleWith('[data-testid="group-colors"]') === ruleWith('[data-testid="row-theme"]'));
+	});
+
+	it("a dialog's dim and box follow the visible height", () => {
+		const dim = ruleFor('[data-interaction-layer][role="dialog"] > div > div.fixed');
+		assert.match(dim, /bottom: auto;/);
+		assert.match(dim, /height: var\(--lh-vvh, 100dvh\);/);
+		assert.match(ruleFor('[data-interaction-layer][role="dialog"] > div > div.fixed > *'), /max-height: calc\(var\(--lh-vvh, 100dvh\) \* 0\.85\);/);
+		// The shape those selectors rely on: HostDialog's boundary, then its isolation box, then the caller's backdrop.
+		const host = readFileSync(path.join(root, "components/host-dialog.tsx"), "utf8");
+		assert.match(host, /data-interaction-layer=\{layer\.id\}/);
+		assert.match(host, /<div style=\{\{ isolation: "isolate" \}\}><div \{\.\.\.composedBackdrop\}>\{visual\}<\/div><\/div>/);
+	});
+});
+
 describe("phone menus above their anchor are pinned by their top", async () => {
 	const { phoneTopPlacement } = await import("../components/menu-shell.tsx");
 	it("sits the menu's bottom just above the anchor, whatever the frame's height", () => {

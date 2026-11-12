@@ -5,6 +5,7 @@ import { CITATION_MAX_COMMENT_LENGTH } from "@/src/core";
 import { Button } from "./ui/button";
 import { useOptionalInteractionLayers } from "./interaction-layers";
 import { isInteractionScopeEligible } from "./plugin-input-focus";
+import { plainEnterSends } from "@/components/phone/enter-key";
 
 /**
  * THE CITATION COMMENT EDITOR (2026-10-31; behaviour follows T3 Code's
@@ -61,7 +62,9 @@ export function CitationCommentEditor({ initial, onDraftChange, onSave, onCancel
 				onKeyDown={(event) => {
 					if (!isInteractionScopeEligible(areaRef.current, controller)) return;
 					const action = commentKeyAction({ ...event, isComposing: event.nativeEvent.isComposing || event.keyCode === 229 });
-					if (action === null) return;
+					// Side-tutor fork: on a touch phone a plain Enter is a new line
+					// and Save saves (components/phone/enter-key.ts).
+					if (action === null || (action === "save" && !plainEnterSends())) return;
 					event.preventDefault();
 					event.stopPropagation();
 					if (action === "cancel") onCancel();

@@ -39,6 +39,7 @@ import { useOptionalInteractionLayers } from "./interaction-layers";
 import { isInteractionScopeEligible } from "./plugin-input-focus";
 import { pluginQuestionKeySuppressed, composingQuestionKey } from "./plugin-question-keys";
 import { isTypingSurface } from "@/src/core";
+import { plainEnterSends } from "@/components/phone/enter-key";
 
 /** Overlay roots whose buttons keep native Enter (hand-rolled menus mark
  *  themselves data-lh-menu; Radix poppers/dialogs carry their own attrs). */
@@ -71,6 +72,9 @@ export function useEnterSubmits(submit: () => void, scopeRef?: RefObject<HTMLEle
 			if (e.key !== "Enter" || e.defaultPrevented || pluginQuestionKeySuppressed(e) || composingQuestionKey(e)) return;
 			if (!isInteractionScopeEligible(scopeRef ? scopeRef.current : document.body, controller)) return;
 			if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+			// Side-tutor fork: on a touch phone Enter never sends; the button
+			// does (components/phone/enter-key.ts).
+			if (!plainEnterSends()) return;
 			if (isTypingSurface(e)) return;
 			const target = e.target as HTMLElement | null;
 			if (target?.tagName === "BUTTON" && buttonKeepsNativeEnter(target)) return;

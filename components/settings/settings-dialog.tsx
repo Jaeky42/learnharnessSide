@@ -67,6 +67,7 @@ import { ObsidianSection } from "./obsidian-section.tsx";
 import { CloudSection } from "./cloud-section.tsx";
 import { CloudServerSection } from "./cloud-server-section.tsx";
 import { isPhoneNow, useIsPhone } from "@/components/phone/use-phone";
+import { isPluginSettingsSection } from "@/components/phone/phone-plugins";
 import { isServerMode } from "./server-mode";
 
 /** Owner (2026-09-20): hints earn their place — mechanics-explaining
@@ -172,6 +173,9 @@ export function SettingsDialogProvider({
 		interactions.invalidateOpening();
 		fadingCopy.current?.remove();
 		fadingCopy.current = null;
+		// Side-tutor fork: plugins are hidden on a phone, so a link to a
+		// plugin section opens on the section list instead.
+		if (section && isPhoneNow() && isPluginSettingsSection(section)) section = undefined;
 		setNavigationRequest(request => request + 1);
 		setLandOn(section ? section as SectionId : "keys");
 		setLandOnExplicit(!!section);
@@ -324,6 +328,15 @@ export function SettingsDialogBody({
 	useEffect(() => {
 		if (phoneOpensSection) setPhoneScreen("section");
 	}, [initialSection, phoneOpensSection, navigationRequest]);
+	// Side-tutor fork: no plugin rows on a phone (decision "Hide the ways in");
+	// a plugin section still open when the layout turns into the phone one
+	// goes back to the list. Links are turned away in open() above.
+	const phonePluginSection = phone && isPluginSettingsSection(active);
+	useEffect(() => {
+		if (!phonePluginSection) return;
+		setActive("keys");
+		setPhoneScreen("list");
+	}, [phonePluginSection]);
 
 	const enabledPlugins = snapshot.plugins.filter(plugin => plugin.info.enabled);
 	const activePluginId = active.startsWith("plugin:") ? active.slice("plugin:".length) : null;
@@ -344,7 +357,9 @@ export function SettingsDialogBody({
 		(s.id !== "account" || account.devices || (phone && account.devices === undefined && isServerMode())) &&
 		(s.id !== "obsidian" || isServerMode()) &&
 		!(phone && s.id === "keyboard"));
-	const navSections: { id: SectionId; label: string; icon?: LucideIcon }[] = [
+	// Side-tutor fork: a phone lists no plugin rows (and so none of the
+	// dividers that set them apart below).
+	const navSections: { id: SectionId; label: string; icon?: LucideIcon }[] = phone ? [...nativeSections] : [
 		...nativeSections,
 		{ id: "core-plugins", label: "Core plugins", icon: PlugIcon },
 		{ id: "plugins", label: "Community plugins", icon: PuzzleIcon },
@@ -524,7 +539,7 @@ export function SettingsDialogBody({
 								<span className="min-w-0">{s.label}</span>
 							</button>
 							{/* After the last native/fork row: the plugin management rows follow. */}
-							{index === nativeSections.length - 1 && <hr className="my-2 shrink-0 border-border" />}
+							{!phone && index === nativeSections.length - 1 && <hr className="my-2 shrink-0 border-border" />}
 							{s.id === "plugins" && <hr className="my-2 shrink-0 border-border" />}
 						</Fragment>
 					))}
