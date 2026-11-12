@@ -145,6 +145,7 @@ Five things the plan had left open, or that came out differently than the plan s
 - **Draw** sits in the lesson's top bar right of Notes and the ring. With too little room (the notes drawer open, a narrow window, a long title) it moves into upstream's ⋯ menu.
 - The pad covers the lesson under the top bar. **An open question is already on the sheet**, with its options, as a read-only picture to draw on or around; the answer is picked after closing the pad. With the notes drawer open the pad narrows beside it.
 - Not tried: sending a drawing to the teacher (it needs a real model).
+- **On an iPad (owner's):** a resting palm became one big selection box over the pad. The fork now cancels finger and palm touches on the pad's drawing area, makes the pad unselectable and clears a stuck selection at the next touch, from its own touch files, without changing upstream's plugin ("Palm rejection on the Drawing Pad" in `docs/cloud-sync.md`).
 
 ### The other core plugins, as tried on a computer (nothing changed)
 
