@@ -46,7 +46,11 @@ function ActionIcon({ action }: { action: PluginAction }) {
 		: <PuzzleIcon aria-hidden="true" className="size-4 shrink-0" />;
 }
 
-function ActionButton({ item, context, captureContext, className, iconOnly = false, menuItem = false, onRun }: {
+// Side-tutor fork (cloud sync): a held action's look, keyed to aria-disabled
+// (set only by `blocked`), as upstream's attach button does.
+const HELD_LOOK = "aria-disabled:cursor-default aria-disabled:opacity-40 aria-disabled:hover:bg-transparent aria-disabled:hover:text-muted-foreground";
+
+function ActionButton({ item, context, captureContext, className, iconOnly = false, menuItem = false, onRun, blocked }: {
 	item: PlacedPluginAction;
 	context: PluginActionContext;
 	captureContext?: () => PluginActionContext | undefined;
@@ -54,13 +58,18 @@ function ActionButton({ item, context, captureContext, className, iconOnly = fal
 	iconOnly?: boolean;
 	menuItem?: boolean;
 	onRun?: () => void;
+	/** Side-tutor fork (cloud sync): why the action can't run here. The button
+	 * keeps its name and icon, is greyed with this as its tooltip, and a press
+	 * does nothing (not `disabled`, so the tooltip still shows). */
+	blocked?: string;
 }) {
 	const { manager } = usePlugins();
-	return <Hint label={item.action.name} side={context.placement === "graph" ? "right" : "bottom"}>
-		<button type="button" role={menuItem ? "menuitem" : undefined} data-plugin-action={item.key} title={item.action.name} aria-label={item.action.name}
-			disabled={item.busy || pluginActionDisabled(item.action, context)} aria-busy={item.busy || undefined}
-			className={`${className} disabled:pointer-events-none disabled:opacity-40`}
-			onClick={() => { void manager?.runAction(item.pluginId, item.action, () => { const captured = captureContext ? captureContext() : context; if (captured) onRun?.(); return captured; }); }}>
+	return <Hint label={blocked ?? item.action.name} side={context.placement === "graph" ? "right" : "bottom"}>
+		<button type="button" role={menuItem ? "menuitem" : undefined} data-plugin-action={item.key} title={blocked ?? item.action.name} aria-label={item.action.name}
+			disabled={!blocked && (item.busy || pluginActionDisabled(item.action, context))} aria-busy={item.busy || undefined}
+			aria-disabled={blocked ? true : undefined} data-held={blocked ? "" : undefined}
+			className={`${className} disabled:pointer-events-none disabled:opacity-40 ${HELD_LOOK}`}
+			onClick={() => { if (blocked) return; void manager?.runAction(item.pluginId, item.action, () => { const captured = captureContext ? captureContext() : context; if (captured) onRun?.(); return captured; }); }}>
 			<ActionIcon action={item.action} />
 			{!iconOnly && <span className="min-w-0 truncate">{item.action.name}</span>}
 		</button>
@@ -109,7 +118,10 @@ export function fitPluginTopBarActions(widths: readonly number[], available: num
 	return count;
 }
 
-export function PluginTopBarActions({ context, captureContext }: { context: Extract<PluginActionContext, { placement: "top-bar" }>; captureContext?: () => PluginActionContext | undefined }) {
+// Side-tutor fork (cloud sync): `blocked` greys every action, in the row and
+// in the overflow menu (which still opens, so they can be seen), on a session
+// another device holds.
+export function PluginTopBarActions({ context, captureContext, blocked }: { context: Extract<PluginActionContext, { placement: "top-bar" }>; captureContext?: () => PluginActionContext | undefined; blocked?: string }) {
 	const { snapshot } = usePlugins();
 	const actions = placedPluginActions(snapshot.plugins, context);
 	const root = useRef<HTMLDivElement>(null);
@@ -176,14 +188,14 @@ export function PluginTopBarActions({ context, captureContext }: { context: Extr
 		<div ref={probes} aria-hidden="true" className="pointer-events-none invisible fixed left-0 top-0 flex w-max gap-1">
 			{actions.map(item => <span key={item.key} className={TOP_BUTTON}><ActionIcon action={item.action} /><span className="min-w-0 truncate">{item.action.name}</span></span>)}
 		</div>
-		{actions.slice(0, count).map(item => <ActionButton key={item.key} item={item} context={context} captureContext={captureContext} className={TOP_BUTTON} />)}
+		{actions.slice(0, count).map(item => <ActionButton key={item.key} item={item} context={context} captureContext={captureContext} className={TOP_BUTTON} blocked={blocked} />)}
 		{excess.length > 0 && <Hint label="More plugin actions" side="bottom"><button ref={trigger} type="button" title="More plugin actions" aria-label="More plugin actions"
 			aria-haspopup="menu" aria-expanded={menuOpen} onClick={() => setMenuOpen(open => !open)}
 			className="flex size-9 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"><EllipsisIcon className="size-4" /></button></Hint>}
 		{menuOpen && excess.length > 0 && <MenuShell anchorRef={trigger} testid="plugin-top-bar-menu" onClose={(reason) => { setMenuOpen(false); if (reason === "escape") trigger.current?.focus(); return "closed"; }} preferredSide="down" align="right"
 			menuClass="lh-no-drag w-64 rounded-xl border border-border bg-popover p-1 shadow-lg">
 			<div role="menu" aria-label="More plugin actions">
-			{excess.map(item => <ActionButton key={item.key} item={item} context={context} captureContext={captureContext} menuItem onRun={() => setMenuOpen(false)}
+			{excess.map(item => <ActionButton key={item.key} item={item} context={context} captureContext={captureContext} menuItem onRun={() => setMenuOpen(false)} blocked={blocked}
 				className="flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-muted-foreground hover:bg-accent hover:text-foreground" />)}
 			</div>
 		</MenuShell>}

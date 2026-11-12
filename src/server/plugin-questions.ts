@@ -12,6 +12,7 @@ import type { ChatStore } from "../core/ports.ts";
 import { emit } from "../core/events.ts";
 import { isTurnRunning } from "./turn-liveness.ts";
 import { getPluginHost } from "./plugins.ts";
+import { holdsSession } from "./sync/engine.ts";
 
 export type QuestionTypeResolution =
 	| { status: "available"; definition: NativePluginQuestionDefinition; signal: AbortSignal; requireActive(): void }
@@ -226,7 +227,12 @@ export function pluginQuestionCompatibilityAppends(record: { messages: LhMessage
 
 /** Re-read after startup awaits; never write over an active native turn. No migration or wake. */
 export async function reconcilePluginQuestionCompatibility(chatStore: ChatStore, chatId: string): Promise<void> {
-	if (isTurnRunning(chatId)) return;
+	// Side-tutor fork (cloud sync): a session another device holds is read-only
+	// here; its holder reconciles its own record. Checked again after the await
+	// (a take-over can land meanwhile). Without this, the guarded store drops
+	// the write but record-changed still fires, and the open page's reload GET
+	// lands here again: a loop.
+	if (!holdsSession(chatId) || isTurnRunning(chatId)) return;
 	const initial = chatStore.getChat(chatId);
 	if (!initial || (!pendingPluginQuestionOf(initial.messages) && !unreadablePending(initial.messages))) return;
 	let host: Awaited<ReturnType<typeof getPluginHost>>;
@@ -235,7 +241,7 @@ export async function reconcilePluginQuestionCompatibility(chatStore: ChatStore,
 	const record = chatStore.getChat(chatId);
 	if (!record) return;
 	const appends = pluginQuestionCompatibilityAppends(record, (pluginId, typeId, version) => host.resolveQuestionType(pluginId, typeId, version));
-	if (!appends.length) return;
+	if (!appends.length || !holdsSession(chatId)) return;
 	chatStore.saveMessages(chatId, [...record.messages, ...appends]);
 	emit("record-changed", { chatId });
 }

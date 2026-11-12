@@ -31,10 +31,14 @@ export function runSelectionAction(action: SelectionAction, capture: CapturedSel
 	return action.onSelect(capture);
 }
 
-export function SelectionToolbarButtons({ capture, actions, onDone }: {
+export function SelectionToolbarButtons({ capture, actions, onDone, blocked }: {
 	capture: CapturedSelection;
 	actions: readonly SelectionAction[];
 	onDone: () => void;
+	/** Side-tutor fork (cloud sync): why no action can run here (a session
+	 * another device holds). Every button keeps its label and icon, is greyed
+	 * with this as its tooltip, and a press does nothing. */
+	blocked?: string;
 }) {
 	return (
 		<>
@@ -47,12 +51,15 @@ export function SelectionToolbarButtons({ capture, actions, onDone }: {
 						type="button"
 						size="xs"
 						variant="outline"
-						disabled={disabled !== null}
+						disabled={!blocked && disabled !== null}
 						aria-label={disabled ?? action.ariaLabel}
-						className="bg-popover shadow-md dark:bg-popover dark:hover:bg-accent"
+						aria-disabled={blocked ? true : undefined}
+						data-held={blocked ? "" : undefined}
+						title={blocked}
+						className={`bg-popover shadow-md dark:bg-popover dark:hover:bg-accent${blocked ? " cursor-default opacity-40 hover:bg-popover dark:hover:bg-popover" : ""}`}
 						// Keep the learner's selection alive through the click.
 						onPointerDown={(event) => event.preventDefault()}
-						onClick={() => { if (runSelectionAction(action, capture)) onDone(); }}
+						onClick={() => { if (!blocked && runSelectionAction(action, capture)) onDone(); }}
 					>
 						<Icon aria-hidden="true" className="size-3.5" />
 						{disabled ?? action.label}
@@ -102,8 +109,10 @@ function selectionVisible(range: Range, viewport: HTMLElement): boolean {
 	return false;
 }
 
-/** The floating toolbar over a tutor-text selection inside `viewport`. */
-export function SelectionToolbar({ viewport, actions }: { viewport: HTMLElement | null; actions: readonly SelectionAction[] }) {
+/** The floating toolbar over a tutor-text selection inside `viewport`.
+ *  Side-tutor fork (cloud sync): `blocked` greys every button (see
+ *  SelectionToolbarButtons). */
+export function SelectionToolbar({ viewport, actions, blocked }: { viewport: HTMLElement | null; actions: readonly SelectionAction[]; blocked?: string }) {
 	const controller = useOptionalInteractionLayers();
 	const [state, setState] = useState<{ capture: CapturedSelection; position: SelectionActionPoint } | null>(null);
 	const toolbarRef = useRef<HTMLDivElement>(null);
@@ -200,7 +209,7 @@ export function SelectionToolbar({ viewport, actions }: { viewport: HTMLElement 
 			<SelectionToolbarButtons capture={state.capture} actions={actions.map(action => ({
 				...action,
 				onSelect: capture => isInteractionScopeEligible(viewport, controller) && action.onSelect(capture),
-			}))} onDone={done} />
+			}))} onDone={done} blocked={blocked} />
 		</div>,
 		document.body,
 	);
