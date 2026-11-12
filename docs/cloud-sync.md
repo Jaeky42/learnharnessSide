@@ -343,7 +343,7 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 
 #### Plugins on a phone: Flashcards and Rich code blocks (built after the upstream 0.6.0 merge)
 
-- **State:** built on `claude/upstream-0.6.0`, together with Flashcards sync ("Flashcards sync" under "Handoff"). **Not shipped:** not pushed to `side-tutor` or to the server's branch; both workflow dry runs are still to run; the owner's iPhone hasn't seen it.
+- **State:** built on `claude/upstream-0.6.0`, together with Flashcards sync ("Flashcards sync" under "Handoff"). **Not shipped;** where it stands is "After the merge (read this first)" under "Handoff".
 - **The plan** is `docs/phone-plugins-plan.md`: the owner's decisions (numbered 1–11 there) and the smaller rules, approved by the owner ("Approved, build it"). This part records what was built for each. Change a decision only with the owner's approval.
 - It replaces the 0.6.0 merge's "under 640 px no plugin is offered" (decision 10 in `docs/upstream-0.6.0.md`) for these two plugins only.
 
@@ -422,7 +422,9 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 
 **What was checked**
 
-- In a browser at iPhone size: a production build, real touch through CDP, the Safari-tab and the home-screen set-ups, a dark and a light theme.
+- In a browser at iPhone size: a production build, real touch through CDP, the Safari-tab and the home-screen set-ups, a dark and a light theme. Every screen of the look was shot again after the change.
+- **Flashcards with the stand-in provider:** a generation through the picker, the preview and Start.
+- **Tests, typecheck, lint** (on the branch after the merge of `side-tutor`, before the sync fixes): typecheck clean; lint clean apart from the one existing warning; the full suite without `tests/safe-fetch.test.ts`: 5,997 tests, 5,988 pass, 4 skipped, 5 fail. The 5 are the four that fail in the development sandbox on untouched code ("Development notes from the merge" in `docs/upstream-0.6.0.md`) and one plugin SDK type test that runs out of its 30-second limit in a full run and passes alone. The plugin's own tests: 204 of 204.
 - **The computer:** compared element by element at 1280 and 700 px against the build before the change: identical.
 - **A fresh reviewer** read the phone diff and found two real bugs (the rename box stuck open after a hold on, or a slide off, its ✕; a hold inside the rename box opening the menu and saving) and smaller items. All are fixed.
 
@@ -431,7 +433,7 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 - The safe-area spacing (the home bar under the pinned buttons); the real keyboard with the scroll-into-view; Safari's bounce on the pinned footer; the rename ✕ keeping the keyboard up; the hold's timing and iOS's text callout; a formula scrolling sideways in a card; TikZ's time and memory; the viewer's pinch and drag.
 - The plan ends the round with a "what to try on your iPhone" page; expect a second round from it.
 
-**Built beyond the plan's letter, for the owner to review**
+**Built beyond the plan's letter, for the owner to review** (the owner was told of each in chat as it came up and hasn't answered item by item)
 
 - **Renaming a deck:** while its box is open, that row's Review and + are hidden so the box has room (96 → 200 px); the ⚙ and the ✕ stay. A hold on that row does nothing while the box is open. Sliding off the ✕ and tapping elsewhere saves the draft (the plugin's own blur rule).
 - The rename ✕'s hidden label for screen readers is "Cancel".
@@ -505,7 +507,9 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 ### After the merge (read this first)
 
 - **Upstream 0.6.0 is merged and shipped** to both branches, at the same commit. It raises the sync protocol to 2, so the server and the desktop app must both be updated or sync pauses (nothing is discarded while paused). What changed in sync, the gate, the phone layout and the screens is in `docs/upstream-0.6.0.md`. Where this file and that one differ, that one is newer.
-- **The phone plugins round is built, not shipped** (on `claude/upstream-0.6.0`): Flashcards and Rich code blocks on a phone ("Plugins on a phone" under "Phone layouts") and Flashcards sync ("Flashcards sync" below). It raises the sync protocol to 3, so the same rule applies again: the server and the desktop app must both be updated, the server first. Not pushed to `side-tutor` or to the server's branch; both workflow dry runs are still to run; the owner's iPhone hasn't seen it; a second review, of the sync part, is under way.
+- **The phone plugins round is built, not shipped** (on `claude/upstream-0.6.0`): Flashcards and Rich code blocks on a phone ("Plugins on a phone" under "Phone layouts") and Flashcards sync ("Flashcards sync" below). It raises the sync protocol to 3, so the same rule applies again: the server and the desktop app must both be updated, the server first.
+  - **Where it stands:** not pushed to `side-tutor` or to the server's branch. The branch contains `side-tutor`'s `a5d3284` (the three iPad fixes, merged in), so shipping is a fast-forward of both branches. Both workflows were started by hand as dry runs on this branch (they publish nothing); their results aren't in yet. The owner's iPhone hasn't seen it, and the "what to try on your iPhone" page is still to come.
+  - **Reviews:** the sync part was reviewed; its six serious findings and the lower ones are fixed ("The review of the wiring, and its fixes" under "Flashcards sync"). A second pass by the same reviewer, over the fixes, is under way.
 
 - **Merged:** `side-tutor` was fast-forwarded to the cloud sync branch at `a2d2b7e` with the owner's word ("merge"), and the Windows workflow published **release 0.5.6** from it. The desktop app now has everything in this file and in `docs/side-tutor.md`.
 - **Checked on Windows before it went out:** the Windows workflow was started by hand on the cloud sync branch (a dry run: no release) and passed, with the sync and cloud tests added to it. Before that the sync code had only run on Linux.
@@ -515,7 +519,7 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
   - the owner's server follows `LH_CHANNEL=dev`, which is built from `claude/pensive-goldberg-7dty2m`. A change the server should get must be pushed there; a change both should get goes to both branches, kept at the same commit.
   - Moving the server to `latest`, so one branch feeds both, is the owner's call and hasn't been asked.
 - **The two sides must speak the same sync protocol version** (1 in release 0.5.6; **2 from the upstream 0.6.0 merge on**, see `docs/upstream-0.6.0.md`; **3 with Flashcards sync**, built and not shipped, see "Flashcards sync"). A change that raises it has to reach the server and the desktop together, or sync pauses until both are updated.
-- **Restoring a first-sync backup** (`%APPDATA%\LearnHarness\backups` on the PC, `/data/backups` on the server) has no written guide. Putting old files back while paired would sync the old state everywhere: unpair first, and write the steps for the situation at hand.
+- **Restoring a first-sync backup** (`%APPDATA%\LearnHarness\backups` on the PC, `/data/backups` on the server) has no written guide. Putting old files back while paired would sync the old state everywhere: unpair first, and write the steps for the situation at hand. (With Flashcards sync, Flashcards' library put back deletes nothing anywhere; "Restoring a backup" under "Flashcards sync".)
 - **Not done:** Phase 7 (one automated test with two desktops and a server syncing everything together; a tidy of this file). The owner chose to merge without it.
 
 ### State before the merge (Phases 0–5 done; notes drawer additions built)
@@ -757,7 +761,8 @@ Kept as written while the work was on its own branch; where it says "until the m
   - where both have the same folder, prompt text, imported-file record or node place, the server's is kept;
   - anything of those kinds that only the new PC has is added on both sides.
   - "First" is the server's record of which desktops have done a first sync (`devices` in `maps.json`). A server that lost that record treats the next desktop as the first again.
-- **A file that is there but can't be read is left alone**, on both sides: its items are neither sent, taken nor deleted that round. Reading a damaged `settings.json` as "no settings" would have reset the other side's.
+  - Since the Flashcards review: a desktop also counts as later while another is part-way through its first exchange (in pages), so two PCs whose first exchanges overlap aren't both first. It holds for the settings exchange and for Flashcards'.
+- **A file that is there but can't be read is left alone**, on both sides: its items are neither sent, taken nor deleted that round. Reading a damaged `settings.json` as "no settings" would have reset the other side's. Since the Flashcards review, the desktop's place in the server's list doesn't move in such a round either, so nothing the server has for that file is passed over.
 - **Chains-view folders changed on two devices at once** are made whole after every change that arrives (`withOrganizationItems`): a folder whose parent is gone, or that would sit inside itself, moves to the top; a source filed in a missing folder is unfiled. The same on every device.
 - **A value a file adjusts on the way in** (the settings sanitizer clamps a number, say) is recorded as adjusted and sent back once; it doesn't bounce.
 - **A server that lost its records** answers `409 send_all`; the desktop then sends everything once, as at a first sync.
@@ -993,7 +998,7 @@ One run between two built copies with the loop on, through the real screens, nob
 
 ### Flashcards sync (built, not shipped)
 
-- **State:** built on `claude/upstream-0.6.0`, together with the phone plugins round ("Plugins on a phone" under "Phone layouts"). **Not shipped:** not pushed to `side-tutor` or to the server's branch; both workflow dry runs are still to run. A second review, of the sync part, is under way.
+- **State:** built on `claude/upstream-0.6.0`, together with the phone plugins round ("Plugins on a phone" under "Phone layouts"), and fixed after a review ("The review of the wiring, and its fixes" below). **Not shipped;** where it stands is "After the merge (read this first)" under "Handoff".
 - **Why:** the owner added it while answering the phone plan's questions: decks made in the Windows app should be on the phone, so **sync Flashcards between the Windows app and the server in this round**.
 - **The plan** is `docs/phone-plugins-plan.md` ("Flashcards sync": decisions S1–S6 and the smaller rules), approved by the owner. Change a decision only with the owner's approval.
 - It replaces decision 17 of the 0.6.0 merge ("plugin data is per device") for Flashcards' library only. Every other plugin's data, and which plugins are on, stay per device.
@@ -1017,10 +1022,14 @@ The smaller rules approved with them (what travels, schedules never travel, orde
 - **How "a delete always wins" reads for decks and facts:**
   - a fact deleted on one device while the other added a new card to it survives, with the new card;
   - a deck deleted on one device but given a card on the other is a normal deck again;
-  - which decks a fact is in is one item per fact: changed on both devices while apart, the later change wins whole;
+  - which decks a fact is in combines (one item per fact and deck, since the review's fixes; "The items" below). The first ruling here, "one item per fact, the later change wins whole", is replaced;
   - a joined twin deck can undercount that day's new cards (reviews keep the deck id they were recorded under).
 - **Schedules are worked out again when the zone changes.** When the server takes a zone it didn't keep or run in, it rebuilds every schedule in that zone; the PC does the same when it sends its zone (its first exchange, or after it moved). Without that, a review made in the old zone kept that zone's due date on one side only (found in the two-copy run). The cost: at the first sync, due dates of facts reviewed in the other zone can move by up to a day. With two PCs in different zones, the one not counted keeps its own zone's schedules. The owner has been told.
 - **A side with no Flashcards folder** makes no backup folder and counts as backed up.
+- **Made while fixing the review's findings** (for the owner's review; the owner was told in chat):
+  - **the same-question rule** reads as "only a pair that meets from two devices": two cards with the same question on one fact, one from each device, lose the later one; two cards one device made are both kept ("The items" below);
+  - **a fact taken out of every deck stays in the deck it was put in last** (a fact is never left in no deck);
+  - **a generation that shows no progress for 15 minutes holds the exchange no longer.**
 
 #### What travels, and what stays per device
 
@@ -1036,16 +1045,17 @@ The smaller rules approved with them (what travels, schedules never travel, orde
   - `s|<setting>` the five synced settings;
   - `d|<deck>` a deck `{name, newLimit, sourceId?, s, at}`; `x|<deck>` a deck was deleted;
   - `o|decks` the deck order; `q|<deck>` the order of the facts in a deck;
-  - `p|<fact>` a fact `{origin, name, statement, snapshot?, sourceId?, created}`; `e|<fact>` when the fact was deleted; `m|<fact>` which decks it is in `{deckId: stamp}`;
+  - `p|<fact>` a fact `{origin, name, statement, snapshot?, sourceId?, created}`; `e|<fact>` when the fact was deleted; `m|<deck>|<fact>` the fact in that deck, or taken out of it: `{in, s}`;
   - `c|<card>` a card `{p, q, a, s}`; `k|<card>` a card was deleted; `u|<fact>` the order of a fact's cards;
   - `r|<review>` one review, never changed: `{p, c, rating, at, deckIds, settings}`;
   - `f|<file>` an uploaded file's record `{name, fingerprint, deckId}`.
-- **Nothing is deleted by a missing item.** Deletions are items of their own (`x`, `k`, `e`), so latest-change-wins only ever chooses between two values. A per-device memory (`<data>/sync/flashcards-memory.json`) tells "deleted here" from "never had it": the plugin's file keeps no record of what it deleted.
+- **Nothing is deleted by a missing item.** Deletions are items of their own (`x`, `k`, `e`), so latest-change-wins only ever chooses between two values. A per-device memory tells "deleted here" from "never had it": the plugin's file keeps no record of what it deleted ("The memory" under "The wiring").
 - **A card's deletion is final:** `k` is never taken back, whatever was edited later.
-- **A fact deleted and made again starts fresh:** `e` says from when its reviews count. A fact is alive while it has a card. Its moment of making (`created`) travels, so a fact nobody has reviewed yet has the same schedule everywhere.
+- **A fact deleted and made again starts fresh:** `e` says from when its reviews count. An `e` is also made for a fact whose file holds reviews from before it was made (deleted and made again before this device's first sync). A fact is alive while it has a card. Its moment of making (`created`) travels, so a fact nobody has reviewed yet has the same schedule everywhere.
 - **Order items exist only after a real reorder.** Members an order doesn't know follow it by stamp, then id, so the later reorder wins and anything it doesn't know comes after.
 - **Twin decks** (S4): two decks from the same session or source (`sourceId`), or made from the same uploaded file (fingerprint), are joined. The earliest made stays; name and limit come from the most recently changed.
-- **The same question, word for word after trimming, twice on one fact:** the earlier card stays, the other is deleted (the plugin's own rule when it generates).
+- **Membership combines** (one item per fact and deck): a fact put into a deck on each side is in both decks afterwards; taking it out of a deck (`{in: false}`) travels like any change; a fact taken out of every deck it was in stays in the one it was put in last.
+- **The same question, word for word after trimming, twice on one fact:** only a pair whose cards came from different devices loses one, the later (`duplicateDeletions`). It is decided by the device that takes in the second card, from what it knows the sender had. Two cards one device made are both kept, there and everywhere.
 - **A review item leaves out** `before`, `after` and `introduced` (worked out again), `requestId` and `ticketId` (local), and the model fields of its settings copy.
 
 #### The replay (`src/core/sync/flashcards-replay.ts`)
@@ -1064,18 +1074,42 @@ The smaller rules approved with them (what travels, schedules never travel, orde
 - **Cached:** the parsed library by its file's stamp (inode, size and times), and the items with their fingerprints by the file's stamp plus the memory's. **An idle round reads no Flashcards file and writes nothing.**
 - **Apply is one synchronous step**, with nothing awaited between reading and writing (`src/server/sync/flashcards-files.ts`): read the file again, combine (`applyFlashcardsChanges`, with the plugin's own scheduler), write the file whole (a temporary file renamed over it, as the plugin writes), save the memory (after the file: a memory ahead of its file would read as deletions), then tell open pages: `plugin-message {pluginId: "flashcards", topic: "changed", data: {by: "sync"}}`. The loop doesn't take a notice "by sync" for a change made here.
 - **The format lock:** a file whose `version` isn't the one this build reads (`FLASHCARDS_FORMAT`, 1), or that isn't the plugin's shape, is neither sent nor taken, and never written over. No message on screen.
+- **A library that can't be read** (the format lock, or a damaged file):
+  - on the PC: no request and nothing written that round;
+  - on the server: the exchange answers 409 `locked`, and the PC then sends only a cheap `{probe: true}` each round until the server can read again. The server's backup isn't made again;
+  - no cursor moves past a kind that can't be read, so nothing the other side has is passed over (the settings exchange follows the same rule).
+- **The memory,** each side's own: `sync/flashcards-memory.json` (`{version: 1, items}`) and `sync/flashcards-memory-reviews.json` (`{version: 1, reviews, revision}`: the review ids, and the library's `revision` it was made from). The library is always written before the memory.
+  - **Records lost** means no memory while the library can be read, or a library that doesn't follow its memory (`followsMemory`: a lower `revision`, or a review the memory saw is gone; the plugin only ever raises the revision and never removes a review). Then nothing missing counts as deleted, everything is combined again, and the log says so once.
+  - The server then starts its table afresh (each PC is told `send_all`); a PC sends everything again. The items of a library that was put back are timed 0, so the other side's values stand where both have an item.
+- **Restoring a backup** (the first-sync one or the Flashcards one): nothing is deleted on the other side. Decks deleted after the backup can come back as decks; their cards stay deleted.
 - **The round** (`src/server/sync/round.ts`): Flashcards is its last part, after the settings, in its own try/catch, so a failure there leaves the rest syncing. While the server can't be reached, its changes are still noted with their times (`detect()`), as for the settings. The loop's 2-second trigger fires on Flashcards' own `changed` and `batch-changed` notices (`flashcardsChanged` in `loop.ts`).
-- **State files** under `<data>/sync/`, each side's own and never synced: on the server `flashcards.json` and `time-zone.json`; on a PC `flashcards-desktop.json`; on both `flashcards-memory.json`.
-  - A memory missing while the exchange's state is there means this side's records are lost: the server starts its table afresh (each PC is then told `send_all`), and a PC sends everything again.
-- **The backup:** `backups/before-first-flashcards-sync <date>/core-plugin-data/flashcards/`, once per side, before anything the exchange writes (`makeFlashcardsBackup` in `src/store/sync/backup.ts`). If it can't be made, the Flashcards part of the round fails and the rest syncs.
+- **State files** under `<data>/sync/`, each side's own and never synced: on the server `flashcards.json` and `time-zone.json`; on a PC `flashcards-desktop.json`; on both `flashcards-memory.json` and `flashcards-memory-reviews.json` ("The memory" above).
+- **The backup:** `backups/before-first-flashcards-sync <date>/core-plugin-data/flashcards/`, once per side, before anything the exchange writes (`makeFlashcardsBackup` in `src/store/sync/backup.ts`). If it can't be made, the Flashcards part of the round fails and the rest syncs. It, and the first-sync backup, also keep Flashcards sync's own files under `sync/` when they exist (the memory and the exchange's state), so a library restored with them is whole.
+- **Noting this side's own changes:** about 2 seconds after the plugin's `changed` or `batch-changed` notice, each side notes its own Flashcards changes with their time, also with nobody connected (`watchFlashcardsChanges` in `flashcards-engine.ts`; the server's starts in `autostart.ts`, a PC's with its loop). Only once `sync/flashcards.json` (the server) or the PC's state exists; nothing on an unpaired side, and an idle side writes nothing. Without that the server timed its own changes when a PC next asked, so an older phone edit could beat a newer PC edit.
+- **A generation holding the exchange:** while it does, its notices start no round; the one after it ends does. The hold ends after 15 minutes with no change to the active batches (`BUSY_HOLD_MAX_MS`), with a log line.
+- **Two PCs:** a desktop counts as later (it takes the server's values) when another has done its first exchange or is part-way through it, in pages. Both exchanges follow this.
 - **The time zone** (S2; `src/server/sync/flashcards-zone.ts`):
   - the PC sends its IANA zone name on the first page whenever it differs from the last one it sent;
-  - the server checks the name, stores `{version: 1, zone, from, at}` in `time-zone.json`, and sets `process.env.TZ` at once. It takes a zone only after its backup, and not while it is busy;
+  - the server checks the name, puts it in its standard form, stores `{version: 1, zone, from, at}` in `time-zone.json`, and sets `process.env.TZ` at once. It checks the zone took effect; if not, it keeps the one it had (a log line). It takes a zone only after its backup, and not while it is busy;
+  - the PC works its schedules out again once per zone, also while the server keeps answering busy;
   - at every start it sets it again before the plugins start (`instrumentation.ts`, server mode only). Nothing is set on a server no desktop ever gave a zone to;
   - with two PCs in different zones, the most recently changed one counts;
   - checked on Node 22 and Node 26: `Date`'s local getters, `Intl`'s default zone and the plugin's study day follow.
 - **Unpair and pairing again:** the Flashcards state is kept on both sides, like the settings state. The same server carries on; a different server starts afresh, with a new backup.
 - **An app that isn't paired** makes no Flashcards request and writes no Flashcards sync file (`tests/sync-inert.test.ts`).
+
+#### The review of the wiring, and its fixes
+
+A reviewer read the sync part. It found six serious issues, each reproduced by a script, all fixed before anything shipped (`51608be`); lower ones were fixed too. A second pass by the same reviewer, over the fixes, is under way.
+
+1. **Putting the first-sync backup back** made sync read the missing cards as deletions and delete them everywhere. Now a library that doesn't follow its memory counts as "records lost", and nothing missing counts as deleted ("The memory" above).
+2. **A fact deleted and generated again before a device's first sync** had its schedule rebuilt from the old reviews. Now an `e` is set at the first read.
+3. **A library that can't be read** (the format lock, damaged) made the PC download everything every round and the server back up every round. Now: no request, nothing written, no cursor moved, `locked` and a probe.
+4. **Seconds-long stalls of the server's process** with a 25 MB library. Now tables are copied only on the first change, an idle exchange skips the walk of its table, an apply starts from the last read and leaves its own result as the next read, and fingerprints are kept while a value is the same (a review's for good).
+5. **The server timed its own changes when a PC next asked**, so an older phone edit could beat a newer PC edit. Now each side notes its own changes about 2 seconds after the plugin's notice.
+6. **Two PCs whose first exchanges overlapped** were both "first". Now one part-way through counts too.
+
+Also changed then: deck membership as one item per fact and deck, which combines; the same-question rule for pairs from two devices only; the 15-minute end of a generation's hold, and no rounds from its notices; zone names in their standard form and checked after they are set; one rebuild per zone on the PC.
 
 #### Protocol 3
 
@@ -1097,18 +1131,22 @@ The smaller rules approved with them (what travels, schedules never travel, orde
 - The same card reviewed on both devices while apart: both reviews count, and that day's new-card limit can be passed.
 - A joined twin deck can undercount that day's new cards; with two PCs in different zones, the one not counted keeps its own zone's schedules (above).
 - 60,000 reviews (over 26 MB) weren't tried.
+- With a 25 MB library (20,000 reviews), a phone review or an incoming PC review still holds the server's process for about 300 to 480 ms (measured after the fixes).
+- Clock differences between devices affect the times of reviews and deletions.
 
 #### Tests
 
 - `tests/sync-flashcards.test.ts`: the pure rules, with two devices that each run the plugin's real back end. Both libraries combined at the first sync, every review counted, delete-wins, a deck that still has cards stays, a fact made again starts fresh, twin decks joined, the same question twice, the order rule, settings and the model choice, an idle exchange, and the same library whatever order the changes arrive in.
 - `tests/sync-flashcards-replay.test.ts`: the replay, byte for byte against the plugin's own file.
 - `tests/sync-flashcards-exchange.test.ts` (with `tests/sync-flashcards-harness.ts`): the real exchange, the real files and the plugin's real back end on each side, never restarted. Pages both ways, the backups, a review landing without a restart, plugin writes right before and after a sync write, an idle round, a generation holding the exchange, the format lock, a lost memory, a PC with no library, no backup no sync, and the time zone sent once and again when it changes.
+- Added with the review's fixes (`tests/sync-flashcards-exchange.test.ts`, and cases in `tests/sync-flashcards.test.ts`, `sync-flashcards-replay.test.ts`, `sync-flashcards-zone.test.ts` and `tests/sync-maps.test.ts`): a library put back from its backup deletes nothing; a crash between writing the library and its memory deletes nothing; the backups keep sync's own files; a library that can't be read for a while passes nothing over; a locked library costs no request, and a server's locked library one cheap request a round; the phone's changes keep their own time while every PC is away; the watcher; two PCs whose first exchanges overlap; the same-question pairs; a generation stuck for 15 minutes; one rebuild per zone; the kept snapshot equal to a fresh read.
+- **After the fixes:** all sync tests, 300 of 300; typecheck clean.
 - `tests/sync-flashcards-zone.test.ts`: the zone kept and used by the running process at once and at the next start, the most recent one counting, a name that isn't a zone ignored, the plugin's study day following, and the loop's 2-second trigger.
 - `tests/sync-inert.test.ts` (an unpaired app does nothing new) and the protocol rows in `tests/sync-sessions.test.ts`.
 
 #### The two-copy run
 
-Two built copies with the loop on, the server in UTC and the desktop in another zone, nobody pressing Sync now:
+Before the review's fixes. Two built copies with the loop on, the server in UTC and the desktop in another zone, nobody pressing Sync now:
 
 - unpaired: nothing;
 - a first sync of two different libraries: equal on both 0.8 s after pairing, with a backup on each side;
@@ -1120,6 +1158,8 @@ Two built copies with the loop on, the server in UTC and the desktop in another 
 - 2,000 facts and 20,000 reviews (a 20.3 MB file): first-synced in 10.7 s, in 7 pages up and 3 down;
 - unpair and pair again: carried on with 1 change and no second backup.
 
+**Measured after the fixes** (a 25 MB library, 20,000 reviews): the server's idle exchange 25 ms; a first sync 6.5 s. The steps that still hold the server's process are under "Known limits".
+
 #### Only the real PC and server can confirm
 
 - Windows file stamps, and the rename over the file while another program holds it.
@@ -1128,7 +1168,10 @@ Two built copies with the loop on, the server in UTC and the desktop in another 
 
 #### Log lines and API texts
 
-- No wording on screen. The server's log: `[LearnHarness] Flashcards sync: this server now keeps time in <zone>, the paired desktop app's time zone.`; `[LearnHarness] Flashcards sync: <reason>` (once per distinct reason, on either side); `[LearnHarness] Flashcards sync: the saved time zone couldn't be used: …`.
+- No wording on screen. The server's log: `[LearnHarness] Flashcards sync: this server now keeps time in <zone>, the paired desktop app's time zone.`; `[LearnHarness] Flashcards sync: <reason>` (once per distinct reason, on either side); `[LearnHarness] Flashcards sync: the saved time zone couldn't be used: …`; and since the fixes:
+  - `[LearnHarness] Flashcards sync: the library doesn't follow what sync last saw here (it was put back or replaced); nothing missing from it counts as deleted, and it is combined again.`
+  - `[LearnHarness] Flashcards sync: a generation has shown no progress for 15 minutes; Flashcards sync goes on without waiting for it.`
+  - `[LearnHarness] Flashcards sync: this server couldn't switch to the time zone <zone>, and keeps the one it had.`
 - Texts only the API carries: "The Flashcards changes didn't arrive whole.", "The server is busy with this. Try again in a moment.", "The server couldn't take the Flashcards changes this time."
 
 ### Later phases: decisions still open (ask when you get there)

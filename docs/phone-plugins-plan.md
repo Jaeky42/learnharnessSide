@@ -1,6 +1,6 @@
 # Plan: Flashcards and Rich code blocks on a phone, and Flashcards sync
 
-**Status: approved by the owner ("Approved, build it"). Built on `claude/upstream-0.6.0` (packages A–E; "Where they stand" under "Work packages"); not shipped:** not pushed to `side-tutor` or to the server's branch, both workflow dry runs still to run, the owner's iPhone hasn't seen it, and a second review (of the sync part) is under way. Per `AGENTS.md`, building is mechanical: anything this plan leaves open goes back to the owner. Change a decision here only with the owner's approval. What was built is recorded in `docs/cloud-sync.md`; see "What happened after approval" at the end.
+**Status: approved by the owner ("Approved, build it"). Built on `claude/upstream-0.6.0` (packages A–E; "Where they stand" under "Work packages"); not shipped:** not pushed to `side-tutor` or to the server's branch (the branch contains `side-tutor`'s `a5d3284`, so shipping is a fast-forward of both), both workflow dry runs started and not yet in, the owner's iPhone hasn't seen it, and a second pass of the sync review, over its fixes, is under way. Per `AGENTS.md`, building is mechanical: anything this plan leaves open goes back to the owner. Change a decision here only with the owner's approval. What was built is recorded in `docs/cloud-sync.md`; see "What happened after approval" at the end.
 
 ## What the owner asked
 
@@ -101,8 +101,8 @@ One worker per package, each owning its files, each in its own worktree. Workers
 **Where they stand:**
 
 - **A–E: done**, built on `claude/upstream-0.6.0`.
-- **F: done for the phone part**: a fresh reviewer read the phone diff, and its findings are fixed. A second review, of the sync part, is under way.
-- **G:** the browser run at iPhone size, the computer comparison and the run between two built copies are done, and so are the docs (`docs/cloud-sync.md`, `docs/upstream-0.6.0.md`, `CLAUDE.md`). Still to come: both workflow dry runs and the "what to try on your iPhone" page.
+- **F: done**: a fresh reviewer read the phone diff, and its findings are fixed. The sync part was reviewed too: six serious findings and lower ones, all fixed. A second pass by the same reviewer, over the fixes, is under way.
+- **G:** done: the tests, typecheck and lint, the browser run at iPhone size with every screen shot again, Flashcards with the stand-in provider, the computer comparison, the run between two built copies, and the docs (`docs/cloud-sync.md`, `docs/upstream-0.6.0.md`, `CLAUDE.md`). Both workflow dry runs are started and not yet in. Still to come: the "what to try on your iPhone" page.
 
 | # | Package | Owns | After |
 |---|---|---|---|
@@ -159,11 +159,11 @@ Three answers given after the plan was approved:
 ### Reviews, and what the runs found
 
 - **Package F, the phone part:** a fresh reviewer read the phone diff and found two real bugs (the rename box stuck open after a hold on, or a slide off, its ✕; a hold inside the rename box opening the menu and saving) and smaller items. All are fixed.
-- **The sync part:** a second review is under way.
+- **The sync part:** the reviewer found six serious issues, each reproduced by a script, and all were fixed before anything shipped: a first-sync backup put back deleted cards everywhere; a fact deleted and generated again before a device's first sync was rebuilt from its old reviews; a library that can't be read made the PC download everything and the server back up every round; seconds-long stalls of the server with a 25 MB library; the server timed its own changes when a PC next asked; two PCs whose first exchanges overlapped were both "first". Lower ones were fixed too. The fixes and three rulings made with them (for the owner's review) are in "Flashcards sync" in `docs/cloud-sync.md`. A second pass by the same reviewer, over the fixes, is under way.
 - **Found in the run between two built copies:** a review the server made while it still ran in the zone it was started with kept that zone's due date there, while the PC worked it out in its own zone. Now each side works every schedule out again when the zone changes (a ruling for the owner's review; "Flashcards sync" in `docs/cloud-sync.md`).
 
 ### Where the built facts live
 
 - **The phone:** `docs/cloud-sync.md`, "Phone layouts" → "Plugins on a phone": what was built for each decision, the code, the tests, what was checked, what only the iPhone can show, and the list built beyond this plan's letter for the owner to review.
-- **Flashcards sync:** `docs/cloud-sync.md`, "Flashcards sync": the decisions S1–S6, the rulings made while building (for the owner to review), the items, the replay, the wiring, protocol 3, known limits, tests and the run between two copies.
+- **Flashcards sync:** `docs/cloud-sync.md`, "Flashcards sync": the decisions S1–S6, the rulings made while building (for the owner to review), the items, the replay, the wiring, the review and its fixes, protocol 3, known limits, tests and the run between two copies.
 - **What changed against the 0.6.0 merge** (decisions 10 and 17, "Not in this merge", the upstream files edited, the update steps for protocol 3): `docs/upstream-0.6.0.md`.
