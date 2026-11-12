@@ -7,6 +7,10 @@
  */
 
 import assert from "node:assert/strict";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { Quote } from "lucide-react";
+import { SelectionToolbarButtons } from "../components/selection-toolbar.tsx";
 import { describe, it } from "node:test";
 import { observeSelectionActions, resolveSelectionActionPosition, type SelectionActionPoint } from "../components/selection-actions.ts";
 import {
@@ -41,8 +45,32 @@ describe("where the system's box goes (the owner's measurements)", () => {
 		assert.equal(systemBoxBelow(fiveLines.first, fiveLines.last, { top: 0, height: 894 }), false);
 		assert.equal(systemBoxBelow(fiveLines.first, fiveLines.last, { top: 0, height: 956 }), true);
 	});
-	it("the gap clears the handle knobs (about 14 points beyond the line)", () => {
-		assert.ok(TOUCH_HANDLE_GAP >= 20);
+	it("the gap clears the handle knobs (about 12 points beyond the line), a tiny bit closer than at first", () => {
+		assert.equal(TOUCH_HANDLE_GAP, 18);
+		assert.ok(TOUCH_HANDLE_GAP > 12);
+	});
+	it("beyond the system's box (about 43 pt tall, 15 to 19 pt from the text) clears it", () => {
+		assert.equal(SYSTEM_BOX_CLEARANCE, 70);
+		assert.ok(SYSTEM_BOX_CLEARANCE > 19 + 43);
+	});
+});
+
+describe("the touch buttons' size (owner: a little bigger)", () => {
+	const capture = { messageId: "m", range: {} as Range, selector: { text: "x", start: 0, end: 1, prefix: "", suffix: "" } };
+	const actions = [{ id: "cite", label: "Cite", ariaLabel: "Cite", icon: Quote, visible: () => true, onSelect: () => true }];
+	const classes = (touch?: boolean) => /class="([^"]*)"/.exec(renderToStaticMarkup(createElement(SelectionToolbarButtons, { capture, actions, onDone: () => {}, touch })))![1]!
+		.replace(/&gt;/g, ">").replace(/&lt;/g, "<").replace(/&amp;/g, "&").split(/\s+/);
+	it("32 px tall, 15 px text, a 16 px icon, more side padding, on touch only", () => {
+		assert.equal(TOUCH_TOOLBAR_HEIGHT, 32);
+		const touch = classes(true);
+		for (const c of ["h-8", "text-[15px]", "[&_svg]:size-4", "px-3", "has-[>svg]:px-3"]) assert.ok(touch.includes(c), c);
+		for (const c of ["h-6", "text-xs", "has-[>svg]:px-1.5"]) assert.ok(!touch.includes(c), c);
+		assert.ok(touch.includes("bg-popover") && touch.includes("dark:bg-popover"), "same look");
+	});
+	it("a mouse's buttons keep upstream's xs size", () => {
+		const mouse = classes();
+		for (const c of ["h-6", "text-xs"]) assert.ok(mouse.includes(c), c);
+		assert.ok(!mouse.includes("h-8"));
 	});
 });
 

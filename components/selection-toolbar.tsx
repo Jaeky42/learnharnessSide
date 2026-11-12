@@ -11,7 +11,7 @@ import {
 	isSelectionRectVisible, observeSelectionActions, resolveSelectionActionPosition,
 	type RectLike, type SelectionActionPoint,
 } from "./selection-actions";
-import { resolveTouchSelectionPosition, visibleScreen } from "./phone/touch-selection";
+import { resolveTouchSelectionPosition, TOUCH_BUTTON_CLASS, visibleScreen } from "./phone/touch-selection";
 
 /** One button on the toolbar. Cite is the first; side questions adds more. */
 export interface SelectionAction {
@@ -32,10 +32,13 @@ export function runSelectionAction(action: SelectionAction, capture: CapturedSel
 	return action.onSelect(capture);
 }
 
-export function SelectionToolbarButtons({ capture, actions, onDone, blocked }: {
+export function SelectionToolbarButtons({ capture, actions, onDone, blocked, touch }: {
 	capture: CapturedSelection;
 	actions: readonly SelectionAction[];
 	onDone: () => void;
+	/** Side-tutor fork: a touch selection's buttons are a little bigger
+	 *  (TOUCH_BUTTON_CLASS, components/phone/touch-selection.ts). */
+	touch?: boolean;
 	/** Side-tutor fork (cloud sync): why no action can run here (a session
 	 * another device holds). Every button keeps its label and icon, is greyed
 	 * with this as its tooltip, and a press does nothing. */
@@ -57,7 +60,7 @@ export function SelectionToolbarButtons({ capture, actions, onDone, blocked }: {
 						aria-disabled={blocked ? true : undefined}
 						data-held={blocked ? "" : undefined}
 						title={blocked}
-						className={`bg-popover shadow-md dark:bg-popover dark:hover:bg-accent${blocked ? " cursor-default opacity-40 hover:bg-popover dark:hover:bg-popover" : ""}`}
+						className={`bg-popover shadow-md dark:bg-popover dark:hover:bg-accent${blocked ? " cursor-default opacity-40 hover:bg-popover dark:hover:bg-popover" : ""}${touch ? ` ${TOUCH_BUTTON_CLASS}` : ""}`}
 						// Keep the learner's selection alive through the click.
 						onPointerDown={(event) => event.preventDefault()}
 						onClick={() => { if (!blocked && runSelectionAction(action, capture)) onDone(); }}
@@ -115,7 +118,7 @@ function selectionVisible(range: Range, viewport: HTMLElement): boolean {
  *  SelectionToolbarButtons). */
 export function SelectionToolbar({ viewport, actions, blocked }: { viewport: HTMLElement | null; actions: readonly SelectionAction[]; blocked?: string }) {
 	const controller = useOptionalInteractionLayers();
-	const [state, setState] = useState<{ capture: CapturedSelection; position: SelectionActionPoint } | null>(null);
+	const [state, setState] = useState<{ capture: CapturedSelection; position: SelectionActionPoint; touch?: boolean } | null>(null);
 	const toolbarRef = useRef<HTMLDivElement>(null);
 	const observerRef = useRef<ReturnType<typeof observeSelectionActions> | null>(null);
 	const actionsRef = useRef(actions);
@@ -149,6 +152,7 @@ export function SelectionToolbar({ viewport, actions, blocked }: { viewport: HTM
 				const whole = capture.range.getBoundingClientRect();
 				setState({
 					capture,
+					touch: true,
 					position: resolveTouchSelectionPosition({
 						bounds: viewportRect,
 						firstLine: drawn[0] ?? whole,
@@ -228,7 +232,7 @@ export function SelectionToolbar({ viewport, actions, blocked }: { viewport: HTM
 			<SelectionToolbarButtons capture={state.capture} actions={actions.map(action => ({
 				...action,
 				onSelect: capture => isInteractionScopeEligible(viewport, controller) && action.onSelect(capture),
-			}))} onDone={done} blocked={blocked} />
+			}))} onDone={done} blocked={blocked} touch={state.touch} />
 		</div>,
 		document.body,
 	);

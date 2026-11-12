@@ -53,9 +53,10 @@ export const TOUCH_FINGER_WAIT_MS = 1500;
 export const TOUCH_ACTION_RELEASE_MS = 400;
 
 /** Space between the selected text and the buttons on touch: clears iOS's
- *  selection-handle knobs (about 14 points beyond the first and last line).
+ *  selection-handle knobs (about 12 points beyond the first and last line,
+ *  from the owner's screenshots). 24 at first; owner: "a tiny bit closer".
  *  The computer keeps its 4 px under the end. */
-export const TOUCH_HANDLE_GAP = 24;
+export const TOUCH_HANDLE_GAP = 18;
 
 /** Where the system's box switches sides: the selection's vertical centre
  *  against this fraction of the visible height (owner's iPhone: the switch
@@ -66,9 +67,15 @@ export const SYSTEM_BOX_SWITCH = 0.5;
  *  the box is about 43 points tall and sits 15 to 19 points from the text. */
 export const SYSTEM_BOX_CLEARANCE = 70;
 
-/** The toolbar's height before it has been measured (one row of `xs`
- *  buttons, h-6). */
-export const TOUCH_TOOLBAR_HEIGHT = 24;
+/** The buttons on a touch selection (owner: "a little bigger", after seeing
+ *  screenshots): 32 px tall instead of the computer's 24, 15 px text, a
+ *  16 px icon and a little more side padding. Same look otherwise. Merged
+ *  over the `xs` size by the Button's class merge. */
+export const TOUCH_BUTTON_CLASS = "h-8 gap-1.5 px-3 has-[>svg]:px-3 text-[15px] [&_svg]:size-4";
+
+/** The toolbar's height before it has been measured (one row of buttons in
+ *  TOUCH_BUTTON_CLASS, h-8). */
+export const TOUCH_TOOLBAR_HEIGHT = 32;
 
 const EDGE = 8;
 
