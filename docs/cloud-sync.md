@@ -41,7 +41,7 @@ A teaching transcript can't be merged, because two teachers built on the same tu
 - **Take over warns first** when there is evidence that the holder has turns that haven't synced (see "Phase 5 decisions").
 - **No copies** (owner's change during Phase 5 planning; it replaces the earlier "Title (desktop copy)" rule). A device that lost a session to a take-over discards its unsent turns for that session when it reconnects and shows the server's version. The loss isn't silent: the desktop shows a heads-up while it works offline, and a notice after a discard.
 - An offline desktop can only continue sessions it held before it went offline.
-- A session's side-tutor thread (`side-tutor/<chatId>.json`) and notes home folder (`notes/sessions/<chatId>.json`) follow its lease.
+- A session's notes home folder (`notes/sessions/<chatId>.json`) follows its lease. Its Tutor conversations are inside the chat record since the upstream 0.6.0 merge (`sideChats`), so they travel with it; the separate `side-tutor/<chatId>.json` file is gone.
 
 ### Background work
 
@@ -52,7 +52,6 @@ Graph extraction, research, compaction and visuals run on **whichever device hol
 | Data | How it's written | How it syncs |
 |---|---|---|
 | `chats/*.json` | Whole-file rewrite | Lease. The holder pushes whole files with a version number. |
-| `side-tutor/<chatId>.json` | Whole file | Follows the chat's lease |
 | `notes/sessions/<chatId>.json` | Small JSON | Follows the chat's lease |
 | `graph/*.jsonl` | Mostly appends, with some rewrites (see below) | Appends as lines; rewrites as replayed operations |
 | `sources.json`, positions, `settings.json` | Read-modify-write maps | Last writer wins per key; device-specific keys excluded |
@@ -226,7 +225,7 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
       - Fixed overlays (notes drawer, tutor sheet, Settings) are still clipped to the area between the bars.
       - Risk: Safari may shrink or grow its toolbar when the page scrolls. Checked in a phone-sized Chromium only.
 - **Top bar:** one row at today's height. The title takes the free space (22 px text instead of 30) and truncates. Plan and Notes are icon-only, the extraction ring stays, and the phase word is hidden. The phase dividers in the lesson still show the phase.
-- **Side tutor** (teaching sessions only, as on the desktop):
+- **Side tutor** (teaching and practice sessions since the upstream 0.6.0 merge, as on the desktop):
   - A round bubble in the bottom-right corner, just above the message box, in the app's floating-control look (card background, thin border, grey icon; the owner found the bright version out of place). It shows a spinner while an answer is being written. On a phone the tutor starts closed and isn't focused on open (that would pop up the keyboard).
   - The bubble opens a **bottom sheet** covering about three quarters of the screen, with the lesson dimmed above it. It closes on a tap on the dimmed lesson or the – button. No dragging or resizing.
     - Only the lesson above the sheet is dimmed. Behind the sheet it is left as it is, so it shows through the sheet's see-through middle ("The window's look" in `docs/side-tutor.md`).
@@ -307,7 +306,7 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 - **Real-phone checks (owner, iPhone, iOS 27), two rounds.** Round 1: most of it worked; fixed after it were the keyboard pushing the app up, the session list's strips, Settings' Account row popping in and the missing dictation waveform, and Settings became the centred panel. Round 2 confirmed on the phone: Settings (centred panel, fades), the dictation waveform, the keyboard opening and closing, the session list's full-height colours (Safari tab and home-screen app), 120 fps scrolling, dragging on and out of an opened question (no jumping, no pull-back), tapping the folded question while the lesson moves, the home-screen app filling the screen to the bottom, and the model picker in a Safari tab. Every fix above was found on the owner's iPhone and is described in its own bullet.
 - **Testing these without an iPhone:** Playwright `devices["iPhone 13"]` (iOS Safari user agent, so the Safari-tab bleed turns on); real touch through CDP `Input.dispatchTouchEvent`; the keyboard by replacing `window.visualViewport` with a fake whose `height` you set and fire `resize` on (an init script); the home-screen app by overriding `navigator.standalone` (Chromium has no clock strip, so `env(safe-area-inset-top)` is 0 there and `standaloneGap` stays 0). Chromium never shows iOS's rubber band, its top blur, its swallowed taps or its keyboard pan, so anything touching those needs the owner's phone; a temporary on-screen readout (`?scrolldebug=1`, since removed) was the way to see what the phone did.
 
-**Not in this phase:** a tablet layout, the side tutor in practice sessions, offline use, and renaming notes in the drawer.
+**Not in this phase:** a tablet layout, the side tutor in practice sessions (added at the upstream 0.6.0 merge), offline use, and renaming notes in the drawer.
 
 ### Hosting — built in Phase 1
 
@@ -365,6 +364,8 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 
 ### After the merge (read this first)
 
+- **Upstream 0.6.0 is merged on its own branch, `claude/upstream-0.6.0`, and not shipped yet.** It raises the sync protocol to 2, so the server and the desktop app must be updated together. What changed in sync, the gate, the phone layout and the screens, and the update steps, are in `docs/upstream-0.6.0.md`. Where this file and that one differ, that one is newer.
+
 - **Merged:** `side-tutor` was fast-forwarded to the cloud sync branch at `a2d2b7e` with the owner's word ("merge"), and the Windows workflow published **release 0.5.6** from it. The desktop app now has everything in this file and in `docs/side-tutor.md`.
 - **Checked on Windows before it went out:** the Windows workflow was started by hand on the cloud sync branch (a dry run: no release) and passed, with the sync and cloud tests added to it. Before that the sync code had only run on Linux.
 - **Confirmed by the owner on the real PC and the real server:** after release 0.5.6 they updated the server, followed the pairing guide (an Artifact page) and reported "everything works!". They didn't say which screens they tried, so a take-over, the offline chip and the discard box may still be unseen on real devices. If they report a problem later, ask what the screen shows and what Settings → Cloud reads on the PC; never ask for a pairing code, a password or the server's address.
@@ -372,7 +373,7 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
   - a push to `side-tutor` publishes a desktop release (and builds the server image `:latest`). It still needs the owner's approval every time;
   - the owner's server follows `LH_CHANNEL=dev`, which is built from `claude/pensive-goldberg-7dty2m`. A change the server should get must be pushed there; a change both should get goes to both branches, kept at the same commit.
   - Moving the server to `latest`, so one branch feeds both, is the owner's call and hasn't been asked.
-- **The two sides must speak the same sync protocol version** (1 today). A change that raises it has to reach the server and the desktop together, or sync pauses until both are updated.
+- **The two sides must speak the same sync protocol version** (1 in release 0.5.6; **2 from the upstream 0.6.0 merge on**, see `docs/upstream-0.6.0.md`). A change that raises it has to reach the server and the desktop together, or sync pauses until both are updated.
 - **Restoring a first-sync backup** (`%APPDATA%\LearnHarness\backups` on the PC, `/data/backups` on the server) has no written guide. Putting old files back while paired would sync the old state everywhere: unpair first, and write the steps for the situation at hand.
 - **Not done:** Phase 7 (one automated test with two desktops and a server syncing everything together; a tidy of this file). The owner chose to merge without it.
 
@@ -503,7 +504,7 @@ Kept as written while the work was on its own branch; where it says "until the m
 - **Pictures in a session** are sent once, not with every send of the session.
 - **Clock differences:** the server corrects for a PC clock that is off before deciding which settings change is the latest.
 - **Imported-file records and graph positions** sync one item at a time, latest wins. An imported file's path stays the path on the device that imported it.
-- **Backup contents:** sessions, graph, side-tutor threads, helper jobs, settings, prompt overrides and the notes home-folder records.
+- **Backup contents:** sessions, graph, side-tutor threads, helper jobs, settings, prompt overrides and the notes home-folder records. (Since the upstream 0.6.0 merge: custom themes, the plugins' on/off record and the core plugins' data too, and no side-tutor threads, which are inside the sessions now.)
 - **While sync is paused** (versions differ, or unpaired) nothing is discarded; it resumes where it stopped.
 - **Device names and the wording of every message** ("Held by Desktop", the warning, the heads-up, the notice) are asked in Phase 6 with the screens. Phase 5 stores a name per device and the facts each message needs.
 
@@ -769,7 +770,7 @@ Kept in one place: `src/core/sync/screens.ts`. Change them only with the owner's
 6. **Since when the server can't be reached** (slice 3). `sync.offlineSince` in `GET /api/cloud` on a desktop: the time of the first failed attempt of the current offline spell, null otherwise (`wentOffline` in `client.ts`). The 30-second quiet rule counts from it. `sync.lastContactAt` is null until the app has reached the server once since it started, which is how "started with no connection" is told.
 7. **A signal when the sync state changes** (slice 3). `announceCloudState()` in `round.ts` sends `cloud-changed` on the live channel after a round, a check or a dismissed notice, when the state, the start of the offline spell or the number of notices differs from what was last said. Nothing is sent by an app that isn't paired.
 
-The sync protocol version stays at 1: nothing has been paired anywhere yet.
+The sync protocol version stayed at 1 for these changes: nothing had been paired anywhere yet. (It is 2 from the upstream 0.6.0 merge on.)
 
 #### Slice 1: what is built
 
@@ -876,7 +877,7 @@ One run between two built copies with the loop on, through the real screens, nob
 - **The dev server keeps server objects across code reloads.** After editing `src/server/obsidian-sync.ts`, restart `next dev`; otherwise routes call methods the old manager object doesn't have.
 - **`pkill -f` in a cloud session matches the shell that runs it** when the pattern is on its own command line. Put such commands in a script file.
 - **Colouring a border:** `app/globals.css` sets `* { border-color }` outside any layer, which beats Tailwind's `border-<colour>` utilities. Use a separate element with a background colour (see `Notice` in `obsidian-section.tsx`).
-- **A side tutor thread for screenshots:** write `<data>/side-tutor/<chatId>.json` (`{ "version": 1, "chatId": …, "entries": [{ "id", "question", "answer", "status": "done", "askedAt" }] }`) before loading the page. On a computer, `localStorage["lh:side-tutor:pos"]` (`{ left, top }`) puts the window over the lesson's text, which is what shows through its middle.
+- **A side tutor thread for screenshots** (before the upstream 0.6.0 merge only; now put threads in the chat record's `sideChats`): write `<data>/side-tutor/<chatId>.json` (`{ "version": 1, "chatId": …, "entries": [{ "id", "question", "answer", "status": "done", "askedAt" }] }`) before loading the page. On a computer, `localStorage["lh:side-tutor:pos"]` (`{ left, top }`) puts the window over the lesson's text, which is what shows through its middle.
 - **Dictation in a browser run:** launch Chromium with `--use-fake-device-for-media-stream --use-fake-ui-for-media-stream`, grant the `microphone` permission, answer `/api/stt/token` with `{ "token": "…" }` through `context.route`, and replace `window.WebSocket` for Deepgram's address in an init script (it opens; on the `CloseStream` message it sends one `Results` message with `is_final` and closes).
 - **Browser runs of the notes drawer:**
   - A drag starts only after the pointer has moved a little (10 px after the hold on a phone, 5 px with the mouse), so the dragged row's centre isn't under the pointer. To rest the line on something, measure the row's centre and move the pointer by the difference.

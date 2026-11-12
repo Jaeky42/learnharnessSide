@@ -1,6 +1,6 @@
 # Side Tutor fork: features, design decisions, code map
 
-Branch `side-tutor`, based on upstream amosblomqvist/learnharness @ da08cb5 (v0.5.0). The fork adds three things: the side tutor, the notes drawer, and a separately installed Windows app that updates itself from this fork's releases.
+Branch `side-tutor`, based on upstream amosblomqvist/learnharness v0.6.0 (merged with `git merge`; the owner's choices at that merge are in `docs/upstream-0.6.0.md`). The fork adds three things: the side tutor, the notes drawer, and a separately installed Windows app that updates itself from this fork's releases.
 
 ## Separate Windows app
 
@@ -28,7 +28,8 @@ Branch `side-tutor`, based on upstream amosblomqvist/learnharness @ da08cb5 (v0.
 
 ## Side tutor
 
-- A floating window over **teaching** sessions (not practice) for quick questions. Esc shrinks it.
+- A floating window over a session, **teaching and practice** (practice since the 0.6.0 merge, owner's ask), for quick questions. Esc shrinks it.
+- **Since the 0.6.0 merge it has no engine of its own.** The window, the bubble and the phone sheet are the fork's; what is asked in them are upstream's side conversations. See "The Tutor on upstream's side conversations" below.
 - **Moving and resizing on a computer** (owner's ask; it was the browser's own grip in the bottom right corner):
   - **The top bar moves the window.** Nothing at the top resizes it: not the top edge, not the top corners, not the sides beside the top bar.
   - **The left side, the right side, the bottom side and the two bottom corners resize it.** A side changes the width, the bottom the height, a corner both. The top never moves in a resize; dragging the left side keeps the right edge where it was.
@@ -53,6 +54,7 @@ Branch `side-tutor`, based on upstream amosblomqvist/learnharness @ da08cb5 (v0.
 - **The window's look** (owner's asks, tuned from screenshots):
   - **The middle**, where the conversation is, is closer to black and more see-through than the rest: black at 60%, over the window's blur of the lesson behind it (`BODY_BG` in `components/side-tutor.tsx`). The bars (the top bar, the message line, the typing row) keep the app's background at 95% (`BAR_BG`). The window has no background of its own; one behind the middle would close it up.
     - The owner's pick from a strip of five shades: 70% was "a little too black".
+    - **On a light theme** (upstream 0.6.0's themes) black is unreadable over a light lesson. For now a light theme gets the theme's background at 62% with 10% of its text colour mixed in, and dark themes keep black at 60%. The light look waits for the owner's pick (`docs/upstream-0.6.0.md`, "Open, waiting for the owner").
     - On a phone the sheet paints only what no part covers, in the bars' colour: the strip around its handle and the home-bar strip (`app/phone.css`).
     - **On a phone the dim covers only the lesson above the sheet** (it used to cover the whole screen). Behind the sheet the lesson is left as it is, so it shows through the middle as on a computer; dimmed first, it showed through as plain black, and the owner asked why the phone wasn't see-through. The dim ends one corner radius below the sheet's top, so the lesson at the rounded corners is dimmed too. A tap on the dimmed lesson still closes the sheet.
   - **Dictate and Send are squares as tall as the one-line typing box** (they were 36 px beside a 42 px box). So are Stop and the waveform while it listens, and the button that stops an answer.
@@ -60,24 +62,41 @@ Branch `side-tutor`, based on upstream amosblomqvist/learnharness @ da08cb5 (v0.
     - On a phone every text box is 16 px whatever the reading size (`app/phone.css`), so the sheet sets `--lh-tutor-text: 16px` and the row is worked out from that.
   - **The hint "Ask a follow-up…" is a little smaller than typed text**: seven eighths of it (14 px at the default). It keeps the typed text's line height, so it sits where the typed words will and the box doesn't change height at the first letter. Typed text is unchanged (and must stay 16 px on a phone, or iPhone Safari zooms in).
 - **Speaking to the tutor** (owner's ask): a Dictate button (a microphone) sits right of the typing box, before Send. While it listens, a small live waveform and a red Stop take its place. The words land in the tutor's typing box when the run ends.
-  - It borrows the page's one dictation run (`components/dictation.tsx`): the same microphone, Deepgram key, language and waveform as the lesson's Dictate. The button claims the run's transcript, then starts the run (`components/side-tutor-dictation-state.ts`); `dictation.tsx` sends the transcript to the claimant and drops the claim whenever a run ends, so a claim never outlives its run.
-  - While the tutor's run is live, the lesson's own Dictate shows no run, and the lesson's message box doesn't take the words or the focus.
+  - It borrows the page's one recorder (`components/dictation.tsx`): the same microphone, Deepgram key, language and waveform as the lesson's Dictate. Since the 0.6.0 merge it uses upstream's own hand-over: the button starts a run for its own destination (`toggleFor` with `SIDE_TUTOR_DICTATION_ID`), and the recorder delivers the words there. The fork's earlier claim hooks and `side-tutor-dictation-state.ts` are gone.
+  - While the tutor's run is live, the lesson's own Dictate shows no run and is greyed (upstream's rule for a recorder that is busy elsewhere), and the lesson's message box doesn't take the words or the focus.
+  - The button shows only an error of its own run, as upstream's views do.
   - Send while still listening ends the run first, then asks with the spoken words. Esc cancels the run (the words are dropped), as in the lesson; a second Esc minimizes. Minimizing ends the run and keeps the words.
   - The button is off while the lesson itself is dictating. Without a Deepgram key it says so, and a click opens Settings → Keys, as the lesson's Dictate does.
-- A second agent answers, using the session's model and credentials at **medium** thinking (`SIDE_TUTOR_THINKING` in `src/server/side-tutor.ts`).
-- It sees a fresh lesson snapshot on every question: transcript, plan, phase, answers already revealed, and the open question **without** its answer key. It's told not to reveal open-question answers.
-- **Isolation:** the thread is stored in `<data>/side-tutor/<chatId>.json`, never in the chat record. The main teacher's context, compaction and graph extraction never see it. Its cost isn't added to the session meter. Deleting a session deletes its thread.
+- **The Tutor on upstream's side conversations** (owner's decisions at the 0.6.0 merge; before it, a second agent of the fork's own answered and kept its thread outside the chat record):
+  - **What changed with upstream's behaviour:**
+    - The main teacher receives every exchange with its next turn, and summaries include them. The teacher's prompt has upstream's paragraph about them (`shared/35-side-conversations.md`).
+    - The cost of side answers is added to the session's meter.
+    - The helper reads the lesson since the last summary, the open question without its answer key (plugin questions too), and what the learner has typed but not sent in the answer box. It no longer gets the plan, the phase, or the lesson from before a summary.
+    - It follows the prompt texts edited in Settings and answers in upstream's short style.
+    - It runs at **the session's thinking level** (it was fixed at medium). Its model is upstream's setting (Settings → Agent, the side-question role), per device.
+    - The conversations are stored inside the chat record (`sideChats`), so they travel with the session between devices and into backups.
+    - **No Clear:** nothing can be deleted from a side conversation. The trash button is gone.
+    - An answer still being written carries on after minimizing or a reload, and is there afterwards.
+  - **One scroll.** Upstream keeps one conversation per lesson step (from one learner turn to the next). The window shows all of them in lesson order, each under a divider: **the step's first words**, as plain text (no formatting marks; a formula ends the text with "…"), cut to one line. No mark on the current step. A step with no prose gets a plain line.
+  - **What is typed is about the step the lesson is on.** With a highlighted passage attached, about that passage's step; after that answer, the current step again.
+  - **Highlight, then Ask** (upstream's toolbar over selected lesson text): the window opens (the bottom sheet on a phone) with the passage waiting above the typing box; its ✕ drops it. Once sent, the passage sits above the question, and a click on it shows that place in the lesson (on a phone the sheet closes first). A passage over 4,000 characters: upstream's button reads "Shorten selection" and does nothing.
+  - **Stopped and failed:** a stopped answer keeps its words and says "Stopped." A failed one shows upstream's reason in the theme's error colour, then a link, "Retry". A refusal before anything was saved (no model set up, for example) shows in the line above the typing box, and the question comes back into the box.
+  - **One answer at a time:** while one is being written, Send is Stop.
+  - **Before the teacher has said anything** the window shows its empty sentence and the typing box is off.
+  - **The hint is always "Ask a follow-up…".** Upstream's other hints aren't used.
+  - **Not shown:** upstream's own card, its pinned column, the "?" markers under each step and Ctrl+J. Their components stay in upstream's files, unused, so later releases merge cleanly. Cite, upstream's other toolbar button, is kept.
+  - **The old conversation files** (`<data>/side-tutor/`) are deleted once, at the first start of the updated app, on the PC and on the server (`src/server/side-tutor-cleanup.ts`, called from `instrumentation.ts`). The owner chose deleting over converting. Copies inside a first-sync backup aren't touched.
+  - **How:** the lesson screen's one `useSideThread` (upstream's hook, unchanged) is handed to the window. The hook holds one open conversation; the window keeps it on the step being asked about, reads the others from the hook's list, and reads once at load which answers are still being written. Nothing in upstream's engine is changed.
+  - **Wording added while building, for the owner to review:** "Remove the passage" (the ✕'s tooltip). "Show in the lesson" on a quoted passage is upstream's.
 - **Code:**
-  - `src/core/side-tutor.ts`
-  - `src/store/side-tutor.ts`
-  - `src/agent/subagents/side-tutor.ts`
-  - `src/server/side-tutor.ts`
-  - `app/api/chats/[id]/side-tutor/route.ts`
-  - `components/side-tutor.tsx`
+  - `components/side-tutor.tsx` (the window, the bubble, the sheet, and the conversations in them)
+  - `src/core/tutor-view.ts` (the order of the conversations, the divider's words)
   - `components/side-tutor-window.ts` (which edges resize the window, and how far)
-  - `components/side-tutor-dictation.tsx` and `side-tutor-dictation-state.ts` (the Dictate button; three small hooks in `components/dictation.tsx` and the lesson-side checks in `components/chat.tsx`)
-- **Tests:** `tests/side-tutor.test.ts`; the window's words and look, its Dictate button, moving and resizing, and the bubble's place: `tests/side-tutor-ui.test.tsx`; the resize rules: `tests/side-tutor-window.test.ts`; the phone sheet's background and text size: `tests/phone-layout.test.ts`.
-- **Known limit:** a teacher reply that's still streaming isn't visible until it finishes.
+  - `components/side-tutor-dictation.tsx` (the Dictate button)
+  - `components/chat.tsx`: the mount, "Ask" opening the window, and where upstream's card and markers are left out
+  - upstream's, unchanged: `components/use-side-thread.ts`, `src/core/side-chat.ts`, `src/server/side-chat.ts`, `src/agent/side-chat.ts`, `app/api/chats/[id]/side-chats/**`
+- **Tests:** the window's words and look, the conversations (through upstream's real hook, with a scripted server), its Dictate button, moving and resizing, and the bubble's place: `tests/side-tutor-ui.test.tsx`; the order, the divider's words and the one-time cleanup: `tests/tutor-view.test.ts`; the resize rules: `tests/side-tutor-window.test.ts`; the phone sheet's background and text size: `tests/phone-layout.test.ts`. Upstream's own: `tests/side-chat*.test.ts`, `tests/use-side-thread.test.ts`.
+- **Known limit:** when "Ask" is pressed on a passage of another step while an answer is still being written, that answer finishes on the server and shows a spinner until it lands; its words don't stream in meanwhile.
 - **On a session another device holds** (cloud sync, a paired app only): the window closes to a greyed bubble that can't be pressed, at the lesson's bottom right. See "Slice 2" in `docs/cloud-sync.md`.
 - **On a phone** (browser narrower than 640 px): a bubble above the message box opens the tutor as a bottom sheet. See "Phone layouts" in `docs/cloud-sync.md`.
 
@@ -136,14 +155,14 @@ The learner's own notes beside the lesson, stored as Markdown in their Obsidian 
   - **after 20 seconds**: a message with **Undo** (a split, a merge, a selection moved to a new note), because that button is the only way to undo;
   - its ✕ closes any of them at once.
   - `notesMessageMs` in `components/notes/notes-drawer.tsx`.
-- **Editor:** CodeMirror for editing (sections fold while typing), plus a Read view with formatted math, folding, clickable links and images.
+- **Editor:** CodeMirror for editing (sections fold while typing), plus a Read view with formatted math, folding, clickable links and images. The editor follows the chosen theme's light or dark mode live (`editorTheme(mode)`), and the drawer's colours are theme tokens.
 - **Where it appears:** both **teaching and practice** sessions.
 - **On a phone:** the drawer fills the screen and shows the list, then the note. Rows open their menu on press and hold; holding and then moving the finger drags the row into a folder. See "Phone layouts" in `docs/cloud-sync.md`.
 - **On the cloud server:** the vault is connected in Settings → Obsidian instead of by a folder path, and the drawer says when the notes aren't syncing with Obsidian. See "Obsidian vault on the VPS" in `docs/cloud-sync.md`. The desktop app's drawer is unchanged.
 - **Extras:**
   - Math in Read view.
   - Pasted images go to Obsidian's `attachmentFolderPath`, or `LearnHarness/attachments` when that isn't set.
-  - Shortcuts: Ctrl+Shift+N opens and closes the drawer; Ctrl+Shift+E jumps into the editor.
+  - Shortcut: Ctrl+Shift+N opens the drawer with the cursor in the open note's editor (the note switches to its edit view), and closes it again. With no note open the cursor lands in the search box. The Notes chip opens the drawer without moving the cursor. Ctrl+Shift+E used to jump into the editor; since the 0.6.0 merge it is upstream's Drawing Pad shortcut (owner's decision).
   - **Vault offline:** edits are held in `<data>/notes/pending/` and written when the vault is back. A note changed meanwhile isn't overwritten; the offline version becomes "(offline copy)".
 - **Linked from:** the drawer lists the notes that link to the open note.
 - **Deleting a session** keeps its notes and drops only its home-folder record.
@@ -185,9 +204,9 @@ The learner's own notes beside the lesson, stored as Markdown in their Obsidian 
   - `row-drag-dom.ts`: the movement (measures the rows, moves them frame by frame, settles, and slides every row to its sorted place after the move);
   - `note-editor.tsx`: CodeMirror;
   - `note-read-view.tsx`;
-  - `notes-dialogs.tsx`: Move to, Split, Delete, name prompt;
+  - `notes-dialogs.tsx`: Move to, Split, Delete, name prompt, built on upstream's HostDialog since the 0.6.0 merge (same look, words and buttons); the row menus are a `PointMenu` on upstream's interaction layers (`notes-tree.tsx`);
   - `notes-api.ts`.
-- **Wiring:** `components/chat.tsx` (Notes chip and drawer mount), `src/core/keyboard.ts` (`toggle-notes`, `focus-notes`), and `src/server/chats.ts` (session deletion hook).
+- **Wiring:** `components/chat.tsx` (Notes chip and drawer mount; `landInEditor` when the shortcut opened it), `src/core/keyboard.ts` (`toggle-notes`), and `src/server/chats.ts` (session deletion hook).
 - **Tests:** `tests/notes-core.test.ts`, `notes-store.test.ts`, `notes-privacy.test.ts`, `notes-ui.test.tsx`; the dragging rules: `tests/notes-row-drag.test.ts`; the phone's hold-then-move touch rules: `tests/phone-hold-drag.test.ts`.
 
 ## Claude Code: Fable in the model list
