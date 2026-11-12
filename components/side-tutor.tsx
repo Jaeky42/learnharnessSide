@@ -172,7 +172,7 @@ function clampPos(pos: Pos, width: number, height = 64): Pos {
 	};
 }
 
-export function SideTutor({ chatId, messages, side, dictation, held = false, openRequest = 0 }: {
+export function SideTutor({ chatId, messages, side, dictation, held = false, openRequest = 0, above }: {
 	chatId: string;
 	/** The lesson's native record messages: the order of the steps, and each step's first words. */
 	messages: readonly LhMessage[];
@@ -187,6 +187,10 @@ export function SideTutor({ chatId, messages, side, dictation, held = false, ope
 	/** Counts up each time the lesson's highlight toolbar asks about a passage:
 	 *  the window opens with that passage waiting above the typing box. */
 	openRequest?: number;
+	/** The z-index of a plugin's surface that covers the lesson (the Drawing
+	 *  Pad), when one is open. The tutor then stays above it (owner's ask):
+	 *  the window, and the bubble at the lesson's bottom right. */
+	above?: number;
 }) {
 	const [mounted, setMounted] = useState(false);
 	// Minimized whenever a session opens (owner's ask): the open state belongs
@@ -600,15 +604,21 @@ export function SideTutor({ chatId, messages, side, dictation, held = false, ope
 	// question it sits under the top bar, as far right as here.
 	// On a held session there is no question bar to sit above (the dock is
 	// hidden): the greyed bubble keeps to the lesson's bottom right.
-	const onDock = !phone && !held && anchor.place === "above-dock" && anchor.dock !== null;
+	// So does the bubble while a plugin's surface (the Drawing Pad) covers
+	// the lesson and the dock with it: there it floats above the surface.
+	const overSurface = !phone && above !== undefined;
+	// One above the surface. A menu opened from the surface has the next rank
+	// and comes later in the page, so it still covers the tutor.
+	const raised = overSurface ? { zIndex: above + 1 } : {};
+	const onDock = !phone && !held && !overSurface && anchor.place === "above-dock" && anchor.dock !== null;
 	const bubbleStyle = (phone
 		? anchor.place === "above-dock"
 			? { top: anchor.top }
 			: {}
 		: onDock
 			? { right: BUBBLE_EDGE_GAP, bottom: `calc(100% + ${BUBBLE_BAR_GAP}px)`, WebkitAppRegion: "no-drag" }
-			: held
-				? { right: anchor.right + BUBBLE_EDGE_GAP, bottom: BUBBLE_BAR_GAP, WebkitAppRegion: "no-drag" }
+			: held || overSurface
+				? { right: anchor.right + BUBBLE_EDGE_GAP, bottom: BUBBLE_BAR_GAP, WebkitAppRegion: "no-drag", ...raised }
 				: { right: anchor.right + BUBBLE_EDGE_GAP, top: BUBBLE_TOP, WebkitAppRegion: "no-drag" }) as React.CSSProperties;
 	// The dock lets clicks through to the lesson; the bubble takes its own.
 	const bubblePosition = onDock ? "absolute" : "fixed";
@@ -665,7 +675,7 @@ export function SideTutor({ chatId, messages, side, dictation, held = false, ope
 		    (the sheet is placed by app/phone.css). */}
 		<div
 			data-testid="side-tutor-frame"
-			style={(phone ? {} : { left: pos.left, top: pos.top, ...(size ? { width: size.width, height: size.height } : {}), WebkitAppRegion: "no-drag" }) as React.CSSProperties}
+			style={(phone ? {} : { left: pos.left, top: pos.top, ...(size ? { width: size.width, height: size.height } : {}), WebkitAppRegion: "no-drag", ...raised }) as React.CSSProperties}
 			className={phone ? "contents" : cn("fixed z-30", WINDOW_SIZE, FRAME_MAX_HEIGHT)}
 		>
 		<div

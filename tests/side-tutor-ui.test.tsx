@@ -160,16 +160,16 @@ async function mountTutor(dictation?: FakeDictation, lesson: LhMessage[] = LESSO
 	const { SideTutor } = await import("../components/side-tutor.tsx");
 	const { useSideThread } = await import("../components/use-side-thread.ts");
 	const { ServerEventsProvider } = await import("../components/server-events.tsx");
-	function Lesson({ dictation, held, openRequest }: { dictation?: FakeDictation; held?: boolean; openRequest?: number }) {
+	function Lesson({ dictation, held, openRequest, above }: { dictation?: FakeDictation; held?: boolean; openRequest?: number; above?: number }) {
 		side = useSideThread("chat_1", lesson);
-		return <SideTutor chatId="chat_1" messages={lesson} side={side} dictation={dictation} held={held} openRequest={openRequest} />;
+		return <SideTutor chatId="chat_1" messages={lesson} side={side} dictation={dictation} held={held} openRequest={openRequest} above={above} />;
 	}
 	const host = document.createElement("div");
 	document.body.appendChild(host);
 	const root = createRoot(host);
 	roots.push({ root, host });
 	const settle = () => act(async () => new Promise((r) => setTimeout(r, 20)));
-	const render = async (d?: FakeDictation, more: { held?: boolean; openRequest?: number } = {}) => {
+	const render = async (d?: FakeDictation, more: { held?: boolean; openRequest?: number; above?: number } = {}) => {
 		await act(async () => root.render(<ServerEventsProvider connect={() => ({ close() {}, onOpen() {}, onEvent() {} })}><Lesson dictation={d} {...more} /></ServerEventsProvider>));
 		await settle();
 	};
@@ -647,6 +647,37 @@ describe("on a session another device holds (cloud sync)", () => {
 		// Taken over: the tutor is as the learner left it.
 		await host.rerender(undefined);
 		assert.ok(document.querySelector("[data-testid='side-tutor']"));
+	});
+});
+
+describe("while a plugin's surface covers the lesson (the Drawing Pad)", () => {
+	const z = (el: Element) => /(?:^|;)\s*z-index:\s*(\d+)/.exec(styleOf(el as HTMLElement))?.[1];
+
+	it("the window stays above it, and goes back to its own layer when the surface closes", async () => {
+		const host = await mountTutor();
+		const frame = host.querySelector("[data-testid='side-tutor-frame']") as HTMLElement;
+		assert.equal(z(frame), undefined, "no surface: the window's own layer");
+		await host.rerender(undefined, { above: 104 });
+		assert.ok(document.querySelector("[data-testid='side-tutor']"), "still open");
+		assert.equal(z(document.querySelector("[data-testid='side-tutor-frame']")!), "105", "one above the surface");
+		await host.rerender(undefined);
+		assert.equal(z(document.querySelector("[data-testid='side-tutor-frame']")!), undefined);
+	});
+
+	it("the bubble leaves the covered dock for the lesson's bottom right, above the surface, and still opens the window", async () => {
+		const host = await mountTutor(undefined, LESSON, { opened: false });
+		await host.rerender(undefined, { above: 104 });
+		const bubble = document.querySelector("[data-testid='side-tutor-toggle']") as HTMLElement;
+		assert.ok(bubble);
+		const style = styleOf(bubble);
+		assert.equal(z(bubble), "105");
+		assert.match(style, /bottom:\s*20px/, "20 px up, as on a held session");
+		assert.match(style, /right:\s*\d+px/);
+		assert.match(bubble.getAttribute("class") ?? "", /(?:^|\s)fixed(?:\s|$)/, "not inside the dock");
+		assert.equal(bubble.hasAttribute("data-held"), false, "it can be pressed");
+		await act(async () => bubble.click());
+		assert.ok(document.querySelector("[data-testid='side-tutor']"));
+		assert.equal(z(document.querySelector("[data-testid='side-tutor-frame']")!), "105");
 	});
 });
 

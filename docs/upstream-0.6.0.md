@@ -135,6 +135,22 @@ Five things the plan had left open, or that came out differently than the plan s
 
 - **The Tutor starts minimized** on a computer whenever a session opens, and **comes out of its bubble with a morph** when opened and closed. Computer only; the phone's animation is not to be changed yet. Details in `docs/side-tutor.md`.
 
+- **The Tutor stays above the Drawing Pad**, window and bubble. Details in `docs/side-tutor.md`.
+
+### The Drawing Pad, as tried on a computer (nothing of upstream's changed)
+
+- **Draw** sits in the lesson's top bar right of Notes and the ring. With too little room (the notes drawer open, a narrow window, a long title) it moves into upstream's ⋯ menu.
+- The pad covers the lesson under the top bar. **An open question is already on the sheet**, with its options, as a read-only picture to draw on or around; the answer is picked after closing the pad. With the notes drawer open the pad narrows beside it.
+- Not tried: sending a drawing to the teacher (it needs a real model).
+
+### Asked about, not started: Apple Pencil on an iPad (owner: "dont start working on it yet")
+
+- The owner wants Notability-like Pencil use in the pad on an iPad: squeeze switches to the eraser, which removes whole strokes.
+- **Already upstream's:** pen input with pressure, fingers ignored, and an eraser that removes every stroke it touches (undo restores them).
+- **Not possible in a browser:** squeeze. iPadOS gives it to native apps only (UIPencilInteraction); Safari sends a page no event for it. Looked up, not tried on a device.
+- **Unsure until tried on the owner's iPad:** how many Pencil samples Safari hands a page (smoothness), hover and barrel roll. LearnHarness has never been run on an iPad; it gets the computer layout there.
+- **The two routes told to the owner:** stay a website and pick a stand-in gesture (a change to upstream's plugin), or a small native iPad app around the server's site that passes squeeze on (a separate project that needs a Mac and Xcode).
+
 ## How it was checked
 
 - **Tests, typecheck, lint.** In the development sandbox every test passes except the four that fail there on untouched upstream too ("Development notes" below).

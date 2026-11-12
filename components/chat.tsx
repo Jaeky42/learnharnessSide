@@ -7,7 +7,7 @@ import { usePlugins } from "./plugins";
 import { PluginSubmissionRunner, SubmissionModelEpoch, type SubmissionAttempt } from "./plugin-submission-runner";
 import { submissionImages, type BuiltinSubmissionCapture, type PrepareBuiltinSubmission, type PrepareThinkingSubmission, type PreparePluginQuestionSubmission, type PreparePluginProblemSubmission } from "./plugin-submission-adapters";
 import { SubmittedImages } from "./submitted-images";
-import { usePageSurfaceBoundary, SurfaceRegion } from "./plugin-surfaces";
+import { usePageSurfaceBoundary, SurfaceRegion, useSurfaceChromeStyle } from "./plugin-surfaces";
 import { findSurfaceBoundary } from "./plugin-surface-targets";
 import { scheduleOpeningSubmission } from "./plugin-submission-opening";
 import { activeProblemOccurrenceOf, buildAnswer, toClientQuestion, type PluginSubmission, type PluginSubmissionTarget, type QuestionData } from "@/src/core";
@@ -325,6 +325,8 @@ export function Chat({
 	const sessionFindScopeRef = useRef<HTMLDivElement | null>(null);
 	const pathname = usePathname();
 	const surfaceTarget = usePageSurfaceBoundary({ active: pathname === `/chat/${encodeURIComponent(chatId)}`, viewKey: chatId, bodyRef: sessionFindScopeRef });
+	// Fork: the Tutor stays above a plugin's surface over the lesson (the Drawing Pad).
+	const surfaceRank = useSurfaceChromeStyle(surfaceTarget)?.zIndex;
 	const { manager: pluginManager } = usePlugins();
 	const [, submissionChanged] = useState(0);
 	const [preparationError, setPreparationError] = useState<string>();
@@ -1635,7 +1637,7 @@ export function Chat({
 			    the fork's window over upstream's side conversations. It gets the
 			    page's shared recorder, not the main-input view: its Dictate button
 			    records to its own destination (toggleFor). */}
-			<SideTutor chatId={chatId} messages={nativeMessages} side={sideThread} dictation={recording} held={heldElsewhere} openRequest={tutorOpenRequest} />
+			<SideTutor chatId={chatId} messages={nativeMessages} side={sideThread} dictation={recording} held={heldElsewhere} openRequest={tutorOpenRequest} above={typeof surfaceRank === "number" ? surfaceRank : undefined} />
 			<div className="flex min-w-0 flex-1 flex-col">
 				{/* The top bar is its own block (owner, top-fade round 4): in flow
 				    above the scroller on the plain page background — no gradient. Its
