@@ -100,7 +100,12 @@ export function createSyncLoop(deps: SyncLoopDeps): SyncLoop {
 		if (inFlight) { again = true; return; }
 		// While the server can't be reached, the retries keep their own slow pace.
 		if (failures > 0) return;
-		if (event.type === "turn-started") schedule(0);
+		// A side question (the Tutor, upstream 0.6.0) announces `side-chats-changed`
+		// when its answer starts (the question is in the record by then) and when it
+		// ends. Both go at once: the start tells the server this desktop is busy,
+		// as a reply's start does, and the question isn't left unsent while the
+		// answer is being written.
+		if (event.type === "turn-started" || event.type === "side-chats-changed") schedule(0);
 		else if (CHANGES.has(event.type)) schedule(CHANGE_MS);
 	}
 

@@ -20,6 +20,7 @@ import { PathInput } from "@/components/path-input";
 import { AttachFilesButton } from "@/components/attach-files-button";
 import { SessionStarter } from "@/components/start-session";
 import type { TurnUsage } from "@/src/core";
+import { enterSends } from "@/components/phone/enter-key";
 
 /**
  * Home — the knowledge graph is the main view, full-bleed edge to edge
@@ -270,7 +271,8 @@ export function Home({
 								dictation.cancel();
 								return;
 							}
-							if (e.key === "Enter" && !e.shiftKey) {
+							// Side-tutor fork: the phone's Enter rule (components/phone/enter-key.ts).
+							if (enterSends(e)) {
 								e.preventDefault();
 								void start();
 							}

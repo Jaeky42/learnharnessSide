@@ -113,6 +113,19 @@ describe("a paired desktop's rhythm", () => {
 		assert.deepEqual(h.rounds, [0, 4]);
 	});
 
+	it("at once when a Tutor answer starts or ends (a side question, upstream 0.6.0)", async () => {
+		const h = harness();
+		h.loop.start();
+		await h.pass(4_000);
+		h.emit("side-chats-changed");
+		await h.pass(0);
+		assert.deepEqual(h.rounds, [0, 4], "the question goes up and the server hears this desktop is busy");
+		await h.pass(3_000);
+		h.emit("side-chats-changed");
+		await h.pass(0);
+		assert.deepEqual(h.rounds, [0, 4, 7], "the answer goes up when it ends");
+	});
+
 	it("every kind of change counts: a helper, a folder, an extraction", async () => {
 		for (const type of ["jobs-changed", "sources-changed", "activity-changed"] as const) {
 			const h = harness();

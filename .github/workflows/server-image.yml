@@ -56,7 +56,25 @@ jobs:
           npm install -g --prefix "$RUNNER_TEMP/ob" --no-audit --no-fund --allow-scripts=better-sqlite3 "obsidian-headless@$version"
           test "$("$RUNNER_TEMP/ob/bin/ob" --version)" = "$version"
           echo "LH_TEST_OB_CLI=$RUNNER_TEMP/ob/lib/node_modules/obsidian-headless/cli.js" >> "$GITHUB_ENV"
-      - run: npm test
+      # Upstream's plugin SDK type tests (tests/plugin-*-types.test.ts) each run
+      # the TypeScript compiler with a 30-second limit. Beside the fork's larger
+      # suite on this runner one of them ran out of time, twice in a row. They
+      # run on their own first, one at a time; nothing is skipped.
+      - name: Plugin SDK type tests, on their own
+        run: npx tsx --test --test-concurrency=1 tests/plugin-*types.test.ts
+        env:
+          NODE_ENV: test
+      - name: Every other test
+        run: |
+          shopt -s nullglob
+          files=()
+          for f in tests/*.test.ts tests/*.test.tsx; do
+            case "$f" in tests/plugin-*types.test.ts) ;; *) files+=("$f") ;; esac
+          done
+          echo "${#files[@]} test files"
+          npx tsx --test "${files[@]}"
+        env:
+          NODE_ENV: test
       - run: npm run lint
 
   image:
