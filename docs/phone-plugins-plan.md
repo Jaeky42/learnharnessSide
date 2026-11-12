@@ -1,6 +1,6 @@
 # Plan: Flashcards and Rich code blocks on a phone, and Flashcards sync
 
-**Status: approved by the owner ("Approved, build it"). Building is under way on `claude/upstream-0.6.0`; nothing is shipped.** Per `AGENTS.md`, building is mechanical: anything this plan leaves open goes back to the owner. Change a decision here only with the owner's approval.
+**Status: approved by the owner ("Approved, build it"). Built on `claude/upstream-0.6.0` (packages A–E; "Where they stand" under "Work packages"); not shipped:** not pushed to `side-tutor` or to the server's branch, both workflow dry runs still to run, the owner's iPhone hasn't seen it, and a second review (of the sync part) is under way. Per `AGENTS.md`, building is mechanical: anything this plan leaves open goes back to the owner. Change a decision here only with the owner's approval. What was built is recorded in `docs/cloud-sync.md`; see "What happened after approval" at the end.
 
 ## What the owner asked
 
@@ -98,6 +98,12 @@ Both plugins were un-hidden in a scratch copy and run at iPhone size with no lay
 
 One worker per package, each owning its files, each in its own worktree. Workers never decide wording or behaviour: anything undecided comes back under "Open questions" and goes to the owner.
 
+**Where they stand:**
+
+- **A–E: done**, built on `claude/upstream-0.6.0`.
+- **F: done for the phone part**: a fresh reviewer read the phone diff, and its findings are fixed. A second review, of the sync part, is under way.
+- **G:** the browser run at iPhone size, the computer comparison and the run between two built copies are done, and so are the docs (`docs/cloud-sync.md`, `docs/upstream-0.6.0.md`, `CLAUDE.md`). Still to come: both workflow dry runs and the "what to try on your iPhone" page.
+
 | # | Package | Owns | After |
 |---|---|---|---|
 | A | **The gate and Settings.** Phone-ready plugins listed in `phone-plugins.ts`; only Flashcards' session-list entry shown; `PhonePluginPage` lets phone-ready pages through; the Settings rows and the greyed switches of decision 3. `tests/phone-plugins-ui.test.tsx` rewritten to the new rule, every other plugin still hidden. | `components/phone/phone-plugins.ts`, `phone-plugin-page.tsx`, the plugin block of `app/phone.css`, the phone lines of `components/settings/settings-dialog.tsx` and of the plugins section | — |
@@ -137,3 +143,27 @@ One worker per package, each owning its files, each in its own worktree. Workers
 - Syncing any other plugin's data, or which plugins are switched on.
 - The iPhone status bar on light themes (still open from the 0.6.0 merge).
 - The fork's own coding questions plugin: `docs/own-coding-plugin-plan.md`.
+
+## What happened after approval
+
+The plan above is kept as approved. Where the building went beyond its letter, or a question came back, it is recorded here and in the built docs.
+
+### The owner's later answers
+
+Three answers given after the plan was approved:
+
+- **The full-screen viewer opens a drawing fitted**, as the lesson's other diagrams ("Fitted, as others do"). Nothing in the viewer changed for it.
+- **The spinner shows from the first paint** while Rich code blocks is on ("Spinner from the start"). A kind switched off in the plugin's settings spins for the first moments, then turns into plain code once the plugin has started.
+- **The knowledge picker hides its Props and Created columns on a phone** ("Hide both on a phone").
+
+### Reviews, and what the runs found
+
+- **Package F, the phone part:** a fresh reviewer read the phone diff and found two real bugs (the rename box stuck open after a hold on, or a slide off, its ✕; a hold inside the rename box opening the menu and saving) and smaller items. All are fixed.
+- **The sync part:** a second review is under way.
+- **Found in the run between two built copies:** a review the server made while it still ran in the zone it was started with kept that zone's due date there, while the PC worked it out in its own zone. Now each side works every schedule out again when the zone changes (a ruling for the owner's review; "Flashcards sync" in `docs/cloud-sync.md`).
+
+### Where the built facts live
+
+- **The phone:** `docs/cloud-sync.md`, "Phone layouts" → "Plugins on a phone": what was built for each decision, the code, the tests, what was checked, what only the iPhone can show, and the list built beyond this plan's letter for the owner to review.
+- **Flashcards sync:** `docs/cloud-sync.md`, "Flashcards sync": the decisions S1–S6, the rulings made while building (for the owner to review), the items, the replay, the wiring, protocol 3, known limits, tests and the run between two copies.
+- **What changed against the 0.6.0 merge** (decisions 10 and 17, "Not in this merge", the upstream files edited, the update steps for protocol 3): `docs/upstream-0.6.0.md`.

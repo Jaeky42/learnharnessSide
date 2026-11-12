@@ -4,7 +4,9 @@ The fork is now based on upstream amosblomqvist/learnharness **v0.6.0** (tag com
 
 Upstream 0.6.0 brought: plugins (core and community), themes, side conversations ("side chats", stored in the chat record), a highlight toolbar (Cite, Ask), a dialog system (HostDialog), a Host-header check on the API, a link allow-list in the desktop shell, and chat record format 2.
 
-**State:** shipped. With the owner's word ("ready, do both"), the same commit was pushed to `claude/pensive-goldberg-7dty2m` (the server's image `:dev`) and to `side-tutor` (the Windows release), both plain fast-forwards. Both dry runs had passed on commit `c990b21e`, the last code commit; the shipped commit adds only these lines. Before the push the owner made both backups by hand: a copy of the PC's data folder, and the server's data as one archive in the server user's home folder (`lh-data-before-0.6.tar.gz`). The server's image before the update was `dev-a2d2b7e`, should a way back be needed. **The owner then updated the server and the PC (release 0.6.14) and reported that both "went flawlessly".** They didn't say which screens they tried. `claude/upstream-0.6.0` stays at the same commit and builds nothing.
+**State:** shipped. With the owner's word ("ready, do both"), the same commit was pushed to `claude/pensive-goldberg-7dty2m` (the server's image `:dev`) and to `side-tutor` (the Windows release), both plain fast-forwards. Both dry runs had passed on commit `c990b21e`, the last code commit; the shipped commit adds only these lines. Before the push the owner made both backups by hand: a copy of the PC's data folder, and the server's data as one archive in the server user's home folder (`lh-data-before-0.6.tar.gz`). The server's image before the update was `dev-a2d2b7e`, should a way back be needed. **The owner then updated the server and the PC (release 0.6.14) and reported that both "went flawlessly".** They didn't say which screens they tried. `claude/upstream-0.6.0` builds nothing.
+
+**Since then:** the phone plugins round (Flashcards and Rich code blocks on a phone, and Flashcards sync, sync protocol 3) is **built on `claude/upstream-0.6.0` and not shipped**: not pushed to `side-tutor` or to the server's branch, both workflow dry runs still to run, the owner's iPhone hasn't seen it, and a second review (of the sync part) is under way. The plan is `docs/phone-plugins-plan.md`; what was built is in `docs/cloud-sync.md` ("Plugins on a phone" under "Phone layouts", and "Flashcards sync"). It changes decisions 10 and 17 below, as noted there.
 
 ## The owner's decisions
 
@@ -21,14 +23,14 @@ Upstream 0.6.0 brought: plugins (core and community), themes, side conversations
 | 7 | Settings list | **The fork's.** Obsidian, Cloud and Account sit above the divider, with icons; plugins below. On a phone the closing fade stays. |
 | 8 | Themes | Everything of the fork's follows the chosen theme, including the login pages and the home-screen app's colours. |
 | 9 | Themes and devices | The theme, colour overrides, code ligatures and custom themes sync. "Reasoning in summaries" syncs; "helpers at once" stays per device. |
-| 10 | Phone | The Enter rule applies to upstream's new text boxes. Under 640 px no plugin is offered (Drawing Pad never will be), and a plugin's question is parked with a note. Phone layouts for Flashcards, Coding questions, Rich code blocks, the theme picker and plugin settings pages are a later round. |
+| 10 | Phone | The Enter rule applies to upstream's new text boxes. Under 640 px no plugin is offered (Drawing Pad never will be), and a plugin's question is parked with a note. Phone layouts for Flashcards, Coding questions, Rich code blocks, the theme picker and plugin settings pages are a later round. **Since the phone plugins round** (built, not shipped): Flashcards and Rich code blocks are offered on a phone, with Settings → Core plugins and their own pages; everything else stays as here. See "Phone" below. |
 | 11 | Held sessions | Upstream's new controls are refused by the server and greyed out, like Rename and Delete. A Tutor answer in progress finishes before the session moves. |
 | 12 | The server's front door | **The fork's.** Its login and device-key gates on the server; upstream's new check only on the desktop app and local use. |
 | 13 | Large uploads | **Mix.** Upstream's exemption for document uploads, with the fork's login checked inside it. |
 | 14 | Shortcuts | **Upstream's.** Drawing Pad keeps Ctrl+Shift+E. Ctrl+Shift+N opens the notes drawer with the cursor in the note's editor, and closes it again. The fork's "jump into the editor" shortcut is gone. |
 | 15 | Pop-up boxes | **Upstream's.** All of the fork's move onto HostDialog, keeping their look and words. |
 | 16 | Plugins | **Upstream's.** Every plugin is offered on the PC and on the server, off until switched on. |
-| 17 | Plugin data | Per device for now. The sync backup also covers plugin and theme data. Syncing Flashcards is a later phase. |
+| 17 | Plugin data | Per device for now. The sync backup also covers plugin and theme data. Syncing Flashcards is a later phase. **Since the phone plugins round** (built, not shipped): Flashcards' library syncs (its model choice, batches and uploaded files' text stay per device); every other plugin's data and which plugins are on stay per device. See "Plugin data is per device" below. |
 | 18 | Upstream's workflows | Deleted from the fork (`ci.yml`, `release.yml`, `notify-website.yml`). |
 | 19 | Pictures in messages | The "sent once" rule is extended to them. |
 | — | Server feed | Two branches stay: the server follows its own branch, the PC follows `side-tutor`. |
@@ -43,6 +45,8 @@ Upstream 0.6.0 brought: plugins (core and community), themes, side conversations
 See `docs/side-tutor.md`. In short: the fork's engine (store, route, agent, prompt, sync guard, bundle file) is gone; the window reads upstream's side conversations through upstream's hook `useSideThread`, and nothing in upstream's engine is changed.
 
 ### Sync (protocol 2)
+
+(Protocol 3 since Flashcards sync, built and not shipped: "Flashcards sync" in `docs/cloud-sync.md`. Everything below still holds.)
 
 - **`SYNC_PROTOCOL_VERSION` is 2** (`src/core/sync/protocol.ts`). Upstream raised the chat record format from 1 to 2 (`CURRENT_CHAT_VERSION`), and a format-1 build refuses a format-2 file, so a protocol-1 side must never receive one. The session bundle also changed shape.
   - A test (`PROTOCOL_FOR_CHAT_FORMAT` in `tests/sync-sessions.test.ts`) lists which protocol each chat format needs and fails when the format rises without a new row. It runs in both workflows, so the rule "a release that changes a data format is marked" is enforced.
@@ -60,12 +64,13 @@ See `docs/side-tutor.md`. In short: the fork's engine (store, route, agent, prom
   - `reconcilePluginQuestionCompatibility` (run by `GET /api/chats/<id>`) leaves a held session alone. Without that, a held session whose plugin was off on this device reloaded in a loop.
 - **A Tutor answer syncs at once.** The loop runs a round immediately on `side-chats-changed` (`src/server/sync/loop.ts`), which upstream announces when a side answer starts (the question is in the record by then) and when it ends. So the server hears "busy" as it does for a reply, and the question isn't left unsent while the answer is written. Found by the reviewer: without it the server heard of a Tutor answer only at the next 10-second round.
 - **A Tutor answer counts as a reply being written** at a hand-over (decision 11; `src/server/sync/local-work.ts`): the holder finishes it, then hands over; the asking device shows the existing strip, "Desktop is finishing a reply. This session moves here when it's done." When a session goes anyway (lost to a take-over, or taken from the cloud), a side answer still running for it is stopped with the other work (`sideChats.stopAll`).
-- **Backups** (decision 17; `src/store/sync/backup.ts`): the once-per-side backup also copies `themes/`, `plugins-state.json` and `core-plugin-data/`, and no longer `side-tutor/`. Not the code of community plugins.
+- **Backups** (decision 17; `src/store/sync/backup.ts`): the once-per-side backup also copies `themes/`, `plugins-state.json` and `core-plugin-data/`, and no longer `side-tutor/`. Not the code of community plugins. With Flashcards sync each side also copies Flashcards' folder aside once more, right before its first Flashcards exchange (`backups/before-first-flashcards-sync <date>/`, `makeFlashcardsBackup`).
 - **A bug fixed on the way:** a round whose fetch of one session failed still moved its place in the server's list forward, so that session was never fetched again. The place now moves only past what was fetched (`src/server/sync/desktop-sync.ts`).
 - **Plugin data is per device** (decision 17): which plugins are on, their settings and their data (Flashcards' history) don't sync. Consequences the owner has been told:
   - a plugin's pending question is cancelled by upstream's own rule after a take-over to a device where that plugin is off;
   - a plugin's background job that was running when its session moved fails on the new holder, and says so, instead of restarting;
   - a plugin's own operations (its data, its pages) aren't session writes and aren't refused on a held session.
+  - **Since Flashcards sync** (built, not shipped): Flashcards' library is the exception. Its decks, facts, cards, reviews, synced settings and uploaded-file records travel item by item, with no lease, and each schedule is worked out again from the combined reviews; its model choice, batches and uploaded files' text stay per device. Which plugins are on, and every other plugin's data, are still per device, and the three consequences above still hold. See "Flashcards sync" in `docs/cloud-sync.md`.
 - **An app that isn't paired** still makes no sync request and writes no sync file. Upstream's plugin start-up does create an empty `plugins/` folder in the data folder; `tests/sync-inert.test.ts` allows exactly that.
 
 ### The server's front door
@@ -103,12 +108,12 @@ See `docs/side-tutor.md`. In short: the fork's engine (store, route, agent, prom
 ### Settings
 
 - **Rows, in order:** Providers, Agent, Appearance, Graph, Keyboard, General, Obsidian (server only), Cloud, Account (server only); a divider; Core plugins, Community plugins; a divider; one row per plugin that has settings. Icons for the fork's rows: a notebook with a pen (Obsidian), a cloud (Cloud), a person (Account). (`components/settings/settings-dialog.tsx`)
-- **On a phone:** the list has no icons, no Keyboard row and no plugin rows; a link to a plugin's section lands on the list. The closing fade is kept by fading a copy of the panel's contents (`fadeOutCopy`), because upstream's dialog removes the panel at once.
+- **On a phone:** the list has no icons, no Keyboard row and no plugin rows; a link to a plugin's section lands on the list. (Since the phone plugins round, built and not shipped: Core plugins and the pages of Flashcards and Rich code blocks are listed after Account, with no dividers; "Plugins on a phone" in `docs/cloud-sync.md`.) The closing fade is kept by fading a copy of the panel's contents (`fadeOutCopy`), because upstream's dialog removes the panel at once.
 
 ### Phone
 
 - **The Enter rule** (Enter is a new line on a touch phone; the button sends) also applies to upstream's new text boxes: a plugin question's box and its key handling (`components/plugin-question-dock.tsx`, `plugin-question-keys.ts`), upstream's "Enter from anywhere" (`components/enter-submits.ts`) and the citation comment (`components/citation-comment-editor.tsx`; ⌘/Ctrl+Enter still saves and sends).
-- **Plugins are hidden under 640 px** (`components/phone/phone-plugins.ts` lists the rules):
+- **Plugins are hidden under 640 px** (`components/phone/phone-plugins.ts` lists the rules). **Since the phone plugins round** (built, not shipped) this holds for every plugin but Flashcards and Rich code blocks: Flashcards' session-list entry shows, a phone-ready plugin's page renders, and rich drawings get a phone layout ("Plugins on a phone" in `docs/cloud-sync.md`). As built at the merge:
   - the ways in are hidden by `app/phone.css`: the lesson's top-bar plugin buttons, the session list's plugin entries, the graph's plugin buttons;
   - a plugin page opened directly shows "Open this on a computer." under a top bar that has only the session-list button (`components/phone/phone-plugin-page.tsx`);
   - a plugin's question is parked: "This question needs a bigger screen. Open this session on a computer to answer it.", with the button "Dismiss question" under it; a plugin's practice problem is parked with "This problem needs a bigger screen. Open this session on a computer to answer it." (`components/phone/parked-plugin-question.tsx`; "Asked after it was built" below);
@@ -206,11 +211,15 @@ Protocol 2 means both sides must be updated, or sync pauses (nothing is discarde
 5. Push the same commit to `side-tutor` (owner's approval). The release builds; the app installs it at its next start. Settings → Cloud reads "Up to date" again.
 6. Plugins are off by default and per device: switch the same ones on in both places, from a computer.
 
+**Protocol 3 (Flashcards sync, built and not shipped)** means the same: both sides must be updated, the server first, or all sync pauses, with nothing discarded. The steps above apply again as they stand. The round changes no file format (the chat record stays at 2, Flashcards' file at 1); only the protocol rises. Step 3's copy by hand covers Flashcards too; its own automatic backup is made once, right before each side's first Flashcards exchange.
+
 ## Not in this merge
 
 - Phone layouts for Flashcards, Coding questions, Rich code blocks, the theme picker and plugin settings pages. Until then plugins are computer-only.
 - Syncing plugin data (Flashcards' review history first).
 - Phase 7 of cloud sync, and a tablet layout.
+
+**Since then** (the phone plugins round, built and not shipped): Flashcards and Rich code blocks have phone layouts, Settings on a phone lists Core plugins and their pages, and Flashcards' library syncs. Still not done: phone layouts for Coding questions, the Drawing Pad, the theme picker and community plugins; syncing any other plugin's data or which plugins are on; Phase 7 and a tablet layout.
 
 ## Development notes from the merge
 
@@ -221,3 +230,15 @@ Protocol 2 means both sides must be updated, or sync pauses (nothing is discarde
 - **`docs/plugin-api/`** is generated: `node scripts/build-plugin-types.mjs <dir>`, then `node scripts/build-plugin-api-reference.mjs <dir> docs/plugin-api`. A test fails when it is stale, which happens whenever the fork adds an event (`cloud-changed`).
 - **A Tutor conversation for screenshots:** put threads in the chat record's `sideChats` (upstream's shape in `src/core/contracts/chat.ts`). The old `side-tutor/<chatId>.json` recipe in `docs/cloud-sync.md` no longer applies.
 - **At the next upstream release:** the fork's edits to upstream files are the lesson screen (`components/chat.tsx`: the Tutor's mount, upstream's card and markers left out, the `blocked` props, the parked question and problem), `components/settings/settings-dialog.tsx`, `proxy.ts`, `instrumentation.ts`, `app/layout.tsx`, the `blocked` props in `plugin-chrome.tsx` and `selection-toolbar.tsx`, and the phone Enter rule in the three text-box files. Everything else is in the fork's own files.
+  - **Added by the phone plugins round** (built, not shipped):
+    - `app/layout.tsx`: imports `phone-flashcards.css` and `phone-rich-code-blocks.css`; awaits `richCodeBlocksBoot()` and sets `data-lh-rich-code-blocks` on `<body>`;
+    - `app/plugins/[pluginId]/[viewId]/page.tsx`: passes `pluginId` to `PhonePluginPage` (the wrapper itself dates from the merge);
+    - `components/settings/settings-dialog.tsx`: the phone's rows (Core plugins, the phone-ready plugins' pages) and `isPhoneHiddenSettingsSection`;
+    - `components/settings/plugins-section.tsx` (`PluginRow`): the switch pulled into a variable, disabled and wrapped in `data-phone="plugin-locked"` when locked on a phone; the ⚙ hidden when locked, and marked `data-phone="plugin-settings-link"`;
+    - `components/md-blocks.tsx`: the phone frame around a smiles, abc or tikz block, and `data-lh-rich-fence` on its code fallback;
+    - `components/session-overlay.tsx`: an optional `openDrawing` in the viewer's context and a `drawing` prop;
+    - `components/chat.tsx`: `figureFocus` takes `{ drawing }`, and `openDrawing`;
+    - `instrumentation.ts`: on the server, the saved time zone set before the plugins start;
+    - `src/server/index.ts`: the barrel exports `richCodeBlocksBoot` and `flashcardsExchangeResponse`;
+    - `plugins/flashcards/src/store.cjs`: reads its file again when it changed on disk (Flashcards sync), and one line of `plugins/flashcards/tests/store.test.cjs` with it.
+  - The phone styling of Flashcards and Rich code blocks hangs on upstream's class names and markup from the fork's own stylesheets; `tests/phone-flashcards.test.ts`, `tests/phone-flashcards-structure.test.tsx` and `tests/phone-rich-code-blocks.test.tsx` fail when one of those names or structures changes upstream.

@@ -55,6 +55,8 @@ Graph extraction, research, compaction and visuals run on **whichever device hol
 | `notes/sessions/<chatId>.json` | Small JSON | Follows the chat's lease |
 | `graph/*.jsonl` | Mostly appends, with some rewrites (see below) | Appends as lines; rewrites as replayed operations |
 | `sources.json`, positions, `settings.json` | Read-modify-write maps | Last writer wins per key; device-specific keys excluded |
+| `core-plugin-data/flashcards/flashcards.json` (Flashcards' library; since Flashcards sync, built and not shipped) | Whole-file rewrite by the plugin | Item by item, latest change wins per item; schedules never travel and are worked out again from the combined reviews (see "Flashcards sync") |
+| The other plugins' data, which plugins are on, Flashcards' model choice and its uploaded files' text | Per device | Never synced |
 | `notes/settings.json` (vault path), `notes/pending/` | Per device | Never synced |
 | `obsidian-sync.json` (the server's Obsidian sync record) | Per device | Never synced |
 | `auth.json`, subscription credentials, model caches | Per device | Never synced |
@@ -275,7 +277,7 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 - **Footer row** (context and cost, model, thinking level): all stay, on one row; the model name is kept to one line. The idle Dictate button is icon-only.
   - **While dictating** (owner's ask): a small live waveform (3.5rem, the desktop's meter) replaces the red dot, and the red Stop button is icon-only, so the row still fits.
 - **Home:** the knowledge graph. The toolbar is fitted: search becomes an icon that opens a full-width field, and the other buttons are icon-only. The graph already supports touch drag and pinch (d3-zoom).
-- **Settings:** the desktop's floating panel, centred (90% wide, at most 85% of the visible height); the owner preferred it to a full-screen page. Inside: the section list first, then the section with a back arrow. It opens with the desktop's fade-and-grow and fades back out on close (150ms; closing waits for the fade). The Keyboard section is hidden on phones; nothing else is removed.
+- **Settings:** the desktop's floating panel, centred (90% wide, at most 85% of the visible height); the owner preferred it to a full-screen page. Inside: the section list first, then the section with a back arrow. It opens with the desktop's fade-and-grow and fades back out on close (150ms; closing waits for the fade). The Keyboard section is hidden on phones; nothing else is removed. (Since the upstream 0.6.0 merge the plugin rows were left out too; with the phone plugins round Core plugins and the phone-ready plugins' pages are back: "Plugins on a phone" below.)
   - On the server the Account row shows from the first frame (the `lh_server` cookie), so it doesn't pop into the list when the device list arrives; the section shows "Loading…" until then.
 - **Plan and diagram viewers:** one-finger drag, two-finger pinch to zoom (new), and the − / + buttons.
 
@@ -316,7 +318,7 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 
 **How it's built**
 
-- Phone styling lives in one fork-owned file, `app/phone.css`. Every rule sits inside `@media (max-width: 639.98px)` and under `html:not(.lh-electron)`. The rules are unlayered, so they beat Tailwind's layered utilities without `!important` (except against inline styles).
+- Phone styling lives in fork-owned files: `app/phone.css`, and since the phone plugins round `app/phone-flashcards.css` and `app/phone-rich-code-blocks.css` ("Plugins on a phone" below). Every rule sits inside `@media (max-width: 639.98px)` and under `html:not(.lh-electron)`. The rules are unlayered, so they beat Tailwind's layered utilities without `!important` (except against inline styles).
 - The desktop app is marked `lh-electron` by an inline script in the root layout's `<head>`, before the first paint, so a zoomed-in desktop window at its minimum width can't flash phone styles (`<html suppressHydrationWarning>` for that one attribute).
 - Upstream components get only small hooks: `data-phone="…"` attributes and short `useIsPhone()` conditionals. That keeps rebasing onto upstream cheap.
 - **Code (`components/phone/`):**
@@ -332,12 +334,117 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
   - `use-dock-anchor.ts`: the tutor bubble's position, measured from the top (an iPhone keyboard covers the bottom edge). The computer's minimized tutor uses it too (owner's ask, after Phase 4), so it also reports how far the lesson's right edge is from the window's; the phone ignores that.
   - `enter-key.ts`, `enter-hint.tsx`, `long-press.ts`, `use-pinch-zoom.ts`, `use-dock-touch-scroll.ts`, `window-lock.ts`.
 - **Wiring:** `sidebar.tsx` (drawer state, backdrop, press-and-hold on rows), `top-bar.tsx`, `chat.tsx` (dock hook, practice hint, dock drag), `side-tutor.tsx`, `notes/notes-drawer.tsx`, `notes/notes-tree.tsx`, `settings/settings-dialog.tsx` (a link to a section opens on it; plain Settings opens on the list), `graph-view.tsx` (search icon), `stats-bar.tsx`, `menu-shell.tsx`, `session-overlay.tsx` and `plan-block.tsx` (pinch), and the Enter handlers in `composer.tsx`, `question-dock.tsx`, `practice-dock.tsx`, `reading-thinking.tsx`.
-- **Tests:** `tests/phone-layout.test.ts` checks that every rule in `phone.css` is phone-only and browser-only, and covers the Enter rule, the bubble position, the hold slop, edge scrolling and menu clamping. `tests/phone-hold-drag.test.ts` drives press and hold and hold-then-move with scripted pointer and touch events. `tests/notes-row-drag.test.ts` covers where a drag lands. `tests/server-auth.test.ts` pins the open manifest and icon paths.
+- **Tests:** `tests/phone-layout.test.ts` checks that every rule in `phone.css` (and in the two plugin stylesheets) is phone-only and browser-only, and covers the Enter rule, the bubble position, the hold slop, edge scrolling and menu clamping. `tests/phone-hold-drag.test.ts` drives press and hold and hold-then-move with scripted pointer and touch events. `tests/notes-row-drag.test.ts` covers where a drag lands. `tests/server-auth.test.ts` pins the open manifest and icon paths.
 - **Desktop check:** desktop screenshots (1280 and 700 wide) and a dump of every element's position and size, compared before and after. Nothing moved; the only pixel differences are the see-through footer pills, whose blur picks up whatever transcript text sits behind them.
 - **Real-phone checks (owner, iPhone, iOS 27), two rounds.** Round 1: most of it worked; fixed after it were the keyboard pushing the app up, the session list's strips, Settings' Account row popping in and the missing dictation waveform, and Settings became the centred panel. Round 2 confirmed on the phone: Settings (centred panel, fades), the dictation waveform, the keyboard opening and closing, the session list's full-height colours (Safari tab and home-screen app), 120 fps scrolling, dragging on and out of an opened question (no jumping, no pull-back), tapping the folded question while the lesson moves, the home-screen app filling the screen to the bottom, and the model picker in a Safari tab. Every fix above was found on the owner's iPhone and is described in its own bullet.
 - **Testing these without an iPhone:** Playwright `devices["iPhone 13"]` (iOS Safari user agent, so the Safari-tab bleed turns on); real touch through CDP `Input.dispatchTouchEvent`; the keyboard by replacing `window.visualViewport` with a fake whose `height` you set and fire `resize` on (an init script); the home-screen app by overriding `navigator.standalone` (Chromium has no clock strip, so `env(safe-area-inset-top)` is 0 there and `standaloneGap` stays 0). Chromium never shows iOS's rubber band, its top blur, its swallowed taps or its keyboard pan, so anything touching those needs the owner's phone; a temporary on-screen readout (`?scrolldebug=1`, since removed) was the way to see what the phone did.
 
 **Not in this phase:** a tablet layout, the side tutor in practice sessions (added at the upstream 0.6.0 merge), offline use, and renaming notes in the drawer.
+
+#### Plugins on a phone: Flashcards and Rich code blocks (built after the upstream 0.6.0 merge)
+
+- **State:** built on `claude/upstream-0.6.0`, together with Flashcards sync ("Flashcards sync" under "Handoff"). **Not shipped:** not pushed to `side-tutor` or to the server's branch; both workflow dry runs are still to run; the owner's iPhone hasn't seen it.
+- **The plan** is `docs/phone-plugins-plan.md`: the owner's decisions (numbered 1–11 there) and the smaller rules, approved by the owner ("Approved, build it"). This part records what was built for each. Change a decision only with the owner's approval.
+- It replaces the 0.6.0 merge's "under 640 px no plugin is offered" (decision 10 in `docs/upstream-0.6.0.md`) for these two plugins only.
+
+**Which plugins, and the gate**
+
+- **Phone-ready: Flashcards and Rich code blocks** (`PHONE_READY_PLUGINS` in `components/phone/phone-plugins.ts`). Everything else stays as at the merge (plan decision 11): the Drawing Pad hidden, a Coding questions question or problem parked, community plugins' ways in hidden.
+- **The way in** (decision 2): only Flashcards' session-list entry shows (`PHONE_SIDEBAR_ENTRIES = ["flashcards/open-sidebar"]`; `app/phone.css` names the same entry, and a test keeps the two equal). Teaching, Practice and Flashcards stack in one column. The lesson's top-bar plugin buttons, the graph's plugin buttons and every other session-list entry stay hidden.
+- **A plugin page opened on a phone:** a phone-ready plugin's page renders as on a computer; any other still reads "Open this on a computer." (`PhonePluginPage` now takes the `pluginId`).
+
+**Settings on a phone** (decision 3)
+
+- **The list**, after Account: **Core plugins**, then **Flashcards** and **Rich code blocks**, each only while its plugin is on. No Community plugins row, no other plugin's page, and no dividers above the plugin rows. A link to an unlisted plugin section lands on the list (`isPhoneHiddenSettingsSection`).
+- **The Core plugins page** lists all four core plugins. The switches of Coding questions and Drawing Pad are greyed and can't be changed (`isPhoneLockedPlugin`; disabled, `data-phone="plugin-locked"`), with no explaining text.
+- Their ⚙ is hidden; Flashcards' and Rich code blocks' ⚙ open their own pages.
+- Finger-sized on these pages: the ⚙ is 40 px, and a switch keeps its look with a 40 × 40 touch area around it (`app/phone.css`).
+
+**Flashcards' screens** (decisions 1, 4a–4d, 5a–5c, 6; the look is `app/phone-flashcards.css`, the touch behaviour `components/phone/flashcards-touch.ts`)
+
+- **Everything** (decision 1), making cards from the graph and from a file included.
+- **The review and practice:**
+  - **Stacked ratings (4a):** four full-width buttons, Again to Easy, one under the other (48 px). Reveal answer and Next are full width too (44 px).
+  - **Pinned to the bottom (4b):** while a card shows, the stage is the scroller: the card is as tall as its text, in the middle of the space above the buttons, and a longer card scrolls in that space while the buttons stay in view. The buttons keep clear of the home bar (`env(safe-area-inset-bottom)`).
+  - Between two cards the pinned band stays where it is, with upstream's "Loading next card…" in it (`flashcards-touch.ts` marks that moment `data-phone-review="loading"`). The end states ("No cards due in this selection.", "Practice complete.", an error with Retry) keep upstream's layout.
+  - In practice, "Practice mode does not change your review schedule." sits under the pinned buttons.
+  - **Keyboard hints (4c)** are hidden; the keys still work with a keyboard connected.
+  - **The way out (4d):** the same ✕ in the same place (its centre where it was), 44 × 44. The count stays under the card.
+  - A formula wider than the card scrolls sideways inside the card.
+- **The deck list (5a):** fits the screen (it was 640 px wide in a 368 px box), finger-sized rows, without the three number columns; names truncate. + and ⚙ are 40 × 40; Review keeps its size with a 40 px touch area around it.
+- **Row menus (5b):** the ⚙ stays, and press and hold (about half a second, the fork's one hold in `long-press.ts`) on a row opens the same menu. Rows that have a ⚙ are marked `data-phone-press="flashcards"`, and the held finger is answered by pressing that row's own ⚙; the lift opens nothing else. No dragging; order stays "Move up / Move down" in the menu.
+  - `long-press.ts` lets a click the page sends itself (`isTrusted === false`) through during a hold, so that press reaches the ⚙.
+- **Renaming a deck (5c):** a small ✕ at the end of the rename box cancels and keeps the old name.
+  - It is fork code that sends the box the plugin's own Esc, so the plugin's file isn't edited for it. Its press doesn't take the focus, because a blur saves. Enter still saves.
+  - A press on it that ends any other way (the finger slid off, a scroll, a touch elsewhere, no click within 400 ms of the lift) gives the plugin its blur back, so the box saves as it would have.
+- **Boxes and menus:** every button of the library page and of the plugin's boxes, the boxes' checkbox rows and their ✕, the rows' ⚙ menu items, and the ⚙ beside the page title get 40 px touch areas. In Settings → Flashcards the model and thinking pickers keep their pill with a 40 px touch area.
+- **Statistics charts (6):** shown as they are.
+- **The keyboard:** a focused box (the rename box, search, a card's Question and Answer, the fields of Settings → Flashcards) is scrolled into the visible part when it is focused, and again whenever the visible height changes while it has focus. The app is already as tall as the visible part (`--lh-vvh`); this moves the box inside it.
+- **The knowledge picker** ("Pick nodes", the host's shared screen): 48 px rows, finger-sized checkboxes and controls, and its header uncut. It still covers the whole screen and closes with its ✕ or Done.
+  - **Its Props and Created columns are hidden on a phone** (owner's answer after the plan was approved: "Hide both on a phone"), so the names get the full width. Sorting by name stays.
+- **Checkboxes** in the deck list and the picker are drawn by the fork: a 20 px box inside a 40 × 40 control, in theme tokens, because a native checkbox can't have a larger touch area.
+
+**Rich code blocks** (decisions 7 and 8; `app/phone-rich-code-blocks.css`, `components/phone/rich-drawing-frame.tsx`)
+
+- **Shrink to fit (7):** a drawing wider than the lesson shrinks to the lesson's width; one that fits keeps its size. (Off a phone a wide TikZ drawing keeps its natural size and scrolls sideways in its box, as upstream draws it.)
+- **The enlarge button**, on all three kinds (technical diagrams, molecules, scores): the lesson's own enlarge control, with upstream's label "Expand diagram", at the block's top right, once the picture is drawn. None while a block is drawn or after it failed.
+  - It opens the lesson's existing diagram viewer (drag, pinch, − / +) with a copy of the picture (`drawingCopy`): its ids renamed, so the copy never shares one with the lesson's drawing, and wrapped in the plugin's `rich-code-blocks` class, so the theme's ink and the plugin's fonts still apply.
+  - **The viewer opens the drawing fitted**, as it does the lesson's other diagrams (owner's answer after approval: "Fitted, as others do"). Nothing in the viewer changed for it.
+  - The button keeps the lesson's 24 px look with a 40 × 40 touch area. The area extends to the left: the button sits at the lesson column's right edge, which clips what lies beyond it.
+  - **Where:** the lesson, the Tutor's sheet and the notes Read view, with the button and the viewer in all three. Not inside a Flashcards card: plugin Markdown there is display-only (upstream's rule).
+- **While a block is drawn (8):** a dashed box with a spinner and no words, in place of the source. A block that fails shows what it shows today (the plugin removes its block, and the host shows its error and the source), so no spinner is left behind. With reduced motion the spinner stands still.
+- **From the first paint** (owner's answer after approval: "Spinner from the start"): while Rich code blocks is switched on but its front end hasn't started, a smiles, abc or tikz fence shows the same box instead of the host's code.
+  - Before the page runs, the server's mark decides: `richCodeBlocksBoot()` (`src/server/rich-code-blocks-boot.ts`) reads the plugin host's list while the page is rendered, and `app/layout.tsx` sets `data-lh-rich-code-blocks="on"` on `<body>`. The code fallback of such a fence carries `data-lh-rich-fence` (`md-blocks.tsx`).
+  - Once the page runs, the frame's marker says which state its fence is in (`richFenceState`: `plugin`, `waiting` or `code`).
+  - A kind switched off in the plugin's own settings spins for the first moments, then turns into plain code once the plugin has started (only the plugin knows which kinds are on).
+- **The frame never mounts a block twice.** On a phone it puts a marker of no height just before the block, which keeps its place; so the layout answer arriving after hydration, or a window resized across 640 px, doesn't draw the block again (a failed TikZ block would compile again, up to its 10-second limit). On a computer the frame renders the block alone.
+
+**How it's built (additions to "How it's built" above)**
+
+- **Two more fork-owned stylesheets** under the same law as `phone.css` (inside `@media (max-width: 639.98px)`, under `html:not(.lh-electron)`, unlayered), imported by `app/layout.tsx`: `app/phone-flashcards.css` and `app/phone-rich-code-blocks.css`.
+  - They restyle upstream's markup: the plugins' own class names and the host components that render for them (the tree, the surface, the dialog, the menu, the knowledge picker). Every rule is more specific than the plugin's own; inline styles are beaten with `!important` only.
+  - The guard against upstream renames is the tests below.
+- **Helpers (`components/phone/`):**
+  - `phone-plugins.ts`: the gate (`PHONE_READY_PLUGINS`, `PHONE_SIDEBAR_ENTRIES`, `isPhoneReadyPlugin`, `isPhoneHiddenSettingsSection`, `isPhoneLockedPlugin`); `phone-plugin-page.tsx`;
+  - `flashcards-touch.ts`: press and hold, the rename ✕, the loading mark, the keyboard rule. Installed once by `phone-runtime.tsx`; off the phone layout it marks nothing and answers nothing;
+  - `rich-drawing-frame.tsx`: `PhoneRichDrawingFrame`, `drawingCopy`, `richFenceState`;
+  - `long-press.ts`: a click the page sends itself passes through during a hold.
+- **On the server:** `src/server/rich-code-blocks-boot.ts` (exported from the server barrel).
+- **Upstream files:** none for Flashcards' screens. For Rich code blocks: `md-blocks.tsx`, `session-overlay.tsx` (`openDrawing`, a `drawing` prop), `chat.tsx` (`openDrawing`), `app/layout.tsx`. For the gate and Settings: `settings-dialog.tsx`, `plugins-section.tsx`, `app/plugins/[pluginId]/[viewId]/page.tsx`. The whole list is "At the next upstream release" in `docs/upstream-0.6.0.md`.
+
+**Tests**
+
+- `tests/phone-layout.test.ts`: every rule of the three phone stylesheets is phone-only and browser-only, and each is imported by `app/layout.tsx`; the kept session-list entry; the Settings sections a phone lists; the greyed switch and the 40 px touch areas.
+- `tests/phone-plugins-ui.test.tsx`: the gate, the Settings rows and the greyed switches, every other plugin still hidden.
+- `tests/phone-flashcards.test.ts`: the guard (every class, attribute, label and test id the stylesheet and the touch helper hang on, with the upstream file that makes it; it fails when upstream renames or drops one, or when the stylesheet grows a hook that isn't listed), press and hold, the rename ✕, the keyboard maths.
+- `tests/phone-flashcards-structure.test.tsx`: mounts the plugin's real screens and the host's tree and picker, and fails when the structure a phone rule assumes (children, siblings, order) stops matching.
+- `tests/phone-rich-code-blocks.test.tsx`: the frame's states with the real plugin manager and render service, the boot's failure paths, and the guard on the plugin's names.
+
+**What was checked**
+
+- In a browser at iPhone size: a production build, real touch through CDP, the Safari-tab and the home-screen set-ups, a dark and a light theme.
+- **The computer:** compared element by element at 1280 and 700 px against the build before the change: identical.
+- **A fresh reviewer** read the phone diff and found two real bugs (the rename box stuck open after a hold on, or a slide off, its ✕; a hold inside the rename box opening the menu and saving) and smaller items. All are fixed.
+
+**Only the owner's iPhone can show**
+
+- The safe-area spacing (the home bar under the pinned buttons); the real keyboard with the scroll-into-view; Safari's bounce on the pinned footer; the rename ✕ keeping the keyboard up; the hold's timing and iOS's text callout; a formula scrolling sideways in a card; TikZ's time and memory; the viewer's pinch and drag.
+- The plan ends the round with a "what to try on your iPhone" page; expect a second round from it.
+
+**Built beyond the plan's letter, for the owner to review**
+
+- **Renaming a deck:** while its box is open, that row's Review and + are hidden so the box has room (96 → 200 px); the ⚙ and the ✕ stay. A hold on that row does nothing while the box is open. Sliding off the ✕ and tapping elsewhere saves the draft (the plugin's own blur rule).
+- The rename ✕'s hidden label for screen readers is "Cancel".
+- The fork-drawn checkboxes (above).
+- The phone's Settings list has no dividers above the plugin rows. On the Core plugins page the ⚙ of every core plugin that isn't phone-ready is hidden, Coding questions' too (the plan named Drawing Pad's).
+- Between review cards the pinned band stays, with "Loading next card…" in it. In practice the "Practice mode does not change your review schedule." note sits under the pinned buttons.
+- **Rich code blocks:**
+  - an unfinished fence in a message still being written already shows the spinner;
+  - the wait for the plugin to start is capped at 15 seconds (`RICH_WAIT_CEILING_MS`), after which the block shows its code;
+  - if the server's plugin list isn't ready within 300 ms while a page is rendered (right after a server start), that first page shows code until the page's own plugin list arrives.
+- The enlarge button's touch area extends to the left only (above).
+- **Left as they are:** the picker's 28 px book and folder icon beside its 40 px arrow; the 28 px number fields of Settings → Flashcards; the app's 36 px session-list button; the session-list entries' 28 px height.
+- **Found, not changed:** Enter in the Create deck box and in the Deck settings fields does nothing (upstream's behaviour).
 
 ### Hosting — built in Phase 1
 
@@ -398,6 +505,7 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 ### After the merge (read this first)
 
 - **Upstream 0.6.0 is merged and shipped** to both branches, at the same commit. It raises the sync protocol to 2, so the server and the desktop app must both be updated or sync pauses (nothing is discarded while paused). What changed in sync, the gate, the phone layout and the screens is in `docs/upstream-0.6.0.md`. Where this file and that one differ, that one is newer.
+- **The phone plugins round is built, not shipped** (on `claude/upstream-0.6.0`): Flashcards and Rich code blocks on a phone ("Plugins on a phone" under "Phone layouts") and Flashcards sync ("Flashcards sync" below). It raises the sync protocol to 3, so the same rule applies again: the server and the desktop app must both be updated, the server first. Not pushed to `side-tutor` or to the server's branch; both workflow dry runs are still to run; the owner's iPhone hasn't seen it; a second review, of the sync part, is under way.
 
 - **Merged:** `side-tutor` was fast-forwarded to the cloud sync branch at `a2d2b7e` with the owner's word ("merge"), and the Windows workflow published **release 0.5.6** from it. The desktop app now has everything in this file and in `docs/side-tutor.md`.
 - **Checked on Windows before it went out:** the Windows workflow was started by hand on the cloud sync branch (a dry run: no release) and passed, with the sync and cloud tests added to it. Before that the sync code had only run on Linux.
@@ -406,7 +514,7 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
   - a push to `side-tutor` publishes a desktop release (and builds the server image `:latest`). It still needs the owner's approval every time;
   - the owner's server follows `LH_CHANNEL=dev`, which is built from `claude/pensive-goldberg-7dty2m`. A change the server should get must be pushed there; a change both should get goes to both branches, kept at the same commit.
   - Moving the server to `latest`, so one branch feeds both, is the owner's call and hasn't been asked.
-- **The two sides must speak the same sync protocol version** (1 in release 0.5.6; **2 from the upstream 0.6.0 merge on**, see `docs/upstream-0.6.0.md`). A change that raises it has to reach the server and the desktop together, or sync pauses until both are updated.
+- **The two sides must speak the same sync protocol version** (1 in release 0.5.6; **2 from the upstream 0.6.0 merge on**, see `docs/upstream-0.6.0.md`; **3 with Flashcards sync**, built and not shipped, see "Flashcards sync"). A change that raises it has to reach the server and the desktop together, or sync pauses until both are updated.
 - **Restoring a first-sync backup** (`%APPDATA%\LearnHarness\backups` on the PC, `/data/backups` on the server) has no written guide. Putting old files back while paired would sync the old state everywhere: unpair first, and write the steps for the situation at hand.
 - **Not done:** Phase 7 (one automated test with two desktops and a server syncing everything together; a tidy of this file). The owner chose to merge without it.
 
@@ -537,7 +645,7 @@ Kept as written while the work was on its own branch; where it says "until the m
 - **Pictures in a session** are sent once, not with every send of the session.
 - **Clock differences:** the server corrects for a PC clock that is off before deciding which settings change is the latest.
 - **Imported-file records and graph positions** sync one item at a time, latest wins. An imported file's path stays the path on the device that imported it.
-- **Backup contents:** sessions, graph, side-tutor threads, helper jobs, settings, prompt overrides and the notes home-folder records. (Since the upstream 0.6.0 merge: custom themes, the plugins' on/off record and the core plugins' data too, and no side-tutor threads, which are inside the sessions now.)
+- **Backup contents:** sessions, graph, side-tutor threads, helper jobs, settings, prompt overrides and the notes home-folder records. (Since the upstream 0.6.0 merge: custom themes, the plugins' on/off record and the core plugins' data too, and no side-tutor threads, which are inside the sessions now. With Flashcards sync, a second backup of Flashcards' folder alone, right before each side's first Flashcards exchange: "Flashcards sync".)
 - **While sync is paused** (versions differ, or unpaired) nothing is discarded; it resumes where it stopped.
 - **Device names and the wording of every message** ("Held by Desktop", the warning, the heads-up, the notice) are asked in Phase 6 with the screens. Phase 5 stores a name per device and the facts each message needs.
 
@@ -656,7 +764,7 @@ Kept as written while the work was on its own branch; where it says "until the m
 - **An open page** shows a setting that arrived by sync the next time it loads its settings; the chains view updates at once (`sources-changed`).
 - **The vault's folder names** (decision 15): with a round, when the list changed, the desktop sends the names of its vault's top-level folders (`desktopVaultFolders`; names only, nothing inside them is opened; nothing is said while the vault is offline). The server keeps them in `<data>/sync/vault-folders.json`, and the Obsidian sync manager leaves them out like folders found on disk: at every start of `ob` (so before a first download), and at once if `ob` is running when a new name arrives (`foldersAnnounced`, one restart). The notes folder and dot-folders are never left out, whatever is sent.
 - **State:** `<data>/sync/maps.json` on the server (per item: a fingerprint, the time, the counter; never a value), `<data>/sync/maps-desktop.json` on a desktop. Neither exists before a desktop's first round.
-- **A round** is now sessions, then the graph, then these files: `{round: {sessions, graph, maps}}`.
+- **A round** is now sessions, then the graph, then these files: `{round: {sessions, graph, maps}}`. (With Flashcards sync, the Flashcards library comes last: `{sessions, graph, maps, flashcards}`; "Flashcards sync".)
 - **Code:** `src/core/sync/maps.ts`, `src/server/sync/{map-views,maps-sync,maps-engine}.ts`, `src/store/sync/vault-folders.ts`, `app/api/sync/maps`, and three small additions to `src/server/obsidian-sync.ts`.
 - **Tests:** `tests/sync-maps.test.ts` (the rules; each side's files in memory, real state files, PCs with wrong clocks), `tests/sync-maps-wiring.test.ts` (the real stores and files), and one more case in `tests/obsidian-sync.test.ts` (the real `ob`: announced folders are left out before any of their files arrive).
 - **Real run:** two built copies: a first sync (the desktop's settings on both, the server's model and font untouched, 371 node places and the sliders equal), a setting changed on each side, and a chains-view folder made on the server showing on the desktop.
@@ -665,14 +773,14 @@ Kept as written while the work was on its own branch; where it says "until the m
 
 - **When a paired desktop syncs** (decision 11; `src/server/sync/loop.ts`):
   - a full round when the app starts (at its first API request, a moment after the window opens);
-  - about 2 seconds after a change here (`turn-settled`, `record-changed`, `chats-changed`, `jobs-changed`, `sources-changed`, `activity-changed`);
+  - about 2 seconds after a change here (`turn-settled`, `record-changed`, `chats-changed`, `jobs-changed`, `sources-changed`, `activity-changed`; with Flashcards sync also Flashcards' own `changed` and `batch-changed` notices, but not the ones sync itself sends);
   - at once when a reply starts (`turn-started`), so the server knows this desktop is busy;
   - every 10 seconds otherwise;
   - while the server can't be reached: 10 s, 20 s, 40 s, 80 s, 160 s, then every 5 minutes. A change here doesn't hurry a retry;
   - paused (the versions differ) or unpaired by the server: a look every 5 minutes;
   - a change that happens while a round is under way gets one more round 2 seconds after it;
   - one round at a time: "Sync now" (`POST /api/cloud {op:"sync"}`) waits for a round under way, then runs (`round.ts`).
-- **A round** is: sessions (leases first), then the graph log, then the small files.
+- **A round** is: sessions (leases first), then the graph log, then the small files (and, with Flashcards sync, the Flashcards library last).
 - **The loop exists only in a paired desktop app.** `src/server/sync/autostart.ts` (loaded with the server barrel) starts it when a pairing file is there; pairing starts it too. No pairing file: no loop, no timer. It never runs on the cloud server, during a build, or in tests. `LH_SYNC_LOOP=off` turns it off (for runs that drive rounds by hand).
 - **An idle pair writes nothing.** A round in which nothing changed rewrites no state file on either side (`stateFile.write` skips equal content). The server keeps "last heard from" in memory to the second and saves it about once a minute.
 - **Pictures are sent once** (`src/core/sync/pictures.ts`). A session's pictures live in its chat file (`imageSnapshots`, each named by the SHA-256 of its bytes).
@@ -803,7 +911,7 @@ Kept in one place: `src/core/sync/screens.ts`. Change them only with the owner's
 6. **Since when the server can't be reached** (slice 3). `sync.offlineSince` in `GET /api/cloud` on a desktop: the time of the first failed attempt of the current offline spell, null otherwise (`wentOffline` in `client.ts`). The 30-second quiet rule counts from it. `sync.lastContactAt` is null until the app has reached the server once since it started, which is how "started with no connection" is told.
 7. **A signal when the sync state changes** (slice 3). `announceCloudState()` in `round.ts` sends `cloud-changed` on the live channel after a round, a check or a dismissed notice, when the state, the start of the offline spell or the number of notices differs from what was last said. Nothing is sent by an app that isn't paired.
 
-The sync protocol version stayed at 1 for these changes: nothing had been paired anywhere yet. (It is 2 from the upstream 0.6.0 merge on.)
+The sync protocol version stayed at 1 for these changes: nothing had been paired anywhere yet. (It is 2 from the upstream 0.6.0 merge on, and 3 with Flashcards sync, built and not shipped.)
 
 #### Slice 1: what is built
 
@@ -882,6 +990,146 @@ One run between two built copies with the loop on, through the real screens, nob
 
 - Nothing for Phase 6: the owner's real PC is paired with the real server and they reported that everything works.
 - Phase 7 (not started; the owner starts it).
+
+### Flashcards sync (built, not shipped)
+
+- **State:** built on `claude/upstream-0.6.0`, together with the phone plugins round ("Plugins on a phone" under "Phone layouts"). **Not shipped:** not pushed to `side-tutor` or to the server's branch; both workflow dry runs are still to run. A second review, of the sync part, is under way.
+- **Why:** the owner added it while answering the phone plan's questions: decks made in the Windows app should be on the phone, so **sync Flashcards between the Windows app and the server in this round**.
+- **The plan** is `docs/phone-plugins-plan.md` ("Flashcards sync": decisions S1–S6 and the smaller rules), approved by the owner. Change a decision only with the owner's approval.
+- It replaces decision 17 of the 0.6.0 merge ("plugin data is per device") for Flashcards' library only. Every other plugin's data, and which plugins are on, stay per device.
+- **The sessions' rules don't apply here:** no lease, no Take over, no held state, nothing discarded.
+
+#### Flashcards sync decisions (owner)
+
+1. **S1, how: combine everything.** Every change travels on its own; every review from both devices is kept; each fact's schedule is worked out again from all its reviews.
+2. **S2, time zone: the server follows the PC.** The Windows app tells the server its time zone with a sync, and the server program uses it from then on.
+3. **S3, the first sync: combine both libraries.** Nothing is deleted. A fresh backup on each side first.
+4. **S4, two decks from the same session: joined into one deck.**
+5. **S5, edited on one device, deleted on the other: a delete always wins.**
+6. **S6, settings:** the four scheduling settings and the generation chunk budget sync; the model choice stays per device.
+
+The smaller rules approved with them (what travels, schedules never travel, order, timing, the backup, protocol 3, the one edit to the plugin's code, the known limits) are in the plan; what was built for each is below.
+
+#### Rulings made while building (for the owner to review)
+
+- **A PC with no Flashcards file brings no settings** at its first Flashcards sync: the server's stay. The Flashcards exchange doesn't reset settings a PC didn't send (`resetUnsentSettings: false` in `FLASHCARDS_RULES`), where the app's settings exchange puts a first PC's unset settings back to their defaults.
+- **A device with a generation batch under way holds its Flashcards exchange:** a batch `running` or `cancelling`, while the plugin is on. The server answers 409 `busy` and the PC tries again next round; a PC with its own batch under way sends nothing. Sessions, graph and settings go on. A switched-off plugin is never busy.
+- **How "a delete always wins" reads for decks and facts:**
+  - a fact deleted on one device while the other added a new card to it survives, with the new card;
+  - a deck deleted on one device but given a card on the other is a normal deck again;
+  - which decks a fact is in is one item per fact: changed on both devices while apart, the later change wins whole;
+  - a joined twin deck can undercount that day's new cards (reviews keep the deck id they were recorded under).
+- **Schedules are worked out again when the zone changes.** When the server takes a zone it didn't keep or run in, it rebuilds every schedule in that zone; the PC does the same when it sends its zone (its first exchange, or after it moved). Without that, a review made in the old zone kept that zone's due date on one side only (found in the two-copy run). The cost: at the first sync, due dates of facts reviewed in the other zone can move by up to a day. With two PCs in different zones, the one not counted keeps its own zone's schedules. The owner has been told.
+- **A side with no Flashcards folder** makes no backup folder and counts as backed up.
+
+#### What travels, and what stays per device
+
+- **Travels:** decks (name, daily new-card limit, order), facts and their cards (question, answer, order), which decks each fact is in, every review, the four scheduling settings (`retention`, `learningSteps`, `relearningSteps`, `dayStart`) and the chunk budget (`chunkBudget`), and the record of each uploaded file (its name and fingerprint, so the same file doesn't become a second deck).
+- **Per device, never synced:** the model and thinking choice, generation batches and their retry, the text of uploaded files, the cost log, creation and deletion receipts, and the file's `revision`. A fact's `version` rises only where the fact really changed, so a review open elsewhere stays valid.
+- **Schedules never travel.** After every exchange each device works each fact's schedule out again from the combined reviews (below).
+- **A device where Flashcards is switched off** still receives the data (the file is written with the plugin off or never started), so it is there when the plugin is switched on.
+- **A generation under way** finishes on its device; its cards travel once they are added.
+
+#### The items (`src/core/sync/flashcards-items.ts`)
+
+- Every key is `<kind>|<id>`, and each item travels on its own, latest change wins, through the same per-item exchange as the settings (slice 5):
+  - `s|<setting>` the five synced settings;
+  - `d|<deck>` a deck `{name, newLimit, sourceId?, s, at}`; `x|<deck>` a deck was deleted;
+  - `o|decks` the deck order; `q|<deck>` the order of the facts in a deck;
+  - `p|<fact>` a fact `{origin, name, statement, snapshot?, sourceId?, created}`; `e|<fact>` when the fact was deleted; `m|<fact>` which decks it is in `{deckId: stamp}`;
+  - `c|<card>` a card `{p, q, a, s}`; `k|<card>` a card was deleted; `u|<fact>` the order of a fact's cards;
+  - `r|<review>` one review, never changed: `{p, c, rating, at, deckIds, settings}`;
+  - `f|<file>` an uploaded file's record `{name, fingerprint, deckId}`.
+- **Nothing is deleted by a missing item.** Deletions are items of their own (`x`, `k`, `e`), so latest-change-wins only ever chooses between two values. A per-device memory (`<data>/sync/flashcards-memory.json`) tells "deleted here" from "never had it": the plugin's file keeps no record of what it deleted.
+- **A card's deletion is final:** `k` is never taken back, whatever was edited later.
+- **A fact deleted and made again starts fresh:** `e` says from when its reviews count. A fact is alive while it has a card. Its moment of making (`created`) travels, so a fact nobody has reviewed yet has the same schedule everywhere.
+- **Order items exist only after a real reorder.** Members an order doesn't know follow it by stamp, then id, so the later reorder wins and anything it doesn't know comes after.
+- **Twin decks** (S4): two decks from the same session or source (`sourceId`), or made from the same uploaded file (fingerprint), are joined. The earliest made stays; name and limit come from the most recently changed.
+- **The same question, word for word after trimming, twice on one fact:** the earlier card stays, the other is deleted (the plugin's own rule when it generates).
+- **A review item leaves out** `before`, `after` and `introduced` (worked out again), `requestId` and `ticketId` (local), and the model fields of its settings copy.
+
+#### The replay (`src/core/sync/flashcards-replay.ts`)
+
+- Each fact's schedule is worked out again from its counted reviews, in the order they were made, with the plugin's own scheduler (`plugins/flashcards/src/scheduler.cjs`) and the settings copy each review recorded. A new fact starts from the plugin's schedule for the moment it was made.
+- Pure: the scheduler is passed in and no clock is read. It runs in the process's own time zone (S2 below).
+- **It reproduces the plugin's own file byte for byte** on single-device histories: 40 days of reviews with all four ratings, lapses, learning and relearning steps and settings changed along the way; a card deleted; a fact deleted and made again (`tests/sync-flashcards-replay.test.ts`).
+
+#### The wiring
+
+- **The route:** `POST /api/sync/flashcards`, behind the device key like every `/api/sync/*` path.
+  - Request `{cursor, all, changes: [{key, value, t}], more?: true, timeZone?}`; answer `{cursor, items: [{key, value | same: true, t}], time, more?: true}`.
+  - Refusals: 409 `send_all` (send everything once), `busy`, `flashcards_failed` (the server couldn't take it this time; tried again next round); 400 when the changes didn't arrive whole.
+- **A second instance of the per-item exchange:** `createMapsAuthority` / `createMapsDesktop` (`src/server/sync/maps-sync.ts`) take optional `rules` and options (`busy`, `makeBackup`, the time zone). Both sides now work on a copy of their state (`structuredClone`), agreed only once it is in the files. The settings exchange keeps its rules (`MAP_RULES`).
+- **Paged both ways:** at most 5,000 items or about 4 MB a page (`PAGE_ITEMS`, `PAGE_BYTES`). The desktop takes what arrived once, after the last page.
+- **Cached:** the parsed library by its file's stamp (inode, size and times), and the items with their fingerprints by the file's stamp plus the memory's. **An idle round reads no Flashcards file and writes nothing.**
+- **Apply is one synchronous step**, with nothing awaited between reading and writing (`src/server/sync/flashcards-files.ts`): read the file again, combine (`applyFlashcardsChanges`, with the plugin's own scheduler), write the file whole (a temporary file renamed over it, as the plugin writes), save the memory (after the file: a memory ahead of its file would read as deletions), then tell open pages: `plugin-message {pluginId: "flashcards", topic: "changed", data: {by: "sync"}}`. The loop doesn't take a notice "by sync" for a change made here.
+- **The format lock:** a file whose `version` isn't the one this build reads (`FLASHCARDS_FORMAT`, 1), or that isn't the plugin's shape, is neither sent nor taken, and never written over. No message on screen.
+- **The round** (`src/server/sync/round.ts`): Flashcards is its last part, after the settings, in its own try/catch, so a failure there leaves the rest syncing. While the server can't be reached, its changes are still noted with their times (`detect()`), as for the settings. The loop's 2-second trigger fires on Flashcards' own `changed` and `batch-changed` notices (`flashcardsChanged` in `loop.ts`).
+- **State files** under `<data>/sync/`, each side's own and never synced: on the server `flashcards.json` and `time-zone.json`; on a PC `flashcards-desktop.json`; on both `flashcards-memory.json`.
+  - A memory missing while the exchange's state is there means this side's records are lost: the server starts its table afresh (each PC is then told `send_all`), and a PC sends everything again.
+- **The backup:** `backups/before-first-flashcards-sync <date>/core-plugin-data/flashcards/`, once per side, before anything the exchange writes (`makeFlashcardsBackup` in `src/store/sync/backup.ts`). If it can't be made, the Flashcards part of the round fails and the rest syncs.
+- **The time zone** (S2; `src/server/sync/flashcards-zone.ts`):
+  - the PC sends its IANA zone name on the first page whenever it differs from the last one it sent;
+  - the server checks the name, stores `{version: 1, zone, from, at}` in `time-zone.json`, and sets `process.env.TZ` at once. It takes a zone only after its backup, and not while it is busy;
+  - at every start it sets it again before the plugins start (`instrumentation.ts`, server mode only). Nothing is set on a server no desktop ever gave a zone to;
+  - with two PCs in different zones, the most recently changed one counts;
+  - checked on Node 22 and Node 26: `Date`'s local getters, `Intl`'s default zone and the plugin's study day follow.
+- **Unpair and pairing again:** the Flashcards state is kept on both sides, like the settings state. The same server carries on; a different server starts afresh, with a new backup.
+- **An app that isn't paired** makes no Flashcards request and writes no Flashcards sync file (`tests/sync-inert.test.ts`).
+
+#### Protocol 3
+
+- `SYNC_PROTOCOL_VERSION` is **3** (`src/core/sync/protocol.ts`): the library travels on a route a protocol-2 build doesn't have, and a PC sends its time zone.
+- `tests/sync-sessions.test.ts` pins which protocol each Flashcards file format needs (`PROTOCOL_FOR_FLASHCARDS_FORMAT = {1: 3}`), beside the chat format's table: a new format with no row fails it.
+- As with protocol 2, both sides must be updated, the server first; until both are, all sync pauses and nothing is discarded. The steps are "Updating the server and the PC together" in `docs/upstream-0.6.0.md`.
+
+#### The plugin's store (the one edit to Flashcards' code)
+
+- `plugins/flashcards/src/store.cjs`: `get()` and `change()` compare the file's stamp (inode, size, mtime, ctime) with what they last read or wrote, and read the file again when it changed on disk. A file that went missing keeps what is in memory; the next change writes it back whole.
+- So the plugin, running in the same process, sees what sync wrote without a restart, and its next write can't put back what sync replaced.
+- One line of `plugins/flashcards/tests/store.test.cjs` changed with it. Both are listed under "At the next upstream release" in `docs/upstream-0.6.0.md`.
+- The Windows workflow runs the plugin's store and back-end tests on Windows in a step of their own; its `tests/sync-*.test.ts` glob picks up the new sync tests.
+
+#### Known limits
+
+- A concept that is two graph nodes (learned separately on both devices before they synced) is two facts.
+- A server that lost its sync records can bring deleted cards back.
+- The same card reviewed on both devices while apart: both reviews count, and that day's new-card limit can be passed.
+- A joined twin deck can undercount that day's new cards; with two PCs in different zones, the one not counted keeps its own zone's schedules (above).
+- 60,000 reviews (over 26 MB) weren't tried.
+
+#### Tests
+
+- `tests/sync-flashcards.test.ts`: the pure rules, with two devices that each run the plugin's real back end. Both libraries combined at the first sync, every review counted, delete-wins, a deck that still has cards stays, a fact made again starts fresh, twin decks joined, the same question twice, the order rule, settings and the model choice, an idle exchange, and the same library whatever order the changes arrive in.
+- `tests/sync-flashcards-replay.test.ts`: the replay, byte for byte against the plugin's own file.
+- `tests/sync-flashcards-exchange.test.ts` (with `tests/sync-flashcards-harness.ts`): the real exchange, the real files and the plugin's real back end on each side, never restarted. Pages both ways, the backups, a review landing without a restart, plugin writes right before and after a sync write, an idle round, a generation holding the exchange, the format lock, a lost memory, a PC with no library, no backup no sync, and the time zone sent once and again when it changes.
+- `tests/sync-flashcards-zone.test.ts`: the zone kept and used by the running process at once and at the next start, the most recent one counting, a name that isn't a zone ignored, the plugin's study day following, and the loop's 2-second trigger.
+- `tests/sync-inert.test.ts` (an unpaired app does nothing new) and the protocol rows in `tests/sync-sessions.test.ts`.
+
+#### The two-copy run
+
+Two built copies with the loop on, the server in UTC and the desktop in another zone, nobody pressing Sync now:
+
+- unpaired: nothing;
+- a first sync of two different libraries: equal on both 0.8 s after pairing, with a backup on each side;
+- a review on the PC reached the server in 0.76 s; one on the server reached the PC in 10 s (its next check);
+- a generation on the server held the PC's review (one `busy`), which went 0.76 s after the batch ended;
+- the PC offline with changes on both sides: all 13 reviews, the hand-made card and the rename kept, and identical schedules 1.9 s after the PC started;
+- an edit against a delete: deleted on both. Twin decks: joined;
+- 30 idle seconds: no Flashcards file written, 3 requests with 0 changes;
+- 2,000 facts and 20,000 reviews (a 20.3 MB file): first-synced in 10.7 s, in 7 pages up and 3 down;
+- unpair and pair again: carried on with 1 change and no second backup.
+
+#### Only the real PC and server can confirm
+
+- Windows file stamps, and the rename over the file while another program holds it.
+- The real Windows zone name.
+- That the server image's compose `TZ` is overridden by the zone the PC gave.
+
+#### Log lines and API texts
+
+- No wording on screen. The server's log: `[LearnHarness] Flashcards sync: this server now keeps time in <zone>, the paired desktop app's time zone.`; `[LearnHarness] Flashcards sync: <reason>` (once per distinct reason, on either side); `[LearnHarness] Flashcards sync: the saved time zone couldn't be used: …`.
+- Texts only the API carries: "The Flashcards changes didn't arrive whole.", "The server is busy with this. Try again in a moment.", "The server couldn't take the Flashcards changes this time."
 
 ### Later phases: decisions still open (ask when you get there)
 
