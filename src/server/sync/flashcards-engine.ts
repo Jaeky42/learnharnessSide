@@ -119,15 +119,16 @@ export function watchFlashcardsChanges(deps: {
 	clearTimer: (handle: unknown) => void;
 	now: () => number;
 	active: () => boolean;
-	/** `since`: when the first change it is noting was announced. */
+	/** `since`: when the last change it is noting was announced (an exchange that looked before it hasn't noted it). */
 	detect: (since: number) => void;
 }): () => void {
 	// Quiet for a while after the last change (a review session is many changes), and never
 	// later than the ceiling after the first: a change keeps a time within a minute of when it was made.
 	let first: number | null = null;
+	let last = 0;
 	let timer: unknown = null;
 	const run = (): void => {
-		const since = first!;
+		const since = last;
 		first = null;
 		timer = null;
 		try { deps.detect(since); } catch (error) { console.error(`[LearnHarness] Flashcards sync: ${error instanceof Error ? error.message : String(error)}`); }
@@ -136,6 +137,7 @@ export function watchFlashcardsChanges(deps: {
 		if (!isFlashcardsChange(event) || !deps.active()) return;
 		const now = deps.now();
 		first ??= now;
+		last = now;
 		if (timer !== null) deps.clearTimer(timer);
 		timer = deps.setTimer(run, Math.max(0, Math.min(WATCH_QUIET_MS, first + WATCH_CEILING_MS - now)));
 	});

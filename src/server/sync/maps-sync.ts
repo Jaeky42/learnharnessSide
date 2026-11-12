@@ -210,7 +210,7 @@ export function createMapsAuthority(deps: {
 	return {
 		detect(since) {
 			if (deps.locked?.()) return;
-			// An exchange since then has noted it all, with the same times.
+			// An exchange since then (`since`: the newest change being noted) has noted it all, with the same times.
 			if (since !== undefined && lastLook >= since) return;
 			const stored = deps.state.read();
 			if (!stored) return;

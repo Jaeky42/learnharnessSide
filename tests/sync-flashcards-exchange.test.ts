@@ -601,7 +601,8 @@ describe("Flashcards sync: what a review of the wiring found", () => {
 		// A review session: a rating every 10 s.
 		const start = now;
 		for (let i = 0; i < 10; i++) { say("changed"); pass(10_000); }
-		assert.deepEqual(detected, [start, start + 50_000], "noted at the ceiling, then again 50 s after the next first change");
+		// Each noting names the newest change it covers, so an exchange that looked before that change doesn't count as having noted it.
+		assert.deepEqual(detected, [start + 40_000, start + 90_000], "noted at the ceiling, then again 50 s after the next first change");
 		pass(60_000);
 		assert.equal(detected.length, 2, "nothing while nothing changes");
 		// One change: noted 20 s later.
@@ -634,6 +635,14 @@ describe("Flashcards sync: what a review of the wiring found", () => {
 		clock.now += 1000;
 		w.authority.detect(announced);
 		assert.equal(stamp(), after, "the exchange noted it already");
+		// A change made after that exchange is noted: the watcher names its newest change, which the exchange didn't see.
+		await w.server.device!.call("save-deck", { id: w.server.library()!.decks[0]!.id, name: "Renamed again" });
+		const later = clock.now;
+		clock.now += 1000;
+		w.authority.detect(announced);
+		assert.equal(stamp(), after, "named by an older change only, it would be passed over");
+		w.authority.detect(later);
+		assert.notEqual(stamp(), after, "named by the newest change, it is noted");
 	});
 
 	it("two PCs whose first exchanges overlap in pages: only the first brings its settings", async () => {

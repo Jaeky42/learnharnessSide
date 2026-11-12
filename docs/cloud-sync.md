@@ -1094,7 +1094,7 @@ The smaller rules approved with them (what travels, schedules never travel, orde
 - **State files** under `<data>/sync/`, each side's own and never synced: on the server `flashcards.json` and `time-zone.json`; on a PC `flashcards-desktop.json`; on both `flashcards-memory.json` and `flashcards-memory-reviews.json` ("The memory" above).
 - **The backup:** `backups/before-first-flashcards-sync <date>/core-plugin-data/flashcards/`, once per side, before anything the exchange writes (`makeFlashcardsBackup` in `src/store/sync/backup.ts`). If it can't be made, the Flashcards part of the round fails and the rest syncs. It, and the first-sync backup, also keep Flashcards sync's own files under `sync/` when they exist (the memory and the exchange's state), so a library restored with them is whole.
 - **Noting this side's own changes** (`watchFlashcardsChanges` in `flashcards-engine.ts`): each side notes its own Flashcards changes with their time, also with nobody connected, **20 s after the last change and at most 50 s after the first one not yet noted** (`WATCH_QUIET_MS`, `WATCH_CEILING_MS`). Only once `sync/flashcards.json` (the server) or the PC's state exists, and on a PC only while it is paired; nothing on an unpaired side, and an idle side writes nothing. It runs while a generation holds the exchange too. Without it the server timed its own changes when a PC next asked, so an older phone edit could beat a newer PC edit.
-  - **On the server** (started in `autostart.ts`) it skips when an exchange has looked at the files since the first change, and it leaves reviews (`r|`, `ExchangeRules.untimed`: they never change, so their time decides nothing) to the next exchange, so a review-only session rewrites no table.
+  - **On the server** (started in `autostart.ts`) it skips when an exchange has looked at the files since the newest change it is noting (a change made after that exchange, in the same wait, is still noted), and it leaves reviews (`r|`, `ExchangeRules.untimed`: they never change, so their time decides nothing) to the next exchange, so a review-only session rewrites no table.
   - **On a PC** (started with its loop) the same timing; its noting has neither skip.
   - The loop's 2-second sync trigger on the plugin's notices is unchanged; only the noting moved.
 - **A generation holding the exchange:** while it does, its notices start no round; the one after it ends does. The hold ends after 15 minutes with no change to the active batches (`BUSY_HOLD_MAX_MS`), with a log line.
@@ -1111,7 +1111,7 @@ The smaller rules approved with them (what travels, schedules never travel, orde
 
 #### The review of the wiring, and its fixes
 
-A reviewer read the sync part. It found six serious issues, each reproduced by a script, all fixed before anything shipped (`51608be`); lower ones were fixed too. A second pass by the same reviewer, over the fixes, is under way.
+A reviewer read the sync part. It found six serious issues, each reproduced by a script, all fixed before anything shipped (`97fe7ee`); lower ones were fixed too. A second and a third pass by the same reviewer followed (below).
 
 1. **Putting the first-sync backup back** made sync read the missing cards as deletions and delete them everywhere. Now a library that doesn't follow its memory counts as "records lost", and nothing missing counts as deleted ("The memory" above).
 2. **A fact deleted and generated again before a device's first sync** had its schedule rebuilt from the old reviews. Now an `e` is set at the first read.
@@ -1122,7 +1122,7 @@ A reviewer read the sync part. It found six serious issues, each reproduced by a
 
 Also changed then: deck membership as one item per fact and deck, which combines; the same-question rule for pairs from two devices only; the 15-minute end of a generation's hold, and no rounds from its notices; zone names in their standard form and checked after they are set; one rebuild per zone on the PC.
 
-**The second pass**, by the same reviewer over those fixes, found six more, all fixed (`f831b39`):
+**The second pass**, by the same reviewer over those fixes, found six more, all fixed (`5e3f9a8`):
 
 1. **A PC whose clock was ahead of the server's, with a library put back**, sent times before 1970 and was refused every round: it never synced Flashcards again. Now times are clamped to 0 on both sides.
 2. **A fact made on both devices** lost the other device's earlier reviews at a later read (the `e` was inferred from `created`). Now it is inferred only for a fact sync has never seen here, from what the file counted.
@@ -1131,7 +1131,9 @@ Also changed then: deck membership as one item per fact and deck, which combines
 5. **The server's own noting** ran 2 s after a notice, noted reviews too and didn't run while a generation held the exchange. Now 20 s after the last change, at most 50 s after the first, skipped after an exchange, reviews left to the exchange, and also while a generation holds it.
 6. **The fallback for a fact taken out of every deck** now looks at deleted decks: the last deck it was put in that isn't deleted; if all are, the last one, which stays as a deck, so the fact is never dropped.
 
-A third pass, over these, is the last check.
+**The third pass**, over those six: all fixed, nothing found that loses, brings back or double-counts a card or a review, and the reviewer's word was to ship. It found one new, narrow gap, fixed before shipping:
+
+- the server's noting skipped whenever an exchange had looked since the *first* change of its wait, so a phone change made after that exchange, in the same wait, was noted only at the next exchange, with a later time; if the PC went offline in those seconds and then edited the same item, the older phone edit won. The watcher now names the *newest* change it is noting, and the skip applies only when an exchange looked after that one. Confirmed with the reviewer's own script.
 
 #### Protocol 3
 
