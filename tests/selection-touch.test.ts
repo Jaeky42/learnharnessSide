@@ -211,15 +211,81 @@ describe("observeSelectionActions on a touch screen", () => {
 		p.done();
 	});
 
-	it("handle drags (selectionchange only) hide it, and it comes back once they rest", () => {
+	it("handle drags (selectionchange only): once shown it stays and is placed again at the next frame for each change (owner's choice, \"Stays, follows\")", () => {
 		const p = page();
 		p.hold();
 		p.advance(SHOW);
 		assert.deepEqual(p.log, ["show touch"]);
-		for (let i = 0; i < 5; i++) { p.observer.selectionChanged(); p.advance(100); }
-		assert.deepEqual(p.log, ["show touch", "dismiss cancel"]);
-		p.advance(SHOW - 100);
-		assert.deepEqual(p.log, ["show touch", "dismiss cancel", "show touch"]);
+		const at = SHOW;
+		for (let i = 1; i <= 5; i++) {
+			p.observer.selectionChanged();
+			p.advance(15);
+			assert.equal(p.shown.length, i, "not yet: the next frame");
+			p.advance(1);
+			assert.deepEqual(p.shown.at(-1), { pointer: null, touch: true, at: at + i * 16 });
+		}
+		assert.ok(!p.log.some((entry) => entry.startsWith("dismiss")), "never hidden in between");
+		p.done();
+	});
+
+	it("several changes within one frame are placed once, for the last", () => {
+		const p = page();
+		p.hold();
+		p.advance(SHOW);
+		for (let i = 0; i < 4; i++) p.observer.selectionChanged();
+		p.advance(16);
+		assert.deepEqual(p.log, ["show touch", "show touch"]);
+		p.done();
+	});
+
+	it("the selection cleared: the toolbar finds nothing and stops following; the next selection settles first again", () => {
+		const p = page();
+		p.hold();
+		p.advance(SHOW);
+		p.observer.selectionChanged();
+		p.advance(16);
+		p.observer.cancel(); // what the toolbar does when it finds no selection
+		p.observer.selectionChanged();
+		p.advance(16);
+		assert.equal(p.shown.length, 2, "not placed at the next frame");
+		p.advance(SHOW);
+		assert.equal(p.shown.length, 3);
+		p.done();
+	});
+
+	it("a new press and hold elsewhere settles first again (first appearance unchanged)", () => {
+		const p = page();
+		p.hold();
+		p.advance(SHOW);
+		p.hold(5);
+		p.advance(16);
+		assert.deepEqual(p.log, ["show touch", "dismiss interaction"]);
+		p.advance(SHOW);
+		assert.deepEqual(p.log, ["show touch", "dismiss interaction", "show touch"]);
+		p.done();
+	});
+
+	it("an autoscroll during a resize: hidden while the lesson scrolls, back as soon as scrolling settles, with no settle wait on top", () => {
+		const p = page();
+		p.hold();
+		p.advance(SHOW);
+		p.observer.selectionChanged();
+		p.advance(16);
+		const shownBefore = p.shown.length;
+		const base = p.shown.at(-1)!.at; // the first scroll comes now
+		for (let i = 0; i < 6; i++) { p.observer.selectionChanged(); p.scroll(); p.advance(30); }
+		assert.equal(p.log.filter((entry) => entry === "dismiss cancel").length, 1, "hidden once, at the first scroll");
+		assert.equal(p.shown.length, shownBefore, "not placed while the lesson moves");
+		const lastScroll = base + 5 * 30;
+		p.advance(lastScroll + 150 + 16 - 1 - (base + 6 * 30));
+		assert.equal(p.shown.length, shownBefore);
+		p.advance(1);
+		assert.equal(p.shown.length, shownBefore + 1);
+		assert.equal(p.shown.at(-1)!.at, lastScroll + 150 + 16, "150 ms after the last scroll, then a frame");
+		// And it follows again after that.
+		p.observer.selectionChanged();
+		p.advance(16);
+		assert.equal(p.shown.length, shownBefore + 2);
 		p.done();
 	});
 
@@ -232,29 +298,43 @@ describe("observeSelectionActions on a touch screen", () => {
 		p.advance(1000);
 		p.up("touch", 7, p.button);
 		p.advance(10);
-		assert.deepEqual(p.log, ["show touch"], "no dismiss before the click");
+		assert.deepEqual(p.log, ["show touch"], "no dismiss and no re-place before the click");
 		p.click(p.button); // the action runs here, with the passage captured at show
+		p.observer.cancel(); // what the toolbar's done() does after the action
 		p.advance(0);
-		assert.deepEqual(p.log, ["show touch", "dismiss cancel"]);
 		// Then the selection is looked at again (the toolbar finds none and closes).
 		p.advance(SHOW);
-		assert.deepEqual(p.log, ["show touch", "dismiss cancel", "show touch"]);
+		assert.deepEqual(p.log, ["show touch", "show touch"]);
 		p.done();
 	});
 
-	it("a press on the toolbar that never clicks lets go after its release time", () => {
+	it("a press on the toolbar that ran nothing (a held session) and changed the selection: placed again at the next frame after the click", () => {
 		const p = page();
 		p.hold();
 		p.advance(SHOW);
 		p.down("touch", 7, p.button);
 		p.observer.selectionChanged();
 		p.up("touch", 7, p.button);
-		p.advance(TOUCH_ACTION_RELEASE_MS - 1);
-		assert.deepEqual(p.log, ["show touch"]);
-		p.advance(1);
-		assert.deepEqual(p.log, ["show touch", "dismiss cancel"]);
+		p.click(p.button);
+		p.advance(16);
+		assert.deepEqual(p.log, ["show touch", "show touch"]);
 		p.done();
 	});
+
+	it("a press on the toolbar that never clicks lets go after its release time, then follows", () => {
+		const p = page();
+		p.hold();
+		p.advance(SHOW);
+		p.down("touch", 7, p.button);
+		p.observer.selectionChanged();
+		p.up("touch", 7, p.button);
+		p.advance(TOUCH_ACTION_RELEASE_MS + 15);
+		assert.deepEqual(p.log, ["show touch"]);
+		p.advance(1);
+		assert.deepEqual(p.log, ["show touch", "show touch"]);
+		p.done();
+	});
+
 
 	it("a press on the toolbar with the selection unchanged leaves it alone (a held session's greyed buttons)", () => {
 		const p = page();
@@ -445,6 +525,30 @@ describe("the desktop app keeps upstream's behaviour for every gesture (a touch-
 		assert.deepEqual(p.log, ["show"]);
 		p.cancel("touch");
 		assert.deepEqual(p.log, ["show", "dismiss cancel"]);
+		p.done();
+	});
+});
+
+describe("following a growing selection: the side switches as its centre crosses the middle", () => {
+	it("a word at 327, then the end dragged down to 700: above the start, then below the end", () => {
+		const first = word(327);
+		const small = resolveTouchSelectionPosition({ ...phone, firstLine: first, lastLine: first });
+		assert.equal(small.side, "above-start");
+		const last = { left: 20, right: 260, top: 688, bottom: 712 };
+		const grown = resolveTouchSelectionPosition({ ...phone, firstLine: first, lastLine: last });
+		assert.deepEqual(grown, { x: 260, y: 712 + TOUCH_HANDLE_GAP, side: "below-end" });
+	});
+});
+
+describe("the desktop app: selection changes during a finger's press are upstream's (nothing until the mouseup)", () => {
+	it("many changes, no show, then the mouseup at once", () => {
+		const p = page("Mozilla/5.0 Chrome/138.0.0.0 Electron/37.0.0 Safari/537.36");
+		p.down("touch");
+		for (let i = 0; i < 5; i++) { p.observer.selectionChanged(); p.advance(16); }
+		assert.equal(p.shown.length, 0);
+		p.mouseup(1, 9, 9);
+		p.advance(16);
+		assert.deepEqual(p.log, ["show"]);
 		p.done();
 	});
 });

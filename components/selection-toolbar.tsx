@@ -145,11 +145,14 @@ export function SelectionToolbar({ viewport, actions, blocked }: { viewport: HTM
 		const eligible = () => isInteractionScopeEligible(viewport, controller);
 		const unsubscribe = controller?.subscribe(() => { if (!eligible()) clear(); });
 		const update = (pointer: SelectionActionPoint | null, touch?: boolean) => {
-			if (!eligible()) { clear(); return; }
+			// Side-tutor fork (touch): a toolbar that follows the selection stops
+			// following once there is nothing to show (the selection cleared).
+			const hide = () => { if (touch) observerRef.current?.cancel(); clear(); };
+			if (!eligible()) { hide(); return; }
 			const capture = captureSelection(viewport, window.getSelection());
-			if (!capture || !actionsRef.current.some((action) => action.visible(capture))) { clear(); return; }
+			if (!capture || !actionsRef.current.some((action) => action.visible(capture))) { hide(); return; }
 			const viewportRect = viewport.getBoundingClientRect();
-			if (!isSelectionRectVisible(capture.range.getBoundingClientRect(), [viewportRect]) || !selectionVisible(capture.range, viewport)) { clear(); return; }
+			if (!isSelectionRectVisible(capture.range.getBoundingClientRect(), [viewportRect]) || !selectionVisible(capture.range, viewport)) { hide(); return; }
 			const lines = Array.from(capture.range.getClientRects());
 			// Side-tutor fork (touch): opposite the system's Copy / Look Up box,
 			// clear of the selection handles, inside the part of the lesson the
