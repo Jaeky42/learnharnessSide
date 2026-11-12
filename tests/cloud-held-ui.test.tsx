@@ -11,7 +11,7 @@ import React, { act } from "react";
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
 
 import assert from "node:assert/strict";
-import { afterEach, beforeEach, describe, it } from "node:test";
+import { after, afterEach, beforeEach, describe, it } from "node:test";
 import type { Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import {
@@ -29,6 +29,12 @@ const { renderToStaticMarkup } = await import("react-dom/server");
 const { ServerEventsProvider } = await import("../components/server-events.tsx");
 const { CloudProvider, useCloud } = await import("../components/cloud/cloud-state.tsx");
 const { SessionStrip } = await import("../components/cloud/session-strip.tsx");
+const { InteractionLayersProvider } = await import("../components/interaction-layers.tsx");
+const { installModalDom } = await import("./modal-dom.ts");
+// The boxes sit on the host's dialog layer (HostDialog), which uses a few
+// browser APIs linkedom lacks.
+Object.assign(globalThis, { HTMLElement: dom.window.HTMLElement, Element: dom.window.Element });
+after(installModalDom(dom));
 
 const originalFetch = globalThis.fetch;
 const realTimers = { setInterval: globalThis.setInterval, clearInterval: globalThis.clearInterval, setTimeout: globalThis.setTimeout, clearTimeout: globalThis.clearTimeout };
@@ -92,11 +98,29 @@ async function mount(node: React.ReactElement, live = channel()) {
 	document.body.appendChild(host);
 	const root = createRoot(host);
 	roots.push({ root, host });
-	await act(async () => root.render(<ServerEventsProvider connect={live.connect}><CloudProvider>{node}</CloudProvider></ServerEventsProvider>));
+	await act(async () => root.render(<InteractionLayersProvider><ServerEventsProvider connect={live.connect}><CloudProvider>{node}</CloudProvider></ServerEventsProvider></InteractionLayersProvider>));
 	await settle();
 	return Object.assign(host, { live });
 }
 
+/** A press-and-release on an element, the way the host's backdrop reads one. */
+const press = async (target: Element) => {
+	for (const type of ["pointerdown", "pointerup", "click"]) {
+		await act(async () => {
+			const event = new dom.window.Event(type, { bubbles: true, cancelable: true });
+			Object.assign(event, { pointerId: 1, isPrimary: true, button: 0 });
+			target.dispatchEvent(event);
+		});
+	}
+	await settle();
+};
+const escape = async () => {
+	const event = new dom.window.Event("keydown", { bubbles: true, cancelable: true });
+	Object.assign(event, { key: "Escape" });
+	await act(async () => { document.dispatchEvent(event); });
+	await settle();
+	return event;
+};
 const byTest = (root: ParentNode, id: string) => root.querySelector(`[data-testid='${id}']`);
 const click = async (el: Element | null | undefined) => { assert.ok(el, "the control exists"); await act(async () => { (el as HTMLElement).click(); }); await settle(); };
 const strip = (host: Element) => byTest(host, "session-strip") as HTMLElement | null;
@@ -374,6 +398,23 @@ describe("Take over", () => {
 		assert.equal(byTest(document, "take-over-dialog"), null);
 		assert.equal(posts.length, 1);
 		assert.equal(byTest(host, "take-over")?.hasAttribute("disabled"), false);
+	});
+
+	it("the box is on the host's dialog layer: Esc and a click outside cancel it, and take nothing", async () => {
+		cookie = "lh_cloud=1";
+		const { posts } = script(() => ({ role: "server", held: { chat_1: desk() } }), () => ({ status: "warning", heldBy: desk() }));
+		const host = await mount(<SessionStrip chatId="chat_1" title="Circuits" />);
+		await click(byTest(host, "take-over"));
+		const layer = document.querySelector("[role='dialog'][data-interaction-layer]");
+		assert.ok(layer?.contains(byTest(document, "take-over-dialog")), "inside the host's dialog");
+		assert.equal(layer?.getAttribute("aria-label"), "Take over “Circuits”?");
+		const event = await escape();
+		assert.equal(event.defaultPrevented, true, "the box took the Esc");
+		assert.equal(byTest(document, "take-over-dialog"), null);
+		await click(byTest(host, "take-over"));
+		await press(byTest(document, "take-over-backdrop")!);
+		assert.equal(byTest(document, "take-over-dialog"), null);
+		assert.equal(posts.filter((p) => p.force === true).length, 0);
 	});
 
 	it("a request that fails says so, and Take over is offered again", async () => {

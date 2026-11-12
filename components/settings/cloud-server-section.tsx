@@ -33,7 +33,7 @@ const IDLE_POLL_MS = 10_000;
 /** A pairing code's life on the server (PAIRING_CODE_LIFETIME_MS); a PC paired since the code was made used it. */
 const CODE_LIFETIME_MS = 10 * 60 * 1000;
 const buttonClass = "rounded-sm border border-border px-3 py-1.5 font-ui text-sm text-foreground transition-colors hover:bg-accent disabled:opacity-50";
-const dangerClass = "rounded-sm border border-border px-3 py-1.5 font-ui text-sm text-red-500 transition-colors hover:bg-red-500/10 disabled:opacity-50";
+const dangerClass = "rounded-sm border border-border px-3 py-1.5 font-ui text-sm text-error transition-colors hover:bg-error/10 disabled:opacity-50";
 
 const day = (ms: number): string => new Date(ms).toLocaleDateString(undefined, { day: "numeric", month: "short" });
 
@@ -132,7 +132,7 @@ export function CloudServerSection() {
 			{desktops === undefined ? <p className="text-xs text-muted-foreground/70">Loading…</p>
 				: desktops === null ? (
 					<div className="flex flex-col items-start gap-2">
-						<p role="alert" className="text-xs text-red-500">Cloud sync couldn’t be checked. Try again.</p>
+						<p role="alert" className="text-xs text-error">Cloud sync couldn’t be checked. Try again.</p>
 						<button type="button" className={buttonClass} onClick={() => void load()}>Check again</button>
 					</div>
 				) : (
@@ -187,7 +187,7 @@ export function CloudServerSection() {
 						) : (
 							<button type="button" className={`${buttonClass} self-start`} disabled={busy} onClick={() => void newCode()} data-testid="cloud-add">{CLOUD_SERVER_TEXT.add}</button>
 						)}
-						{error && <p role="alert" className="text-xs text-red-500" data-testid="cloud-error">{error}</p>}
+						{error && <p role="alert" className="text-xs text-error" data-testid="cloud-error">{error}</p>}
 					</div>
 				)}
 		</SettingsGroup>

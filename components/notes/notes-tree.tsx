@@ -18,8 +18,8 @@
  * The rules are in row-drag.ts, the movement in row-drag-dom.ts.
  */
 
-import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
-import { createPortal } from "react-dom";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { MenuShell } from "@/components/menu-shell";
 import { ChevronRightIcon, FileTextIcon, FolderIcon, FolderOpenIcon, InboxIcon, MoreHorizontalIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { folderOf, INBOX_FOLDER, isFolderSummary, isWithinFolder, noteName, type NotesTreeNote } from "@/src/core";
@@ -94,35 +94,66 @@ export interface TreeMenuItem {
 	danger?: boolean;
 }
 
-function RowMenu({ x, y, items, onClose }: { x: number; y: number; items: TreeMenuItem[]; onClose: () => void }) {
-	const ref = useRef<HTMLDivElement | null>(null);
+/**
+ * A menu opened at a point (a right-click, a press and hold, or under the
+ * note's ⋯ button), on the host's menu layer (MenuShell): its paint order,
+ * Esc and arrow keys are the host's, like the session list's menu. The
+ * point is where it has always opened; `left`/`top` already hold the
+ * clamps each caller used, and the shell's 4 px gap below its anchor is
+ * taken off so the menu's top edge stays on the point.
+ *
+ * A press anywhere outside closes it (mousedown, capturing, as before);
+ * a press inside one of the host's menus never does.
+ */
+export function PointMenu({ left, top, testid, menuClass, onClose, children }: {
+	left: number;
+	top: number;
+	testid: string;
+	menuClass: string;
+	onClose: () => void;
+	children: React.ReactNode;
+}) {
+	const latest = useRef(onClose);
+	latest.current = onClose;
 	useEffect(() => {
 		const onDown = (e: MouseEvent) => {
-			if (!ref.current?.contains(e.target as Node)) onClose();
-		};
-		const onKey = (e: KeyboardEvent) => {
-			if (e.key === "Escape") {
-				e.preventDefault();
-				e.stopPropagation();
-				onClose();
-			}
+			const target = e.target as Element | null;
+			if (target?.closest?.(`[data-testid="${testid}"]`)) return;
+			latest.current();
 		};
 		document.addEventListener("mousedown", onDown, true);
-		document.addEventListener("keydown", onKey);
-		return () => {
-			document.removeEventListener("mousedown", onDown, true);
-			document.removeEventListener("keydown", onKey);
-		};
-	}, [onClose]);
+		return () => document.removeEventListener("mousedown", onDown, true);
+	}, [testid]);
+	const point = useRef({ left, top });
+	point.current = { left, top };
+	const anchorRect = useCallback(() => {
+		const { left: x, top: y } = point.current;
+		return { left: x, right: x, top: y - MENU_GAP, bottom: y - MENU_GAP };
+	}, []);
+	return (
+		<MenuShell
+			testid={testid}
+			getAnchorRect={anchorRect}
+			preferredSide="down"
+			align="left"
+			menuClass={menuClass}
+			onClose={() => { latest.current(); return "closed"; }}
+		>
+			<div role="menu">{children}</div>
+		</MenuShell>
+	);
+}
+
+/** MenuShell's gap between an anchor and the menu below it. */
+const MENU_GAP = 4;
+
+function RowMenu({ x, y, items, onClose }: { x: number; y: number; items: TreeMenuItem[]; onClose: () => void }) {
+	// Where it always opened: at the pointer, kept clear of the window's
+	// right and bottom edges by the same rough measure as before.
 	const left = Math.min(x, window.innerWidth - 230);
 	const top = Math.min(y, window.innerHeight - 40 - items.length * 30);
-	return createPortal(
-		<div
-			ref={ref}
-			role="menu"
-			className="fixed z-50 min-w-48 rounded-lg border border-border bg-popover p-1 text-sm shadow-lg"
-			style={{ left, top }}
-		>
+	return (
+		<PointMenu left={left} top={top} testid="notes-row-menu" menuClass="min-w-48 rounded-lg border border-border bg-popover p-1 text-sm shadow-lg" onClose={onClose}>
 			{items.map((it) => (
 				<button
 					key={it.label}
@@ -140,8 +171,7 @@ function RowMenu({ x, y, items, onClose }: { x: number; y: number; items: TreeMe
 					{it.label}
 				</button>
 			))}
-		</div>,
-		document.body,
+		</PointMenu>
 	);
 }
 

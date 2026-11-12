@@ -1,45 +1,34 @@
 "use client";
 
 /**
- * The notes drawer's dialogs: Move to…, the split preview, and a one-field
- * name prompt (new folder, extract selection). Same shape as the app's
- * other dialogs (portaled z-50, card on a dimmed backdrop, Esc closes and
- * stops there).
+ * The notes drawer's dialogs: Move to…, the split preview, Delete, and a
+ * one-field name prompt (new folder, extract selection). Same shape as the
+ * app's other dialogs: a card on a dimmed backdrop, on the host's dialog
+ * layer (HostDialog, docs/dialog-overlay-contract.md), so Esc and a click
+ * outside close the one on top, and focus and paint order are the host's.
  */
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { createPortal } from "react-dom";
+import { useMemo, useState, type ReactNode } from "react";
 import { FileTextIcon, FolderIcon, InboxIcon, LockIcon } from "lucide-react";
-import { useBackdropDismiss } from "@/components/backdrop-dismiss";
+import { HostDialog } from "@/components/host-dialog";
 import { cn } from "@/lib/utils";
 import { deleteConfirmText, folderOf, INBOX_FOLDER, isWithinFolder, joinPath, nameProblem, noteName, parseSections, type FolderContents } from "@/src/core";
 
+/** The dimmed backdrop (the classes it always had). */
+const DIALOG_BACKDROP = "fixed inset-0 z-50 flex items-center justify-center bg-background/80";
+
 function Frame({ label, onClose, children, wide }: { label: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
-	const backdrop = useBackdropDismiss(onClose);
-	useEffect(() => {
-		const onKey = (e: KeyboardEvent) => {
-			if (e.key === "Escape") {
-				e.preventDefault();
-				e.stopPropagation();
-				onClose();
-			}
-		};
-		document.addEventListener("keydown", onKey);
-		return () => document.removeEventListener("keydown", onKey);
-	}, [onClose]);
-	return createPortal(
-		<div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80" {...backdrop}>
-			<div
-				role="dialog"
-				aria-modal="true"
-				aria-label={label}
-				onClick={(e) => e.stopPropagation()}
-				className={cn("max-h-[calc(100dvh-4rem)] overflow-y-auto rounded-xl border bg-card p-5 shadow-xl", wide ? "w-[40rem] max-w-[calc(100vw-2rem)]" : "w-[26rem] max-w-[calc(100vw-2rem)]")}
-			>
-				{children}
-			</div>
-		</div>,
-		document.body,
+	const frame = (
+		<div
+			onClick={(e) => e.stopPropagation()}
+			className={cn("max-h-[calc(100dvh-4rem)] overflow-y-auto rounded-xl border bg-card p-5 shadow-xl", wide ? "w-[40rem] max-w-[calc(100vw-2rem)]" : "w-[26rem] max-w-[calc(100vw-2rem)]")}
+		/>
+	);
+	// Esc and a click outside close, as they always did (also while busy).
+	return (
+		<HostDialog open aria-label={label} frame={frame} backdropProps={{ className: DIALOG_BACKDROP }} onClose={() => { onClose(); return "closed"; }}>
+			{children}
+		</HostDialog>
 	);
 }
 
@@ -49,6 +38,7 @@ function Actions({ onClose, onConfirm, label, busy, disabled, danger }: { onClos
 			<button type="button" onClick={onClose} className="rounded-md px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
 				Cancel
 			</button>
+			{/* Danger: white on the theme's error colour, as upstream's destructive button. */}
 			<button
 				type="button"
 				onClick={onConfirm}

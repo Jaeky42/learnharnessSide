@@ -11,7 +11,7 @@ import React, { act } from "react";
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
 
 import assert from "node:assert/strict";
-import { afterEach, beforeEach, describe, it } from "node:test";
+import { after, afterEach, beforeEach, describe, it } from "node:test";
 import type { Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import {
@@ -31,6 +31,12 @@ const { CloudProvider } = await import("../components/cloud/cloud-state.tsx");
 const { SessionStrip } = await import("../components/cloud/session-strip.tsx");
 const { SyncChip } = await import("../components/cloud/sync-chip.tsx");
 const { DiscardNotice } = await import("../components/cloud/discard-notice.tsx");
+const { InteractionLayersProvider } = await import("../components/interaction-layers.tsx");
+const { installModalDom } = await import("./modal-dom.ts");
+// The boxes sit on the host's dialog layer (HostDialog), which uses a few
+// browser APIs linkedom lacks.
+Object.assign(globalThis, { HTMLElement: dom.window.HTMLElement, Element: dom.window.Element });
+after(installModalDom(dom));
 
 const originalFetch = globalThis.fetch;
 const realTimers = { setInterval: globalThis.setInterval, clearInterval: globalThis.clearInterval, setTimeout: globalThis.setTimeout, clearTimeout: globalThis.clearTimeout };
@@ -95,11 +101,29 @@ async function mount(node: React.ReactElement, live = channel()) {
 	document.body.appendChild(host);
 	const root = createRoot(host);
 	roots.push({ root, host });
-	await act(async () => root.render(<ServerEventsProvider connect={live.connect}><CloudProvider>{node}</CloudProvider></ServerEventsProvider>));
+	await act(async () => root.render(<InteractionLayersProvider><ServerEventsProvider connect={live.connect}><CloudProvider>{node}</CloudProvider></ServerEventsProvider></InteractionLayersProvider>));
 	await settle();
 	return Object.assign(host, { live });
 }
 
+/** A press-and-release on an element, the way the host's backdrop reads one. */
+const press = async (target: Element) => {
+	for (const type of ["pointerdown", "pointerup", "click"]) {
+		await act(async () => {
+			const event = new dom.window.Event(type, { bubbles: true, cancelable: true });
+			Object.assign(event, { pointerId: 1, isPrimary: true, button: 0 });
+			target.dispatchEvent(event);
+		});
+	}
+	await settle();
+};
+const escape = async () => {
+	const event = new dom.window.Event("keydown", { bubbles: true, cancelable: true });
+	Object.assign(event, { key: "Escape" });
+	await act(async () => { document.dispatchEvent(event); });
+	await settle();
+	return event;
+};
 const byTest = (root: ParentNode, id: string) => root.querySelector(`[data-testid='${id}']`);
 const click = async (el: Element | null | undefined) => { assert.ok(el, "the control exists"); await act(async () => { (el as HTMLElement).click(); }); await settle(); };
 const strip = (host: Element) => byTest(host, "session-strip") as HTMLElement | null;
@@ -207,7 +231,7 @@ describe("the sync chip", () => {
 		assert.equal(chip(host)?.textContent, "Offline");
 		assert.equal(chip(host)?.getAttribute("data-state"), "offline");
 		assert.match(chip(host)?.className ?? "", /uppercase/);
-		assert.match(chip(host)?.className ?? "", /text-amber-500/);
+		assert.match(chip(host)?.className ?? "", /text-warning/, "the theme's warning colour (amber on the Default theme)");
 		assert.ok(chip(host)?.querySelector("svg"), "the outline ring");
 		await click(chip(host));
 		assert.deepEqual(opened, ["cloud"]);
@@ -359,6 +383,37 @@ describe("the discard box", () => {
 		notices = [one];
 		await host.live.fire("cloud-changed");
 		assert.equal(byTest(document, "discard-title")?.textContent, "“Circuits” was taken over");
+	});
+
+	it("only OK closes it: Esc and a click outside do nothing, and the Esc goes no further", async () => {
+		const { posts } = script(() => pc(sync("ok"), { notices: [one] }));
+		await mount(<DiscardNotice />);
+		const layer = document.querySelector("[role='dialog'][data-interaction-layer]");
+		assert.ok(layer?.contains(box()), "on the host's dialog layer");
+		assert.equal(layer?.getAttribute("aria-label"), "“Circuits” was taken over");
+		assert.equal(document.activeElement, byTest(document, "discard-ok"), "OK has the focus, as before");
+		const event = await escape();
+		assert.equal(event.defaultPrevented, true, "a refusing box still takes the Esc");
+		assert.ok(box());
+		await press(byTest(document, "discard-backdrop")!);
+		assert.ok(box());
+		assert.deepEqual(posts, []);
+		await click(byTest(document, "discard-ok"));
+		assert.equal(box(), null);
+	});
+
+	it("mounted outside the app's layers, it brings its own and still shows", async () => {
+		script(() => pc(sync("ok"), { notices: [one] }));
+		const host = document.createElement("div");
+		document.body.appendChild(host);
+		const root = createRoot(host);
+		roots.push({ root, host });
+		const live = channel();
+		await act(async () => root.render(<ServerEventsProvider connect={live.connect}><CloudProvider><DiscardNotice /></CloudProvider></ServerEventsProvider>));
+		await settle();
+		assert.equal(byTest(document, "discard-title")?.textContent, "“Circuits” was taken over");
+		await escape();
+		assert.ok(box());
 	});
 
 	it("never on the server's site", async () => {

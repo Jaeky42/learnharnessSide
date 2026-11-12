@@ -103,6 +103,6 @@ export function ClaudeServerSignIn() {
 			</div>
 		</form>}
 
-		{shownError && <p role="alert" className="text-xs text-red-400" data-testid="claude-server-error">{shownError}</p>}
+		{shownError && <p role="alert" className="text-xs text-error" data-testid="claude-server-error">{shownError}</p>}
 	</div>;
 }

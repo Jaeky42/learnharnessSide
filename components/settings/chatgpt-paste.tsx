@@ -72,6 +72,6 @@ export function ChatGPTPasteStep({ startedAt }: { startedAt: number }) {
 				{sent ? "Finishing sign-in…" : remaining > 0 ? `${left(remaining)} left` : "Time's up. Close this and press Connect again."}
 			</span>
 		</div>
-		{error && <p role="alert" className="text-xs text-red-400" data-testid="chatgpt-paste-error">{error}</p>}
+		{error && <p role="alert" className="text-xs text-error" data-testid="chatgpt-paste-error">{error}</p>}
 	</form>;
 }

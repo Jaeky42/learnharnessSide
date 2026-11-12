@@ -33,7 +33,7 @@ const POLL_MS = 5000;
 const fieldClass = "w-full rounded-sm border border-input bg-background px-2.5 py-1.5 font-ui text-sm text-foreground focus-visible:outline-2 focus-visible:outline-ring";
 const buttonClass = "rounded-sm border border-border px-3 py-1.5 font-ui text-sm text-foreground transition-colors hover:bg-accent disabled:opacity-50";
 const primaryClass = "self-start rounded-sm bg-primary px-3 py-1.5 font-ui text-sm text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50";
-const dangerClass = "rounded-sm border border-border px-3 py-1.5 font-ui text-sm text-red-500 transition-colors hover:bg-red-500/10 disabled:opacity-50";
+const dangerClass = "rounded-sm border border-border px-3 py-1.5 font-ui text-sm text-error transition-colors hover:bg-error/10 disabled:opacity-50";
 
 const isPairedState = (state: CloudSyncState): boolean => state === "starting" || state === "ok" || state === "offline" || state === "paused";
 
@@ -58,7 +58,7 @@ const asView = (value: unknown): CloudView | null => {
 };
 
 type Tone = "ok" | "idle" | "trouble";
-const DOT: Record<Tone, string> = { ok: "bg-emerald-500", idle: "bg-muted-foreground", trouble: "bg-amber-500" };
+const DOT: Record<Tone, string> = { ok: "bg-success", idle: "bg-muted-foreground", trouble: "bg-warning" };
 
 function StatusLine({ tone, busy, children }: { tone: Tone; busy?: boolean; children: React.ReactNode }) {
 	return (
@@ -115,7 +115,7 @@ function PairForm({ view, notice, onPaired }: { view: CloudView; notice: string 
 			</label>
 			<p className="text-xs text-muted-foreground" data-testid="cloud-pair-note">{again ? CLOUD_TEXT.pairingAgain : CLOUD_TEXT.firstPairing}</p>
 			<button type="submit" className={primaryClass} disabled={busy || !address.trim() || !code.trim() || !name.trim()} data-testid="cloud-pair">{busy ? CLOUD_TEXT.pairing : CLOUD_TEXT.pair}</button>
-			{error && <p role="alert" className="text-xs text-red-500" data-testid="cloud-error">{error}</p>}
+			{error && <p role="alert" className="text-xs text-error" data-testid="cloud-error">{error}</p>}
 		</form>
 	);
 }
@@ -175,7 +175,7 @@ function PairedView({ view, onView, onUnpaired }: { view: CloudView; onView: (ne
 			) : (
 				<button type="button" className={`${buttonClass} self-start`} disabled={syncing} onClick={() => setConfirming(true)} data-testid="cloud-unpair">{CLOUD_TEXT.unpair}</button>
 			)}
-			{error && <p role="alert" className="text-xs text-red-500" data-testid="cloud-error">{error}</p>}
+			{error && <p role="alert" className="text-xs text-error" data-testid="cloud-error">{error}</p>}
 		</div>
 	);
 }
@@ -216,7 +216,7 @@ export function CloudSection() {
 			{view === undefined ? <p className="text-xs text-muted-foreground/70">Loading…</p>
 				: view === null ? (
 					<div className="flex flex-col items-start gap-2">
-						<p role="alert" className="text-xs text-red-500">Cloud sync couldn’t be checked. Try again.</p>
+						<p role="alert" className="text-xs text-error">Cloud sync couldn’t be checked. Try again.</p>
 						<button type="button" className={buttonClass} onClick={() => void load()}>Check again</button>
 					</div>
 				) : isPairedState(view.sync.state) ? (

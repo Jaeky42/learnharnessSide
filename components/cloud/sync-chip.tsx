@@ -4,6 +4,8 @@
  * Phase 6, docs/cloud-sync.md). Owner's choices: it shows only when
  * something is off, as an outline ring and a word or two, both amber:
  * OFFLINE, SYNC PAUSED or NOT PAIRED. A click opens Settings → Cloud.
+ * The amber is the theme's warning colour (`text-warning`), so the chip
+ * follows the theme; on the Default theme it is the same amber as before.
  *
  * Never on a PC that was never paired, never after the learner's own
  * Unpair, never on the server's site or a phone: useSyncTrouble() is null
@@ -24,7 +26,7 @@ export function SyncChip({ onOpen }: { onOpen: () => void }) {
 				onClick={onOpen}
 				data-testid="sync-chip"
 				data-state={trouble}
-				className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs uppercase tracking-wider text-amber-500 transition-colors hover:bg-accent"
+				className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs uppercase tracking-wider text-warning transition-colors hover:bg-accent"
 			>
 				{/* An outline ring, a thin line of the Settings gear's weight. */}
 				<CircleIcon aria-hidden className="size-3" />

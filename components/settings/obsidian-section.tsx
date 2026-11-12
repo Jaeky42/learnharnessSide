@@ -19,7 +19,7 @@ const HEADERS = { "content-type": "application/json", "x-learnharness-obsidian":
 const fieldClass = "w-full rounded-sm border border-input bg-background px-2.5 py-1.5 font-ui text-sm text-foreground focus-visible:outline-2 focus-visible:outline-ring";
 const buttonClass = "rounded-sm border border-border px-3 py-1.5 font-ui text-sm text-foreground transition-colors hover:bg-accent disabled:opacity-50";
 const primaryClass = "rounded-sm bg-primary px-3 py-1.5 font-ui text-sm text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50";
-const dangerClass = "rounded-sm border border-border px-3 py-1.5 font-ui text-sm text-red-500 transition-colors hover:bg-red-500/10 disabled:opacity-50";
+const dangerClass = "rounded-sm border border-border px-3 py-1.5 font-ui text-sm text-error transition-colors hover:bg-error/10 disabled:opacity-50";
 
 interface Reply {
 	ok: boolean;
@@ -42,7 +42,7 @@ const TONE: Record<ObsidianSyncState, Tone> = {
 	paused: "stopped",
 	failing: "stopped",
 };
-const DOT: Record<Tone, string> = { ok: "bg-emerald-500", busy: "bg-amber-500", stopped: "bg-red-500" };
+const DOT: Record<Tone, string> = { ok: "bg-success", busy: "bg-warning", stopped: "bg-error" };
 
 /** "today, 14:02", or the date and time on another day. */
 export function lastSyncedText(at: number, now: number = Date.now()): string {
@@ -57,7 +57,7 @@ export function lastSyncedText(at: number, now: number = Date.now()): string {
 function Notice({ tone, children, testid }: { tone: "stopped" | "warning"; children: React.ReactNode; testid?: string }) {
 	return (
 		<p role="alert" className="flex gap-2 text-xs text-foreground" data-testid={testid}>
-			<span aria-hidden className={`w-0.5 shrink-0 self-stretch rounded-full ${tone === "stopped" ? "bg-red-500" : "bg-amber-500"}`} />
+			<span aria-hidden className={`w-0.5 shrink-0 self-stretch rounded-full ${tone === "stopped" ? "bg-error" : "bg-warning"}`} />
 			<span>{children}</span>
 		</p>
 	);
@@ -66,7 +66,7 @@ function Notice({ tone, children, testid }: { tone: "stopped" | "warning"; child
 function ErrorLine({ error }: { error: { text: string; detail?: string | null } | null }) {
 	if (!error) return null;
 	return (
-		<div role="alert" className="text-xs text-red-500" data-testid="obsidian-error">
+		<div role="alert" className="text-xs text-error" data-testid="obsidian-error">
 			<p>{error.text}</p>
 			{error.detail && <p className="mt-0.5 text-muted-foreground">Obsidian said: {error.detail}</p>}
 		</div>
@@ -170,7 +170,7 @@ function ChooseVault({ view, control }: { view: ObsidianView; control: (body: ob
 			{vaults === null && !listError && <p role="status" className="text-xs text-muted-foreground">Loading your vaults…</p>}
 			{listError && (
 				<div className="flex flex-col items-start gap-2">
-					<p role="alert" className="text-xs text-red-500" data-testid="obsidian-error">{listError}</p>
+					<p role="alert" className="text-xs text-error" data-testid="obsidian-error">{listError}</p>
 					<button type="button" className={buttonClass} onClick={() => void load()}>Check again</button>
 				</div>
 			)}

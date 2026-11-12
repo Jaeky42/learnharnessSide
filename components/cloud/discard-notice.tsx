@@ -10,10 +10,16 @@
  * when the app is next opened. Only OK closes it, and clears it for good
  * (POST /api/cloud {op:"dismiss-notice"}): a click outside or Esc does
  * nothing, so it can't be lost by accident.
+ *
+ * It sits on the host's dialog layer (HostDialog, docs/dialog-overlay-
+ * contract.md). Its close callback refuses every request (Esc, a click
+ * outside, a return to Settings): a refusing surface still takes the Esc,
+ * so it reaches nothing underneath either. OK is the only way out.
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { useMemo, useRef, useState } from "react";
+import { HostDialog } from "@/components/host-dialog";
+import { InteractionLayersProvider, useOptionalInteractionLayers } from "@/components/interaction-layers";
 import { DISCARD_OK, discardBox } from "@/src/core";
 import { useCloud, type CloudNotice } from "./cloud-state";
 
@@ -26,6 +32,15 @@ async function dismiss(notice: CloudNotice): Promise<void> {
 }
 
 export function DiscardNotice() {
+	// The box belongs inside AppShell's interaction layers. Mounted outside
+	// them (the root layout placed it beside AppShell before the host's
+	// layers existed), it brings its own, so it still shows and still keeps
+	// Esc and a click outside from closing it.
+	if (!useOptionalInteractionLayers()) return <InteractionLayersProvider><DiscardBox /></InteractionLayersProvider>;
+	return <DiscardBox />;
+}
+
+function DiscardBox() {
 	const cloud = useCloud();
 	/** Read here already; they stay away while the server is told. */
 	const [read, setRead] = useState<ReadonlySet<string>>(() => new Set());
@@ -35,8 +50,6 @@ export function DiscardNotice() {
 	);
 	const box = discardBox(notices);
 	const okRef = useRef<HTMLButtonElement>(null);
-	const shown = box !== null;
-	useEffect(() => { if (shown) okRef.current?.focus(); }, [shown]);
 	if (!box) return null;
 
 	const ok = () => {
@@ -45,40 +58,44 @@ export function DiscardNotice() {
 		void Promise.all(gone.map(dismiss)).then(() => cloud.refresh());
 	};
 
-	return createPortal(
-		<div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80" data-testid="discard-backdrop">
-			<div
-				role="alertdialog"
-				aria-modal="true"
-				aria-label={box.title}
-				data-testid="discard-dialog"
-				className="max-h-[calc(100dvh-4rem)] w-[26rem] max-w-[calc(100vw-2rem)] overflow-y-auto rounded-xl border bg-card p-5 shadow-xl"
-			>
-				<h2 className="text-sm font-semibold" data-testid="discard-title">{box.title}</h2>
-				<div className="mt-1 flex flex-col gap-2 text-xs text-muted-foreground" data-testid="discard-body">
-					{box.lines.length === 1 ? <p>{box.before} {box.lines[0]} {box.after}</p> : (
-						<>
-							<p>{box.before}</p>
-							<ul className="flex flex-col gap-1">
-								{box.lines.map((line, index) => <li key={keyOf(notices[index]!)} data-testid="discard-line">{line}</li>)}
-							</ul>
-							<p>{box.after}</p>
-						</>
-					)}
-				</div>
-				<div className="mt-5 flex justify-end">
-					<button
-						ref={okRef}
-						type="button"
-						onClick={ok}
-						data-testid="discard-ok"
-						className="rounded-md border border-border px-4 py-1.5 text-sm text-foreground transition-colors hover:bg-accent"
-					>
-						{DISCARD_OK}
-					</button>
-				</div>
+	const frame = (
+		<div
+			data-testid="discard-dialog"
+			className="max-h-[calc(100dvh-4rem)] w-[26rem] max-w-[calc(100vw-2rem)] overflow-y-auto rounded-xl border bg-card p-5 shadow-xl"
+		/>
+	);
+	return (
+		<HostDialog
+			open
+			aria-label={box.title}
+			frame={frame}
+			initialFocusRef={okRef}
+			backdropProps={{ className: "fixed inset-0 z-50 flex items-center justify-center bg-background/80", "data-testid": "discard-backdrop" }}
+			onClose={() => "blocked"}
+		>
+			<h2 className="text-sm font-semibold" data-testid="discard-title">{box.title}</h2>
+			<div className="mt-1 flex flex-col gap-2 text-xs text-muted-foreground" data-testid="discard-body">
+				{box.lines.length === 1 ? <p>{box.before} {box.lines[0]} {box.after}</p> : (
+					<>
+						<p>{box.before}</p>
+						<ul className="flex flex-col gap-1">
+							{box.lines.map((line, index) => <li key={keyOf(notices[index]!)} data-testid="discard-line">{line}</li>)}
+						</ul>
+						<p>{box.after}</p>
+					</>
+				)}
 			</div>
-		</div>,
-		document.body,
+			<div className="mt-5 flex justify-end">
+				<button
+					ref={okRef}
+					type="button"
+					onClick={ok}
+					data-testid="discard-ok"
+					className="rounded-md border border-border px-4 py-1.5 text-sm text-foreground transition-colors hover:bg-accent"
+				>
+					{DISCARD_OK}
+				</button>
+			</div>
+		</HostDialog>
 	);
 }

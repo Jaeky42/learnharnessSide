@@ -9,12 +9,14 @@ import React, { act } from "react";
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
 
 import assert from "node:assert/strict";
-import { afterEach, describe, it } from "node:test";
+import { after, afterEach, describe, it } from "node:test";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import type { NotesTree, NotesTreeNote } from "../src/core/notes.ts";
 import { buildTree, canDropInto, filterTree } from "../components/notes/notes-tree.tsx";
 import { readViewMarkdown } from "../components/notes/note-read-view.tsx";
+import { InteractionLayersProvider } from "../components/interaction-layers.tsx";
+import { installModalDom } from "./modal-dom.ts";
 
 const dom = parseHTML("<html><body></body></html>");
 const storage = new Map<string, string>();
@@ -27,7 +29,16 @@ Object.assign(dom.window, {
 		removeItem: (k: string) => void storage.delete(k),
 	},
 });
-Object.assign(globalThis, { window: dom.window, document: dom.document, CustomEvent: dom.window.CustomEvent });
+Object.assign(globalThis, { window: dom.window, document: dom.document, CustomEvent: dom.window.CustomEvent, HTMLElement: dom.window.HTMLElement, Element: dom.window.Element });
+// The drawer's dialogs and menus sit on the host's layers (HostDialog,
+// MenuShell), which use a few browser APIs linkedom lacks.
+const restoreModalDom = installModalDom(dom);
+Object.assign(dom.window, { innerWidth: 390, innerHeight: 844 });
+const modalStyle = globalThis.getComputedStyle;
+const withVars = ((el: Element) => Object.assign(modalStyle(el), { getPropertyValue: () => "" })) as typeof getComputedStyle;
+Object.assign(globalThis, { getComputedStyle: withVars, ResizeObserver: class { observe() {} disconnect() {} } });
+Object.assign(dom.window, { getComputedStyle: withVars });
+after(restoreModalDom);
 const originalFetch = globalThis.fetch;
 const roots: { root: Root; host: HTMLElement }[] = [];
 
@@ -106,12 +117,25 @@ describe("Read view markdown", () => {
 	});
 });
 
+describe("the editor follows the theme", () => {
+	it("CodeMirror's light or dark base follows the theme's mode, and every colour is a theme token", async () => {
+		const { EditorState } = await import("@codemirror/state");
+		const { EditorView } = await import("@codemirror/view");
+		const { editorTheme } = await import("../components/notes/note-editor.tsx");
+		assert.equal(EditorState.create({ extensions: editorTheme("dark") }).facet(EditorView.darkTheme), true);
+		assert.equal(EditorState.create({ extensions: editorTheme("light") }).facet(EditorView.darkTheme), false);
+		const source = (await import("node:fs")).readFileSync(new URL("../components/notes/note-editor.tsx", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+		assert.doesNotMatch(source, /rgba?\(|#[0-9a-fA-F]{3,6}\b|\{ dark: true \},\s*\);/, "no hard-coded colour, no fixed dark flag");
+		assert.match(source, /color-mix\(in srgb, var\(--foreground\) 16%, transparent\)/, "the selection: the text colour at 16%, rgba(230,230,230,0.16) on the Default theme");
+	});
+});
+
 async function mount(node: React.ReactElement) {
 	const host = document.createElement("div");
 	document.body.appendChild(host);
 	const root = createRoot(host);
 	roots.push({ root, host });
-	await act(async () => root.render(node));
+	await act(async () => root.render(<InteractionLayersProvider>{node}</InteractionLayersProvider>));
 	return host;
 }
 
@@ -328,6 +352,63 @@ describe("drawer", () => {
 		assert.deepEqual(posts[1], { action: "delete", path: "Electricity" });
 		assert.deepEqual([...host.querySelectorAll("[data-testid='notes-tree-folder']")].map((r) => r.textContent?.replace(/\d+$/, "")), ["Physics"]);
 		assert.match(host.textContent ?? "", /Deleted “Electricity”\./);
+	});
+
+	// ── The host's layers (HostDialog, MenuShell; upstream 0.6.0) ──────────
+	const escape = async () => {
+		const event = new dom.window.Event("keydown", { bubbles: true, cancelable: true });
+		Object.assign(event, { key: "Escape" });
+		await act(async () => { document.dispatchEvent(event); });
+		return event;
+	};
+
+	it("the row menu is a host menu: at the pointer, and Esc closes it and goes no further", async () => {
+		const { host } = await drawerWithNotes();
+		await openRowMenu(host, "notes-tree-note", "Current");
+		const menu = document.querySelector<HTMLElement>("[data-testid='notes-row-menu']");
+		assert.ok(menu?.hasAttribute("data-lh-menu"), "MenuShell's menu");
+		assert.equal(menu?.style.left, "40px");
+		assert.equal(menu?.style.top, "120px", "its top edge on the pointer, as before");
+		const event = await escape();
+		assert.deepEqual(menuLabels(), []);
+		assert.equal(event.defaultPrevented, true, "the menu took the Esc");
+	});
+
+	it("a dialog is a host dialog: one layer, named, and Esc closes it without deleting", async () => {
+		const { host, posts } = await drawerWithNotes();
+		await openRowMenu(host, "notes-tree-note", "Current");
+		await act(async () => { menuItem("Delete").click(); });
+		const dialog = document.querySelector<HTMLElement>("[role='dialog']");
+		assert.ok(dialog?.hasAttribute("data-interaction-layer"));
+		assert.equal(dialog?.getAttribute("aria-label"), "Delete “Current”?");
+		assert.equal(document.querySelectorAll("[role='dialog']").length, 1);
+		const event = await escape();
+		assert.equal(event.defaultPrevented, true);
+		assert.equal(document.querySelector("[role='dialog']"), null);
+		assert.deepEqual(posts, []);
+	});
+
+	it("the open note's ⋯ menu is a host menu under its button", async () => {
+		storage.set("lh:notes-mode", JSON.stringify("read"));
+		storage.set("lh:notes-open-note:chat_1", JSON.stringify("Electricity/Ohm's law.md"));
+		scriptFetch({
+			"/api/notes/file": { path: "Electricity/Ohm's law.md", body: "Intro\n\n## The rule\nV = IR\n", hash: "h1", pending: false, sessions: ["chat_1"], parent: null },
+			"/api/notes": { status: status(), folders: ["Electricity"], notes: [note("Electricity/Ohm's law.md", ["chat_1"], { sections: 1 })], backlinks: {} },
+			"/api/chats/": { homeFolder: "Electricity" },
+		});
+		const { NotesDrawer } = await import("../components/notes/notes-drawer.tsx");
+		const host = await mount(<NotesDrawer chatId="chat_1" onClose={() => {}} />);
+		await settle();
+		const button = host.querySelector<HTMLElement>("[aria-label='Note actions']")!;
+		button.getBoundingClientRect = () => ({ left: 300, right: 330, top: 50, bottom: 70, width: 30, height: 20, x: 300, y: 50, toJSON() {} });
+		await act(async () => { button.click(); });
+		const menu = document.querySelector<HTMLElement>("[data-testid='notes-note-menu']");
+		assert.ok(menu?.hasAttribute("data-lh-menu"));
+		assert.equal(menu?.style.left, "130px", "200 px left of the button's right edge, as before");
+		assert.equal(menu?.style.top, "74px");
+		assert.deepEqual([...document.querySelectorAll("[data-testid='notes-note-menu'] [role='menu'] [role='menuitem']")].map((b) => b.textContent), ["Move to…", "Split note…", "Open in Obsidian"]);
+		await escape();
+		assert.equal(document.querySelector("[data-testid='notes-note-menu']"), null);
 	});
 
 	it("tells the learner when the vault is offline and how many notes are waiting", async () => {

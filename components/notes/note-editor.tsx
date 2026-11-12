@@ -22,7 +22,8 @@ import { codeFolding, foldGutter, foldKeymap, HighlightStyle, syntaxHighlighting
 import { Annotation, Compartment, EditorState, type Extension, RangeSetBuilder } from "@codemirror/state";
 import { Decoration, type DecorationSet, EditorView, keymap, placeholder, ViewPlugin, type ViewUpdate, WidgetType } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
-import { findLinks, linkSuggestions, noteName, suggestionLinkText, type LinkSuggestion, type NoteLink } from "@/src/core";
+import { findLinks, linkSuggestions, noteName, suggestionLinkText, type LinkSuggestion, type NoteLink, type RenderedMode } from "@/src/core";
+import { useAppearance } from "@/components/settings/appearance";
 
 const External = Annotation.define<boolean>();
 
@@ -31,56 +32,64 @@ export interface NoteEditorHandle {
 	selection(): { start: number; end: number };
 }
 
-const theme = EditorView.theme(
-	{
-		"&": {
-			color: "var(--foreground)",
-			backgroundColor: "transparent",
-			fontFamily: "var(--font-prose)",
-			fontSize: "var(--lh-prose-size)",
-			height: "100%",
-		},
-		".cm-scroller": { fontFamily: "inherit", lineHeight: "1.5", overflow: "auto" },
-		".cm-content": { padding: "4px 0 24px", caretColor: "var(--foreground)" },
-		".cm-line": { padding: "0 4px 0 2px" },
-		"&.cm-focused .cm-cursor": { borderLeftColor: "var(--foreground)" },
-		"&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection": { backgroundColor: "rgba(230,230,230,0.16) !important" },
-		".cm-gutters": { backgroundColor: "transparent", border: "none", color: "var(--muted-foreground)" },
-		".cm-foldGutter .cm-gutterElement": { padding: "0 2px", cursor: "pointer" },
-		".cm-foldPlaceholder": {
-			backgroundColor: "var(--accent)",
-			border: "none",
-			color: "var(--muted-foreground)",
-			fontFamily: "var(--font-ui)",
-			fontSize: "11px",
-			padding: "0 6px",
-			borderRadius: "4px",
-		},
-		".cm-placeholder": { color: "var(--muted-foreground)" },
-		".cm-lh-suggest": { textDecoration: "underline dotted var(--muted-foreground)", textUnderlineOffset: "3px" },
-		".cm-lh-link": { textDecoration: "underline", textUnderlineOffset: "3px" },
-		".cm-lh-link-btn": {
-			fontFamily: "var(--font-ui)",
-			fontSize: "11px",
-			lineHeight: "1",
-			color: "var(--muted-foreground)",
-			border: "1px solid var(--border)",
-			borderRadius: "4px",
-			padding: "1px 4px",
-			marginLeft: "4px",
-			verticalAlign: "2px",
-			cursor: "pointer",
-			background: "transparent",
-		},
-		".cm-lh-link-btn:hover": { color: "var(--foreground)", borderColor: "var(--muted-foreground)" },
-		".cm-tooltip": { backgroundColor: "var(--popover)", border: "1px solid var(--border)", borderRadius: "8px", overflow: "hidden" },
-		".cm-tooltip-autocomplete > ul": { fontFamily: "var(--font-ui)", fontSize: "12.5px", maxHeight: "14rem" },
-		".cm-tooltip-autocomplete > ul > li": { padding: "3px 8px" },
-		".cm-tooltip-autocomplete > ul > li[aria-selected]": { backgroundColor: "var(--accent)", color: "var(--foreground)" },
-		".cm-completionDetail": { color: "var(--muted-foreground)", fontStyle: "normal", marginLeft: "8px" },
+/** The editor's look. Every colour is a theme token, so it follows the
+ *  active theme (and its overrides) live. The selection is the text colour
+ *  at 16%: on the Default theme that is the rgba(230,230,230,0.16) it was. */
+const THEME_SPEC = {
+	"&": {
+		color: "var(--foreground)",
+		backgroundColor: "transparent",
+		fontFamily: "var(--font-prose)",
+		fontSize: "var(--lh-prose-size)",
+		height: "100%",
 	},
-	{ dark: true },
-);
+	".cm-scroller": { fontFamily: "inherit", lineHeight: "1.5", overflow: "auto" },
+	".cm-content": { padding: "4px 0 24px", caretColor: "var(--foreground)" },
+	".cm-line": { padding: "0 4px 0 2px" },
+	"&.cm-focused .cm-cursor": { borderLeftColor: "var(--foreground)" },
+	"&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection": { backgroundColor: "color-mix(in srgb, var(--foreground) 16%, transparent) !important" },
+	".cm-gutters": { backgroundColor: "transparent", border: "none", color: "var(--muted-foreground)" },
+	".cm-foldGutter .cm-gutterElement": { padding: "0 2px", cursor: "pointer" },
+	".cm-foldPlaceholder": {
+		backgroundColor: "var(--accent)",
+		border: "none",
+		color: "var(--muted-foreground)",
+		fontFamily: "var(--font-ui)",
+		fontSize: "11px",
+		padding: "0 6px",
+		borderRadius: "4px",
+	},
+	".cm-placeholder": { color: "var(--muted-foreground)" },
+	".cm-lh-suggest": { textDecoration: "underline dotted var(--muted-foreground)", textUnderlineOffset: "3px" },
+	".cm-lh-link": { textDecoration: "underline", textUnderlineOffset: "3px" },
+	".cm-lh-link-btn": {
+		fontFamily: "var(--font-ui)",
+		fontSize: "11px",
+		lineHeight: "1",
+		color: "var(--muted-foreground)",
+		border: "1px solid var(--border)",
+		borderRadius: "4px",
+		padding: "1px 4px",
+		marginLeft: "4px",
+		verticalAlign: "2px",
+		cursor: "pointer",
+		background: "transparent",
+	},
+	".cm-lh-link-btn:hover": { color: "var(--foreground)", borderColor: "var(--muted-foreground)" },
+	".cm-tooltip": { backgroundColor: "var(--popover)", border: "1px solid var(--border)", borderRadius: "8px", overflow: "hidden" },
+	".cm-tooltip-autocomplete > ul": { fontFamily: "var(--font-ui)", fontSize: "12.5px", maxHeight: "14rem" },
+	".cm-tooltip-autocomplete > ul > li": { padding: "3px 8px" },
+	".cm-tooltip-autocomplete > ul > li[aria-selected]": { backgroundColor: "var(--accent)", color: "var(--foreground)" },
+	".cm-completionDetail": { color: "var(--muted-foreground)", fontStyle: "normal", marginLeft: "8px" },
+};
+const DARK_THEME = EditorView.theme(THEME_SPEC, { dark: true });
+const LIGHT_THEME = EditorView.theme(THEME_SPEC, { dark: false });
+
+/** CodeMirror's own light/dark base styles follow the theme's mode
+ *  (themes declare one, docs/themes.md). Exported for tests. */
+export function editorTheme(mode: RenderedMode): Extension {
+	return mode === "light" ? LIGHT_THEME : DARK_THEME;
+}
 
 const highlight = HighlightStyle.define([
 	{ tag: tags.heading1, fontWeight: "var(--lh-heading-weight)", fontSize: "1.45em" },
@@ -178,6 +187,12 @@ export function NoteEditor({
 	const live = useRef<Live>({ paths: notePaths, self: selfPath, onOpenLink, onPasteImage, onChange, onSelection });
 	live.current = { paths: notePaths, self: selfPath, onOpenLink, onPasteImage, onChange, onSelection };
 	const refresh = useRef(new Compartment());
+	// The theme's mode: a switch while the editor is open reconfigures it in
+	// place (the colours are CSS variables and move by themselves).
+	const { resolvedMode } = useAppearance();
+	const modeRef = useRef(resolvedMode);
+	modeRef.current = resolvedMode;
+	const look = useRef(new Compartment());
 
 	useEffect(() => {
 		if (!host.current) return;
@@ -255,7 +270,7 @@ export function NoteEditor({
 			EditorView.lineWrapping,
 			placeholder("Start typing. Use ## for a section heading."),
 			autocompletion({ override: [wikiCompletion], icons: false, activateOnTyping: true }),
-			theme,
+			look.current.of(editorTheme(modeRef.current)),
 			refresh.current.of([]),
 			suggestionsPlugin,
 			EditorView.domEventHandlers({
@@ -316,6 +331,10 @@ export function NoteEditor({
 		if (current === value) return;
 		view.dispatch({ changes: { from: 0, to: current.length, insert: value }, annotations: External.of(true) });
 	}, [value]);
+
+	useEffect(() => {
+		viewRef.current?.dispatch({ effects: look.current.reconfigure(editorTheme(resolvedMode)) });
+	}, [resolvedMode]);
 
 	// The set of note names changed: recompute suggestions and link marks.
 	const pathsKey = notePaths.join("\n");

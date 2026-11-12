@@ -112,7 +112,7 @@ export function AccountSection({ devices, reload }: { devices: AccountDevice[]; 
 						<input id="account-confirm" type="password" autoComplete="new-password" className={fieldClass} value={confirm} onChange={(e) => setConfirm(e.target.value)} />
 					</label>
 					{message && (
-						<p role="status" className={`text-xs ${message.ok ? "text-muted-foreground" : "text-red-500"}`} data-testid="account-password-message">{message.text}</p>
+						<p role="status" className={`text-xs ${message.ok ? "text-muted-foreground" : "text-error"}`} data-testid="account-password-message">{message.text}</p>
 					)}
 					<button type="submit" className={buttonClass} disabled={busy || !current || !next}>Change password</button>
 				</form>
@@ -142,7 +142,7 @@ export function AccountSection({ devices, reload }: { devices: AccountDevice[]; 
 						<button type="button" className={buttonClass} onClick={() => setConfirmingSignOut(true)} data-testid="account-sign-out">Sign out everywhere</button>
 					</div>
 				)}
-				{signOutError && <p role="alert" className="text-xs text-red-500">{signOutError}</p>}
+				{signOutError && <p role="alert" className="text-xs text-error">{signOutError}</p>}
 			</SettingsGroup>
 		</div>
 	);

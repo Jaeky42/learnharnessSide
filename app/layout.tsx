@@ -31,6 +31,10 @@ export const metadata: Metadata = {
 	// name and icon (app/manifest.ts covers Android). black-translucent lets
 	// the app draw under the clock, so the session drawer and its dim run the
 	// full height (owner's ask); every top edge pads by the safe-area inset.
+	// It stays black-translucent on light themes too (white clock text): iOS
+	// has no translucent style with dark text ("default" stops the page below
+	// the clock, which the phone layout's --lh-safe-top/standaloneGap rely on),
+	// and it reads the style only when the icon is added to the home screen.
 	appleWebApp: { capable: true, title: "LearnHarness", statusBarStyle: "black-translucent" },
 	icons: { apple: "/icons/apple-touch-icon.png" },
 };
@@ -38,13 +42,18 @@ export const metadata: Metadata = {
 // PHONE (cloud sync Phase 3): viewport-fit=cover lets the app paint under the
 // notch and home bar (app/phone.css pads with the safe-area insets), and
 // resizes-content makes Android shrink the layout above its keyboard.
-export const viewport: Viewport = {
-	width: "device-width",
-	initialScale: 1,
-	viewportFit: "cover",
-	interactiveWidget: "resizes-content",
-	themeColor: "#141414",
-};
+// Side-tutor fork (themes): the browser's bar colour is the saved theme's
+// background, read per request like the <html> variables below.
+export async function generateViewport(): Promise<Viewport> {
+	await connection();
+	return {
+		width: "device-width",
+		initialScale: 1,
+		viewportFit: "cover",
+		interactiveWidget: "resizes-content",
+		themeColor: readThemeBoot().vars["--background"] ?? "#141414",
+	};
+}
 
 const ELECTRON_MARK = "if(navigator.userAgent.indexOf('Electron')!==-1)document.documentElement.classList.add('lh-electron')";
 
@@ -82,11 +91,14 @@ export default async function RootLayout({ children }: { children: React.ReactNo
 						<CloudProvider>
 							<SidebarProvider>
 								<ActivityProvider>
-									<AppShell>{children}</AppShell>
+									<AppShell>
+										{children}
+										{/* What this PC had to discard after a take-over, said once.
+										    Inside the shell, so it shares the app's dialog layers. */}
+										<DiscardNotice />
+									</AppShell>
 								</ActivityProvider>
 							</SidebarProvider>
-							{/* What this PC had to discard after a take-over, said once. */}
-							<DiscardNotice />
 						</CloudProvider>
 					</AppearanceProvider>
 				</PluginsProvider>
