@@ -32,6 +32,21 @@
  * cancelled so it can't land twice. (Calling stopScroll on every move instead made scrolling jump up
  * and down on the owner's iPhone and was reverted.)
  *
+ * A TAP ON THE FOLDED QUESTION ENDS AT THE BOTTOM, OPEN (owner's iPhone: it
+ * opened for an instant and folded again, with the lesson left far up). The
+ * tap opens the question and slides the lesson down (use-stick-to-bottom's
+ * scrollToBottom). That library takes ANY upward scroll during its slide for
+ * the learner leaving: it ends the slide at once, chat.tsx then lets go of
+ * the question, and the next scroll event folds it. On an iPhone such scrolls
+ * come without a new touch: Safari's own deceleration of a lesson still
+ * moving, or its late reports of where the lesson was. A tap whose wobble
+ * became a short drag here could also leave this file's own throw running
+ * against the slide. So on a touch screen a reveal (revealToBottom): stops
+ * that throw first, and holds the question open, sliding again whenever a
+ * slide ends short of the bottom, until the lesson is at its bottom, or the
+ * learner touches or wheels again (a new touch still stops the slide), or
+ * REVEAL_HOLD_MS has passed. Elsewhere it is one slide, as before.
+ *
  * NO BOUNCE AT THE ENDS (found with the scroll readout on the owner's
  * iPhone). When the lesson overshot its bottom, Safari's rubber-band spring
  * pulled it back to the edge; a swipe that began during that bounce folded
@@ -47,7 +62,7 @@
  * the drag's first movement (dragDecision).
  */
 
-import { useEffect, useRef, type RefObject } from "react";
+import { useCallback, useEffect, useRef, type RefObject } from "react";
 import { useIsTouchScreen } from "@/components/phone/use-phone";
 
 /** Per-frame velocity decay of the fling after the finger lifts. */
@@ -161,12 +176,65 @@ export type DockTouchHooks = {
 	isSliding?: () => boolean;
 };
 
+/** The longest a reveal holds the question open on a touch screen, in ms. A
+ *  slide from far up takes about 2 s; this leaves room for a lesson that was
+ *  still moving when the tap landed. */
+export const REVEAL_HOLD_MS = 4000;
+/** Close enough to the bottom: the slide stops 1 px short of it. */
+export const REVEAL_BOTTOM_PX = 2;
+
+/** Pure rule, exported for tests: a slide to the bottom has ended; is the
+ *  reveal over? Yes at the bottom, or once the hold was let go (a new touch
+ *  or wheel, the time limit). Otherwise motion that wasn't the learner's
+ *  stopped the slide short: slide again. */
+export function revealOver(distance: number, held: boolean): boolean {
+	return !held || distance <= REVEAL_BOTTOM_PX;
+}
+
+/** A touch screen's reveal, exported for tests: slide, and slide again (a
+ *  frame later) while the slide ends short of the bottom and the hold lasts. */
+export async function holdReveal(o: { slide: () => unknown; distance: () => number; held: () => boolean; frame: () => Promise<unknown> }): Promise<void> {
+	for (;;) {
+		await o.slide();
+		if (revealOver(o.distance(), o.held())) return;
+		await o.frame();
+		if (!o.held()) return;
+	}
+}
+
+/** Open the question's way to the bottom: `slide` is scrollToBottom, `held`
+ *  says chat.tsx still holds the question open, `settle` lets go of it. */
+export type RevealToBottom = (slide: () => unknown, held: () => boolean, settle: () => void) => Promise<unknown>;
+
 export function useDockTouchScroll(rootRef: RefObject<HTMLElement | null>, transcriptRef: RefObject<HTMLElement | null>, hooks: DockTouchHooks = {}) {
 	// A phone, and a tablet with the computer layout (owner's choice): the
 	// dock is the transcript's sibling at every width.
 	const touch = useIsTouchScreen();
 	const hooksRef = useRef(hooks);
 	hooksRef.current = hooks;
+	const touchRef = useRef(touch);
+	touchRef.current = touch;
+	// Set by the effect below: stop this file's throw; when the learner last
+	// touched the dock or the lesson, or turned a wheel over them.
+	const motionRef = useRef({ stop: () => {}, inputAt: -Infinity });
+	const revealIdRef = useRef(0);
+	const revealToBottom = useCallback<RevealToBottom>((slide, held, settle) => {
+		const transcript = transcriptRef.current;
+		if (!touchRef.current || !transcript) return Promise.resolve(slide()).finally(settle);
+		motionRef.current.stop();
+		const id = ++revealIdRef.current;
+		const startedAt = performance.now();
+		const holds = () => id === revealIdRef.current && motionRef.current.inputAt < startedAt && held();
+		return holdReveal({
+			slide,
+			distance: () => transcript.scrollHeight - transcript.clientHeight - transcript.scrollTop,
+			held: holds,
+			frame: () => new Promise(requestAnimationFrame),
+		}).finally(() => {
+			// A newer reveal owns the hold now.
+			if (id === revealIdRef.current) settle();
+		});
+	}, [transcriptRef]);
 	useEffect(() => {
 		const root = rootRef.current;
 		const transcript = transcriptRef.current;
@@ -191,11 +259,18 @@ export function useDockTouchScroll(rootRef: RefObject<HTMLElement | null>, trans
 			cancelAnimationFrame(frame);
 			frame = 0;
 		};
+		const motion = motionRef.current;
+		motion.stop = stopFling;
+		const onInput = () => {
+			motion.inputAt = performance.now();
+		};
 		const onTranscriptStart = () => {
+			onInput();
 			stopFling();
 			hooksRef.current.onTouchStart?.();
 		};
 		const onStart = (e: TouchEvent) => {
+			onInput();
 			movingAtStart = frame !== 0 || performance.now() - lastScrollAt < 100 || !!hooksRef.current.isSliding?.();
 			startT = e.timeStamp;
 			stopFling();
@@ -268,9 +343,15 @@ export function useDockTouchScroll(rootRef: RefObject<HTMLElement | null>, trans
 		// A touch on the transcript itself stops a fling, as native scrolling does.
 		transcript.addEventListener("touchstart", onTranscriptStart, { passive: true });
 		transcript.addEventListener("scroll", onTranscriptScroll, { passive: true });
+		// A wheel (an iPad's trackpad) lets go of a reveal, as a touch does.
+		root.addEventListener("wheel", onInput, { passive: true });
+		transcript.addEventListener("wheel", onInput, { passive: true });
 		return () => {
 			transcript.style.overscrollBehaviorY = previousOverscroll;
 			stopFling();
+			motion.stop = () => {};
+			root.removeEventListener("wheel", onInput);
+			transcript.removeEventListener("wheel", onInput);
 			root.removeEventListener("touchstart", onStart);
 			root.removeEventListener("touchmove", onMove);
 			root.removeEventListener("touchend", onEnd);
@@ -279,4 +360,5 @@ export function useDockTouchScroll(rootRef: RefObject<HTMLElement | null>, trans
 			transcript.removeEventListener("scroll", onTranscriptScroll);
 		};
 	}, [touch, rootRef, transcriptRef]);
+	return { revealToBottom, revealHoldMs: touch ? REVEAL_HOLD_MS : undefined };
 }

@@ -2728,7 +2728,7 @@ export function DockOverlay({
 	// slide, as a wheel does (owner's find: a swipe then was pulled back in),
 	// and lets the question fold again. A reveal counts from the moment it
 	// starts, before the slide's first frame.
-	useDockTouchScroll(blockRef, scrollRef, {
+	const dockReveal = useDockTouchScroll(blockRef, scrollRef, {
 		onTouchStart: () => {
 			if (!stickState.animation && !expandIntentRef.current) return;
 			stopScroll();
@@ -2752,13 +2752,18 @@ export function DockOverlay({
 	const suppressFoldDuringReveal = () => {
 		expandIntentRef.current = true;
 		clearTimeout(intentTimerRef.current);
-		intentTimerRef.current = setTimeout(() => {
-			expandIntentRef.current = false;
-		}, 2000);
-		return Promise.resolve(scrollToBottom()).finally(() => {
+		const settle = () => {
 			clearTimeout(intentTimerRef.current);
 			expandIntentRef.current = false;
-		});
+		};
+		intentTimerRef.current = setTimeout(settle, dockReveal.revealHoldMs ?? 2000);
+		// TOUCH (fork, owner's iPhone): on a touch screen the reveal holds the
+		// question open until the lesson is really at its bottom, sliding again
+		// if motion that wasn't the learner's stops the slide short, until a
+		// new touch, or the time limit (revealToBottom in
+		// components/phone/use-dock-touch-scroll.ts). Elsewhere it is the one
+		// slide it always was.
+		return dockReveal.revealToBottom(scrollToBottom, () => expandIntentRef.current, settle);
 	};
 	const expandAndReveal = () => {
 		setRevealed(true); // the teach-check invitation was accepted (W5)

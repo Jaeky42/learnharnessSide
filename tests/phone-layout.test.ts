@@ -294,6 +294,25 @@ describe("drag on the dock scrolls the lesson", async () => {
 		assert.equal(flingStep(0.5), 0);
 		assert.ok(Math.abs(flingStep(flingStep(10, 0.5), 0.5) - 9.5) < 1e-9, "two 120 fps frames = one 60 fps frame");
 	});
+	it("a reveal is over at the bottom or once let go; short of the bottom it slides again (owner's iPhone)", async () => {
+		const { revealOver, holdReveal, REVEAL_BOTTOM_PX, REVEAL_HOLD_MS } = await import("../components/phone/use-dock-touch-scroll.ts");
+		assert.equal(REVEAL_HOLD_MS, 4000);
+		assert.equal(revealOver(1, true), true, "the slide stops 1 px short: that is the bottom");
+		assert.equal(revealOver(REVEAL_BOTTOM_PX + 1, true), false, "stopped short by motion that wasn't the learner's");
+		assert.equal(revealOver(5000, false), true, "a new touch, a wheel or the time limit let go of it");
+		// A slide that a stray scroll stops short twice, then reaches the bottom.
+		const ends = [5000, 4200, 1];
+		let slides = 0;
+		let frames = 0;
+		await holdReveal({ slide: async () => { slides++; }, distance: () => ends[slides - 1]!, held: () => true, frame: async () => { frames++; } });
+		assert.equal(slides, 3);
+		assert.equal(frames, 2, "a frame between tries");
+		// Let go while it waits for the next try: no more slides.
+		slides = 0;
+		let held = true;
+		await holdReveal({ slide: async () => { slides++; }, distance: () => 5000, held: () => held, frame: async () => { held = false; } });
+		assert.equal(slides, 1);
+	});
 	it("takes the throw from the last moments of the drag, not the last twitch", async () => {
 		const { releaseVelocity, FLING_MAX } = await import("../components/phone/use-dock-touch-scroll.ts");
 		// A steady flick down at 1px/ms, then a 3px twitch back 1ms later as the finger lifts.
