@@ -4,7 +4,7 @@ The fork is now based on upstream amosblomqvist/learnharness **v0.6.0** (tag com
 
 Upstream 0.6.0 brought: plugins (core and community), themes, side conversations ("side chats", stored in the chat record), a highlight toolbar (Cite, Ask), a dialog system (HostDialog), a Host-header check on the API, a link allow-list in the desktop shell, and chat record format 2.
 
-**State:** built on the branch `claude/upstream-0.6.0` (it builds nothing and no device follows it). Not yet on `claude/pensive-goldberg-7dty2m` (the server) or `side-tutor` (the desktop app); both need the owner's approval, and must get the same commit, the server's first ("Updating the server and the PC together" below).
+**State:** built and checked on the branch `claude/upstream-0.6.0` (it builds nothing and no device follows it). Both dry runs passed on commit `875a1497`. Not yet on `claude/pensive-goldberg-7dty2m` (the server) or `side-tutor` (the desktop app): each push needs the owner's approval, asked right before it, and both must get the same commit, the server's first ("Updating the server and the PC together" below). Both branches are ancestors of this one, so each push is a plain fast-forward. The owner has the step-by-step update guide (an Artifact page) and starts by making the two backups. The server's current image is `dev-a2d2b7e`, should a way back be needed.
 
 ## The owner's decisions
 
