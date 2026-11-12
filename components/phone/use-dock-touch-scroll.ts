@@ -66,6 +66,17 @@ export function innerCanTake(boxes: ScrollBox[], dy: number): boolean {
 	return false;
 }
 
+/** How far an Apple Pencil moves before it counts as a drag (dragDecision).
+ *  The owner's Pencil taps moved at most 9.6 px; the test page's bench with
+ *  this slop clicked on all 27 Pencil taps. */
+export const PENCIL_SLOP = 12;
+
+/** Is this touch an Apple Pencil? iPadOS labels each touch (`touchType`,
+ *  "stylus" or "direct"); other browsers don't, so it reads as a finger. */
+export function isPencilTouch(t: Touch): boolean {
+	return (t as Touch & { touchType?: string }).touchType === "stylus";
+}
+
 /** Pure rule, exported for tests: what a one-finger drag does, decided on
  *  its FIRST movement. iPhone Safari picks native scrolling on the first
  *  touchmove that isn't prevented, so waiting for a few pixels of travel let
@@ -75,9 +86,17 @@ export function innerCanTake(boxes: ScrollBox[], dy: number): boolean {
  *    "wait"   no movement yet;
  *    "native" sideways, a scroll box under the finger can take it, or too late;
  *    "take"   nothing under the finger can scroll that way: the caller moves
- *             the lesson (the dock) or stops the drag (the page). */
-export function dragDecision(dx: number, dy: number, cancelable: boolean, innerCan: (dy: number) => boolean): "wait" | "native" | "take" {
+ *             the lesson (the dock) or stops the drag (the page).
+ *
+ *  An Apple Pencil waits PENCIL_SLOP px first (owner's iPad, option B of two).
+ *  A Pencil tap always moves a little (1.4 to 9.6 px in the owner's test; a
+ *  finger tap moved 0), and stopping that move cost the tap its click, so a
+ *  Pencil tap often needed several tries. Under the slop its moves are left
+ *  to Safari. The owner accepted the cost: a Pencil drag that starts where
+ *  nothing can scroll may move the page a little before it is stopped. */
+export function dragDecision(dx: number, dy: number, cancelable: boolean, innerCan: (dy: number) => boolean, pencil = false): "wait" | "native" | "take" {
 	if (!cancelable) return "native";
+	if (pencil && Math.hypot(dx, dy) < PENCIL_SLOP) return "wait";
 	if (dx === 0 && dy === 0) return "wait";
 	if (Math.abs(dx) > Math.abs(dy)) return "native";
 	return innerCan(dy) ? "native" : "take";
@@ -157,6 +176,7 @@ export function useDockTouchScroll(rootRef: RefObject<HTMLElement | null>, trans
 		let startX = 0;
 		let startY = 0;
 		let lastY = 0;
+		let pencil = false;
 		let samples: { t: number; y: number }[] = [];
 		let mode: "idle" | "pending" | "native" | "forward" = "idle";
 		let target: EventTarget | null = null;
@@ -186,6 +206,7 @@ export function useDockTouchScroll(rootRef: RefObject<HTMLElement | null>, trans
 			}
 			const t = e.touches[0];
 			if (!t) return;
+			pencil = isPencilTouch(t);
 			startX = t.clientX;
 			startY = lastY = t.clientY;
 			samples = [{ t: e.timeStamp, y: t.clientY }];
@@ -196,7 +217,7 @@ export function useDockTouchScroll(rootRef: RefObject<HTMLElement | null>, trans
 			const t = e.touches[0];
 			if (mode === "idle" || mode === "native" || e.touches.length !== 1 || !t) return;
 			if (mode === "pending") {
-				const decision = dragDecision(t.clientX - startX, t.clientY - startY, e.cancelable, (dy) => innerCanTake(scrollersUnder(target, root), dy));
+				const decision = dragDecision(t.clientX - startX, t.clientY - startY, e.cancelable, (dy) => innerCanTake(scrollersUnder(target, root), dy), pencil);
 				if (decision === "wait") return;
 				if (decision === "native") {
 					mode = "native";

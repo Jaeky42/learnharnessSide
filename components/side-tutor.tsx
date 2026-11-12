@@ -37,6 +37,7 @@ import { plainEnterSends } from "@/components/phone/enter-key";
 import { joinDictation, type Dictation } from "@/components/dictation";
 import { SIDE_TUTOR_DICTATION_ID, SideTutorDictate, tutorOwnsDictation } from "@/components/side-tutor-dictation";
 import { MORPH_CLOSE_MS, MORPH_EASE, MORPH_OPEN_MS, morphStart, resizeTutorRect, storedTutorSize, TUTOR_EDGE, TUTOR_RESIZE_EDGES, type MorphBox, type TutorRect, type TutorResizeEdge, type TutorSize } from "@/components/side-tutor-window";
+import { tabletTopInset } from "@/components/phone/tablet-top";
 import { CitationActionsContext } from "@/components/citation-chip";
 import { useServerResync } from "@/components/server-events";
 import type { useSideThread } from "@/components/use-side-thread";
@@ -63,7 +64,9 @@ export type TutorSide = ReturnType<typeof useSideThread>;
 const BUBBLE_EDGE_GAP = 16;
 const BUBBLE_BAR_GAP = 20;
 /** While an opened question leaves no room above the bar: under the top
- *  bar, the same distance in from the lesson's right edge. */
+ *  bar, the same distance in from the lesson's right edge. In the tablet
+ *  home-screen app the top bar is lower by --lh-tablet-top (app/tablet.css),
+ *  and so is this spot. */
 const BUBBLE_TOP = 72;
 
 /**
@@ -140,8 +143,11 @@ const CORNER_SHAPE: Partial<Record<TutorResizeEdge, string>> = {
 
 type Pos = { left: number; top: number };
 
-function defaultPos(): Pos {
-	return { left: window.innerWidth - DEFAULT_WIDTH - DEFAULT_RIGHT_GAP, top: DEFAULT_TOP };
+/** In the tablet home-screen app the top bar sits lower, below iOS's clock
+ *  and blur (app/tablet.css); the window's default spot and its top limit
+ *  move down with it (`inset`, 0 elsewhere). */
+export function defaultPos(inset = tabletTopInset()): Pos {
+	return { left: window.innerWidth - DEFAULT_WIDTH - DEFAULT_RIGHT_GAP, top: DEFAULT_TOP + inset };
 }
 
 function readStored<T>(key: string, fallback: T): T {
@@ -161,14 +167,15 @@ function writeStored(key: string, value: unknown): void {
 	}
 }
 
-function clampPos(pos: Pos, width: number, height = 64): Pos {
+export function clampPos(pos: Pos, width: number, height = 64, inset = tabletTopInset()): Pos {
+	const minTop = EDGE + inset;
 	const maxLeft = Math.max(EDGE, window.innerWidth - width - EDGE);
-	const maxTop = Math.max(EDGE, window.innerHeight - Math.min(height, 120) - EDGE);
+	const maxTop = Math.max(minTop, window.innerHeight - Math.min(height, 120) - EDGE);
 	const left = Number.isFinite(pos.left) ? pos.left : maxLeft;
-	const top = Number.isFinite(pos.top) ? pos.top : DEFAULT_TOP;
+	const top = Number.isFinite(pos.top) ? pos.top : DEFAULT_TOP + inset;
 	return {
 		left: Math.min(Math.max(EDGE, left), maxLeft),
-		top: Math.min(Math.max(EDGE, top), maxTop),
+		top: Math.min(Math.max(minTop, top), maxTop),
 	};
 }
 
@@ -619,7 +626,7 @@ export function SideTutor({ chatId, messages, side, dictation, held = false, ope
 			? { right: BUBBLE_EDGE_GAP, bottom: `calc(100% + ${BUBBLE_BAR_GAP}px)`, WebkitAppRegion: "no-drag" }
 			: held || overSurface
 				? { right: anchor.right + BUBBLE_EDGE_GAP, bottom: BUBBLE_BAR_GAP, WebkitAppRegion: "no-drag", ...raised }
-				: { right: anchor.right + BUBBLE_EDGE_GAP, top: BUBBLE_TOP, WebkitAppRegion: "no-drag" }) as React.CSSProperties;
+				: { right: anchor.right + BUBBLE_EDGE_GAP, top: `calc(${BUBBLE_TOP}px + var(--lh-tablet-top, 0px))`, WebkitAppRegion: "no-drag" }) as React.CSSProperties;
 	// The dock lets clicks through to the lesson; the bubble takes its own.
 	const bubblePosition = onDock ? "absolute" : "fixed";
 	const atBubblePlace = (node: React.ReactElement) => (onDock && anchor.dock ? createPortal(node, anchor.dock) : node);

@@ -7,6 +7,7 @@ import "./phone.css";
 import "./phone-flashcards.css";
 import "./phone-rich-code-blocks.css";
 import "./touch.css";
+import "./tablet.css";
 import "./cloud.css";
 import { AppShell, SidebarProvider } from "@/components/sidebar";
 import { ActivityProvider } from "@/components/activity-dock";

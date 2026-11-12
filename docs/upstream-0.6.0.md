@@ -138,6 +138,7 @@ Five things the plan had left open, or that came out differently than the plan s
 - **The Tutor stays above the Drawing Pad**, window and bubble. Details in `docs/side-tutor.md`.
 
 - **A tablet in the browser no longer has its page pulled down by a finger**, with the computer layout kept ("Phone layouts", under "When it applies", in `docs/cloud-sync.md`).
+- **Three iPad fixes** (owner's iPad): in the home-screen app the top edges sit below iOS's blur (a Safari tab is unchanged); Apple Pencil taps click the first time; and palm rejection on the Drawing Pad. All three are in the fork's own touch files, change nothing in the Windows app, and were shipped to both branches at the owner's word. Not yet confirmed on the owner's iPad. Details under "When it applies" in `docs/cloud-sync.md`.
 - **Demos work on the server:** the image now carries Chromium, which the demo agent needs to test-run a demo ("Hosting" in `docs/cloud-sync.md`). Not an 0.6.0 matter: it was so since server mode was built.
 
 ### The Drawing Pad, as tried on a computer (nothing of upstream's changed)
@@ -145,6 +146,7 @@ Five things the plan had left open, or that came out differently than the plan s
 - **Draw** sits in the lesson's top bar right of Notes and the ring. With too little room (the notes drawer open, a narrow window, a long title) it moves into upstream's ⋯ menu.
 - The pad covers the lesson under the top bar. **An open question is already on the sheet**, with its options, as a read-only picture to draw on or around; the answer is picked after closing the pad. With the notes drawer open the pad narrows beside it.
 - Not tried: sending a drawing to the teacher (it needs a real model).
+- **On an iPad (owner's):** a resting palm became one big selection box over the pad. The fork now cancels finger and palm touches on the pad's drawing area, makes the pad unselectable and clears a stuck selection at the next touch, from its own touch files, without changing upstream's plugin ("Palm rejection on the Drawing Pad" in `docs/cloud-sync.md`).
 
 ### The other core plugins, as tried on a computer (nothing changed)
 

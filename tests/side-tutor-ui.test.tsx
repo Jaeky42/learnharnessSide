@@ -608,7 +608,8 @@ describe("minimized", () => {
 		assert.equal(bubble.getAttribute("data-place"), "top");
 		assert.ok(host.contains(bubble), "not inside the dock");
 		assert.match(bubble.className, /\bfixed\b/);
-		assert.match(styleOf(bubble), /top:\s*72px/);
+		// 72 px, lower by the tablet home-screen app's inset (app/tablet.css; 0 elsewhere).
+		assert.match(styleOf(bubble), /top:\s*calc\(72px \+ var\(--lh-tablet-top, 0px\)\)/);
 		assert.match(styleOf(bubble), /right:\s*16px/);
 		// With the notes drawer open, the lesson ends 380 px from the window's edge.
 		for (const dock of [...document.querySelectorAll("[data-phone='dock']")]) dock.remove();
@@ -851,5 +852,25 @@ describe("moving and resizing (computer)", () => {
 		} finally {
 			delete (dom.window as unknown as Record<string, unknown>).matchMedia;
 		}
+	});
+});
+
+describe("in the tablet home-screen app (owner's iPad: the top bar sits below iOS's blur)", () => {
+	it("opens 12 px under the lowered top bar, and can't be dragged up into the blur", async () => {
+		const { defaultPos, clampPos } = await import("../components/side-tutor.tsx");
+		// app/tablet.css: the clock strip (24) plus 32 points.
+		const inset = 24 + 32;
+		assert.equal(defaultPos(inset).top, 72 + inset);
+		assert.equal(clampPos({ left: 400, top: 10 }, 352, 480, inset).top, 8 + inset, "the top limit moves down with the bar");
+		assert.equal(clampPos({ left: 400, top: 300 }, 352, 480, inset).top, 300, "lower spots are kept");
+		// Everywhere else there is no inset, and nothing changes.
+		assert.equal(defaultPos(0).top, 72);
+		assert.equal(clampPos({ left: 400, top: 10 }, 352, 480, 0).top, 10);
+		assert.equal(clampPos({ left: 400, top: 2 }, 352, 480, 0).top, 8);
+	});
+
+	it("reads no inset where app/tablet.css sets none", async () => {
+		const { tabletTopInset } = await import("../components/phone/tablet-top.ts");
+		assert.equal(tabletTopInset(), 0);
 	});
 });

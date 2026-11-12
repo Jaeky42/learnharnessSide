@@ -27,6 +27,20 @@
 		-webkit-touch-callout: none;
 	}
 
+	/* The Drawing Pad (owner's iPad): a palm resting on it is a finger held
+	   down, and Safari turned it into one big text selection over the pad
+	   that the Pencil couldn't draw through or tap away. Nothing in the pad
+	   or the frame around it can be selected, and iOS's press-and-hold menu
+	   is off. Finger and palm touches on its drawing area are cancelled by
+	   components/phone/pad-palm.ts. The class names are upstream's
+	   (plugins/drawing-pad); tests/pad-palm.test.ts checks they still exist. */
+	html:not(.lh-electron) .drawing-pad-root,
+	html:not(.lh-electron) [data-plugin-session-surface-frame]:has(.drawing-pad-root) {
+		-webkit-user-select: none;
+		user-select: none;
+		-webkit-touch-callout: none;
+	}
+
 	/* Buttons that only appear on mouse hover stay visible where a finger
 	   can't hover: copy, expand diagram, and "move this section" in a note's
 	   Read view. The notes list's row menus open by press and hold. */

@@ -1,0 +1,64 @@
+/* TABLET HOME-SCREEN APP (fork-owned, like phone.css and touch.css).
+ *
+ * A tablet gets the computer layout. In the home-screen app iOS draws the
+ * app under its clock, and since iOS 26 it blurs the top of the screen,
+ * which softened the top bar (owner's iPad, as on the iPhone). No setting
+ * turns the blur off, so the top edges move below it (owner's choice, the
+ * iPhone's rule): the top bar's buttons and title start where the blur ends,
+ * and each bar's own background still runs up under the clock.
+ *
+ * Measured on the owner's screenshot (13-inch iPad, 24-point clock strip):
+ * the blur is gone 68 points from the top. The top bar's buttons sit 11.5
+ * points into the bar, so the bar moves down by the clock strip plus 32
+ * points (24 + 32 + 11.5 = 67.5).
+ *
+ * The 32 points are added only where there is a clock strip
+ * (env(safe-area-inset-top) above 0): not on an iPhone held sideways, which
+ * also gets the computer layout but has no clock strip, and not in an iPad
+ * window away from the top of the screen.
+ *
+ * The law, pinned by tests/tablet-top.test.ts: every rule sits inside the
+ * media query below (a touch screen wider than the phone layout) AND under
+ * html:not(.lh-electron) body[data-lh-standalone] (the home-screen app in a
+ * browser, set by components/phone/phone-viewport.tsx). A Safari tab, the
+ * phone layout (app/phone.css has its own --lh-safe-top) and the desktop
+ * app are never touched.
+ *
+ * Unlayered, like phone.css, so these rules beat Tailwind's utilities.
+ * The Tutor's window and bubble read --lh-tablet-top too
+ * (components/phone/tablet-top.ts, components/side-tutor.tsx).
+ */
+
+@media (any-pointer: coarse) and (min-width: 640px) {
+	html:not(.lh-electron) body[data-lh-standalone] {
+		--lh-tablet-top: calc(env(safe-area-inset-top, 0px) + min(32px, env(safe-area-inset-top, 0px) * 100));
+	}
+
+	/* The top bar (lessons, practice, plugin pages): taller by the inset, its
+	   row below it. */
+	html:not(.lh-electron) body[data-lh-standalone] [data-phone="topbar"] {
+		padding-top: var(--lh-tablet-top);
+		height: calc(3.75rem + var(--lh-tablet-top));
+	}
+
+	/* The session list: its column (background and divider) still runs to the
+	   top; its header row starts below the inset. */
+	html:not(.lh-electron) body[data-lh-standalone] [data-phone="sidebar"] > div {
+		padding-top: var(--lh-tablet-top);
+	}
+
+	/* The notes drawer, beside the lesson at full height. */
+	html:not(.lh-electron) body[data-lh-standalone] [data-phone="notes"] {
+		padding-top: var(--lh-tablet-top);
+	}
+
+	/* Home and new session: the corner buttons; the graph's toolbar. They sit
+	   8 px from the top on a computer; here 12 px below the inset, so they start
+	   where the top bar's buttons do (11.5 px into the bar), below the blur. */
+	html:not(.lh-electron) body[data-lh-standalone] [data-phone="corner-header"] {
+		padding-top: calc(0.75rem + var(--lh-tablet-top));
+	}
+	html:not(.lh-electron) body[data-lh-standalone] [data-phone="graph-chrome"] {
+		top: calc(0.75rem + var(--lh-tablet-top));
+	}
+}
