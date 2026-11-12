@@ -13,9 +13,13 @@
  *
  * A session held by another device is read-only here (holds() is false):
  * its files are only ever replaced by what the server sends.
+ *
+ * A chat file in a newer format than this build reads (chatFileTooNew: a
+ * newer build wrote it, and this one was installed over it) is never sent,
+ * handed over or replaced by a discard here. It is left as it is.
  */
 
-import { bundleDigest, checkBundle, type SessionBundle, type SessionChange } from "../../core/sync/sessions.ts";
+import { bundleDigest, chatFileTooNew, checkBundle, NEWER_FORMAT_CODE, type SessionBundle, type SessionChange } from "../../core/sync/sessions.ts";
 import { picturesOnce } from "./pictures-transport.ts";
 import type { SessionFiles } from "../../store/sync/session-files.ts";
 import type { StateFile } from "../../store/sync/state-file.ts";
@@ -132,6 +136,17 @@ export function createDesktopSync(deps: DesktopSyncDeps): DesktopSync {
 	// A session's pictures travel on their own, once (pictures-transport.ts).
 	const request = picturesOnce(deps.request, files);
 	let running: Promise<TickResult> | null = null;
+	/**
+	 * A session the server named this round couldn't be fetched because the
+	 * server stopped answering (not because it refused). The place in the
+	 * server's list then stays where it was, so the next round is told again;
+	 * what was already brought here is told again harmlessly.
+	 */
+	let missed = false;
+	const note = <T>(reply: SyncReply<T>): SyncReply<T> => {
+		if (!reply.ok && reply.reason !== "refused") missed = true;
+		return reply;
+	};
 
 	/** The state for the server this desktop is paired with, or null. */
 	function current(): DesktopState | null {
@@ -175,9 +190,12 @@ export function createDesktopSync(deps: DesktopSyncDeps): DesktopSync {
 	 */
 	async function giveUp(state: DesktopState, change: SessionChange): Promise<boolean> {
 		const entry = state.sessions[change.id];
+		// Not this build's format: left as it is, never replaced by a discard.
+		const before = files.read(change.id);
+		if (before && chatFileTooNew(before.chat)) return false;
 		// A reply, helpers and extraction still running here for it stop now.
 		deps.localWork?.stop(change.id, { turn: true });
-		const reply = await request<SessionChange & { bundle: unknown }>(sessionPath(change.id));
+		const reply = note(await request<SessionChange & { bundle: unknown }>(sessionPath(change.id)));
 		if (!reply.ok) return false;
 		const remote = checkBundle(change.id, reply.body.bundle);
 		if (!remote) return false;
@@ -192,7 +210,7 @@ export function createDesktopSync(deps: DesktopSyncDeps): DesktopSync {
 	}
 
 	async function fetchInto(state: DesktopState, change: SessionChange, mine: boolean): Promise<boolean> {
-		const reply = await request<SessionChange & { bundle: unknown }>(sessionPath(change.id));
+		const reply = note(await request<SessionChange & { bundle: unknown }>(sessionPath(change.id)));
 		if (!reply.ok) return false;
 		const bundle = checkBundle(change.id, reply.body.bundle);
 		if (!bundle) return false;
@@ -216,6 +234,8 @@ export function createDesktopSync(deps: DesktopSyncDeps): DesktopSync {
 		for (const [id, entry] of freed) {
 			const stamp = stamps.get(id);
 			const local = stamp === undefined ? null : files.read(id);
+			// Not this build's format: left freed, and as it is, until a build that reads it.
+			if (local && chatFileTooNew(local.chat)) continue;
 			const localDigest = local ? bundleDigest(local) : null;
 			if (!local || stamp === entry.stamp || localDigest === entry.digest) {
 				entry.mine = entry.freed === "mine";
@@ -226,6 +246,8 @@ export function createDesktopSync(deps: DesktopSyncDeps): DesktopSync {
 			const reply = await request<SessionChange & { bundle: unknown }>(sessionPath(id));
 			if (!reply.ok) {
 				if (reply.reason !== "refused") return reply.reason;
+				// The server's copy is in a format this build can't take: ask again later.
+				if (reply.code === NEWER_FORMAT_CODE) continue;
 				// The server has no such session any more (deleted there): step 2's send settles it.
 				entry.mine = true;
 				delete entry.freed;
@@ -306,6 +328,7 @@ export function createDesktopSync(deps: DesktopSyncDeps): DesktopSync {
 			if (replying(id)) reports[id] = "busy";
 			else if (localBefore.has(id) && localBefore.get(id) !== entry.stamp) reports[id] = "unsent";
 		}
+		missed = false;
 		const news = await request<{ seq: number; changes: SessionChange[]; handovers?: string[] }>("/api/sync/sessions", { method: "POST", body: { cursor: state.cursor, reports } });
 		if (!news.ok) return { ok: false, reason: news.reason };
 		for (const change of news.body.changes) {
@@ -335,7 +358,7 @@ export function createDesktopSync(deps: DesktopSyncDeps): DesktopSync {
 					// are left alone on both sides, never overwritten.
 					const local = files.read(change.id);
 					if (local && !mine) {
-						const reply = await request<SessionChange & { bundle: unknown }>(sessionPath(change.id));
+						const reply = note(await request<SessionChange & { bundle: unknown }>(sessionPath(change.id)));
 						const remote = reply.ok ? checkBundle(change.id, reply.body.bundle) : null;
 						if (!remote) continue;
 						const same = bundleDigest(local) === bundleDigest(remote);
@@ -377,7 +400,7 @@ export function createDesktopSync(deps: DesktopSyncDeps): DesktopSync {
 				}
 			}
 		}
-		state.cursor = news.body.seq;
+		if (!missed) state.cursor = news.body.seq;
 		deps.state.write(state);
 
 		// ── 2. What changed here ──────────────────────────────────────────────
@@ -388,6 +411,8 @@ export function createDesktopSync(deps: DesktopSyncDeps): DesktopSync {
 			if (entry && entry.stamp === stamp) continue;
 			const bundle = files.read(id);
 			if (!bundle) continue;
+			// Not this build's format: never sent, and never put back from the server's copy.
+			if (chatFileTooNew(bundle.chat)) continue;
 			const digest = bundleDigest(bundle);
 			if (entry && digest === entry.digest) { entry.stamp = stamp; continue; }
 			if (entry && !entry.mine) {
@@ -447,7 +472,7 @@ export function createDesktopSync(deps: DesktopSyncDeps): DesktopSync {
 			deps.localWork?.stop(id);
 			const stamp = files.stamp(id);
 			const bundle = files.read(id);
-			if (!bundle) continue;
+			if (!bundle || chatFileTooNew(bundle.chat)) continue;
 			const reply = await request<SessionChange>(sessionPath(id), { method: "PUT", body: { baseVersion: entry.serverVersion, bundle, word: "all-sent", release: true } });
 			if (!reply.ok) continue;
 			state.sessions[id] = {

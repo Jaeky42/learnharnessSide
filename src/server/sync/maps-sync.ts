@@ -21,14 +21,14 @@
  * has, and for that one exchange its values win whatever the times say. A
  * synced SETTING the desktop doesn't have set is its default, so the
  * server's value for it goes too. Everything else is joined: a folder, a
- * prompt text, an imported-file record or a node's place that only one
- * side has is kept.
+ * prompt text, a custom theme, an imported-file record or a node's place
+ * that only one side has is kept.
  *
  * A DESKTOP PAIRED LATER (owner's decision, Phase 6: "only the first PC
  * brings its settings", so a fresh install can't reset every device): at
  * its first sync the server's values stand. Its synced settings become
  * the server's, "not set" included; where both have the same folder,
- * prompt text, record or node place, the server's is kept; and anything
+ * prompt text, theme, record or node place, the server's is kept; and anything
  * of those kinds that only the new PC has is added, as above.
  */
 
@@ -43,7 +43,7 @@ const MAX_CHANGES = 50_000;
 /** An item that can be compared and written this round. */
 const usable = (snapshot: MapSnapshot, key: string): boolean => {
 	const kind = kindOf(key);
-	return !!kind && !snapshot.unreadable.has(kind);
+	return !!kind && !snapshot.unreadable.has(kind) && !snapshot.unreadableKeys?.has(key);
 };
 
 const valueOf = (snapshot: MapSnapshot, key: string): unknown => snapshot.items.get(key)?.value ?? null;

@@ -100,8 +100,8 @@ beforeEach(() => {
 });
 
 describe("the protocol version rule", () => {
-	it("starts at 1, and names the side that is behind in the approved words", () => {
-		assert.equal(protocol.SYNC_PROTOCOL_VERSION, 1);
+	it("is at 2 since upstream 0.6.0, and names the side that is behind in the approved words", () => {
+		assert.equal(protocol.SYNC_PROTOCOL_VERSION, 2);
 		assert.deepEqual(protocol.protocolVerdict(1, 1), { ok: true });
 		assert.deepEqual(protocol.protocolVerdict(2, 1), { ok: false, behind: "server", message: "Update the server to continue syncing" });
 		assert.deepEqual(protocol.protocolVerdict(1, 2), { ok: false, behind: "app", message: "Update LearnHarness to continue syncing" });
@@ -118,11 +118,14 @@ describe("the protocol version rule", () => {
 			headers: { authorization: `Bearer ${key}`, "content-type": "application/json", ...(version === null ? {} : { [protocol.SYNC_PROTOCOL_HEADER]: version }) },
 			body: "{}",
 		});
-		const same = await asServer(() => syncHttp.helloResponse(request("1")));
+		const same = await asServer(() => syncHttp.helloResponse(request("2")));
 		assert.equal(same.status, 200);
-		const newer = await asServer(() => syncHttp.helloResponse(request("2")));
+		const newer = await asServer(() => syncHttp.helloResponse(request("3")));
 		assert.equal(newer.status, 409);
-		assert.deepEqual(await newer.json(), { error: "Update the server to continue syncing", code: "protocol_mismatch", protocol: 1 });
+		assert.deepEqual(await newer.json(), { error: "Update the server to continue syncing", code: "protocol_mismatch", protocol: 2 });
+		const older = await asServer(() => syncHttp.helloResponse(request("1")));
+		assert.equal(older.status, 409, "a build from before upstream 0.6.0 is refused");
+		assert.deepEqual(await older.json(), { error: "Update LearnHarness to continue syncing", code: "protocol_mismatch", protocol: 2 });
 		assert.equal((await asServer(() => syncHttp.helloResponse(request(null)))).status, 400);
 	});
 });
@@ -437,10 +440,10 @@ describe("the desktop's view of its link", () => {
 		await paired();
 		const serverAt = (version: number): typeof fetch => async () =>
 			Response.json({ error: "x", code: "protocol_mismatch", protocol: version }, { status: 409 });
-		let status = await client.contactServer({ fetch: serverAt(2) });
+		let status = await client.contactServer({ fetch: serverAt(3) });
 		assert.equal(status.sync.state, "paused");
 		assert.equal(status.sync.message, "Update LearnHarness to continue syncing");
-		status = await client.contactServer({ fetch: serverAt(0) });
+		status = await client.contactServer({ fetch: serverAt(1) });
 		assert.equal(status.sync.message, "Update the server to continue syncing");
 		assert.equal(status.paired, true, "a pause never unpairs");
 		status = await client.contactServer({ fetch: serverFetch });
@@ -460,7 +463,7 @@ describe("the desktop's view of its link", () => {
 		await paired();
 		let tick = 0;
 		const times = [10_000, 10_200];
-		const ahead: typeof fetch = async () => Response.json({ protocol: 1, time: 70_100, device: { id: "x", name: "Desk" } });
+		const ahead: typeof fetch = async () => Response.json({ protocol: 2, time: 70_100, device: { id: "x", name: "Desk" } });
 		await client.syncRequest("/api/sync/hello", { method: "POST", body: {} }, { fetch: ahead, now: () => times[Math.min(tick++, 1)]! });
 		assert.equal(client.serverClockOffsetMs(), 60_000);
 	});

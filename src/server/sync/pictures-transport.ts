@@ -4,6 +4,9 @@
  * goes through, so the rest of the desktop's sync code still sees whole
  * session files:
  *
+ * (Pictures are the record's imageSnapshots and, since upstream 0.6.0, the
+ * image blocks inside its messages.)
+ *
  *   fetching a session   the chat arrives without its pictures; the ones
  *                        not already in this desktop's copy are fetched
  *                        one by one, and the file is put back together
@@ -12,7 +15,7 @@
  *                        one in pieces) and the session is sent again
  */
 
-import { checkPictureList, PICTURE_PART_CHARS, pictureMatches, picturesIn, withoutPictures, withPictures } from "../../core/sync/pictures.ts";
+import { checkPictureList, PICTURE_PART_CHARS, pictureIds, pictureMatches, picturesIn, withoutPictures, withPictures } from "../../core/sync/pictures.ts";
 import type { SessionBundle } from "../../core/sync/sessions.ts";
 import type { SessionFiles } from "../../store/sync/session-files.ts";
 import type { SyncReply } from "./client.ts";
@@ -35,7 +38,7 @@ export function picturesOnce(request: SyncRequester, files: Pick<SessionFiles, "
 			if (!pictures || typeof reply.body.bundle.chat !== "string") return broken("The session's files didn't arrive whole.");
 			const here = picturesIn(files.read(chatId)?.chat);
 			const fetched = new Map<string, string>();
-			for (const [id] of pictures.list) {
+			for (const id of pictureIds(pictures)) {
 				if (here.has(id)) continue;
 				const picture = await request<{ data?: unknown }>(`${pathname}/pictures/${id}`);
 				if (!picture.ok) return picture as SyncReply<T>;

@@ -20,10 +20,12 @@ import { checkPictureList, PICTURE_ID, picturesIn, withoutPictures, withPictures
 import type { PictureStaging } from "../../store/sync/picture-staging.ts";
 import {
 	bundleDigest,
+	chatFileTooNew,
 	checkBundle,
 	CLOUD_HOLDER,
 	isHolderWord,
 	isSessionId,
+	NEWER_FORMAT_CODE,
 	type HolderWord,
 	type SessionBundle,
 	type SessionChange,
@@ -412,6 +414,9 @@ export function createAuthority(deps: AuthorityDeps): Authority {
 			if (entry.deletedAt !== undefined) return bad("That session was deleted.", 410, { code: "deleted" });
 			const bundle = files.read(chatId);
 			if (!bundle) return bad("No such session.", 404);
+			// A chat file in a newer format than this build reads is never sent
+			// (the second lock beside the protocol number). Not shown to anyone.
+			if (chatFileTooNew(bundle.chat)) return bad("This session's files are in a newer format than this server reads.", 409, { code: NEWER_FORMAT_CODE });
 			// The pictures travel on their own, once (core/sync/pictures.ts).
 			const slim = withoutPictures(bundle.chat);
 			return { status: 200, body: { ...changeOf(chatId, entry), bundle: slim ? { ...bundle, chat: slim.chat, pictures: slim.pictures } : bundle } };

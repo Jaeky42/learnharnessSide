@@ -6,16 +6,19 @@
  *   desktop  %APPDATA%\LearnHarness\backups\before-first-sync 2026-11-20\
  *   server   /data/backups/before-first-sync 2026-11-20/
  *
- * It holds the sessions, the graph, the side-tutor threads, the helper
- * jobs, the settings, the prompt overrides and the notes home-folder
- * records. No keys or sign-ins (they live beside the data folder, not in
- * it), and not the Obsidian vault. Restoring is done by hand.
+ * It holds the sessions (their side questions are inside them), the
+ * graph, the helper jobs, the settings, the prompt overrides, the custom
+ * themes, the notes home-folder records, and the built-in plugins' state
+ * and data (plugins-state.json, core-plugin-data/; per device, never
+ * synced, but kept with the rest). Not community plugin code, no keys or
+ * sign-ins (they live beside the data folder, not in it), and not the
+ * Obsidian vault. Restoring is done by hand.
  */
 
 import fs from "node:fs";
 import path from "node:path";
 
-const PARTS = ["chats", "graph", "side-tutor", "jobs", "settings.json", "prompts", path.join("notes", "sessions")];
+const PARTS = ["chats", "graph", "jobs", "settings.json", "prompts", "themes", path.join("notes", "sessions"), "plugins-state.json", "core-plugin-data"];
 
 function localDate(now: Date): string {
 	const pad = (n: number) => String(n).padStart(2, "0");

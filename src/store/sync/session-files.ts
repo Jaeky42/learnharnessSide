@@ -4,11 +4,13 @@
  * purpose: it moves exact bytes, and it must be able to write a session
  * this device does not hold (the stores refuse that).
  *
- * The four places a session lives:
- *   chats/<id>.json            the chat record
- *   side-tutor/<id>.json       its side-tutor thread
+ * The three places a session lives:
+ *   chats/<id>.json            the chat record (its side questions are inside it)
  *   notes/sessions/<id>.json   its notes home folder
  *   jobs/<jobId>.json          its helper jobs (each names its chatId)
+ *
+ * Until upstream 0.6.0 a fourth, side-tutor/<id>.json, travelled too. A
+ * leftover one is no longer read, sent or written here.
  */
 
 import fs from "node:fs";
@@ -19,7 +21,6 @@ import { removeLeftoverTemps, writeFileAtomicSync } from "../atomic-write.ts";
 
 export interface SessionDirs {
 	chats: string;
-	sideTutor: string;
 	notesSessions: string;
 	jobs: string;
 }
@@ -27,14 +28,13 @@ export interface SessionDirs {
 export function sessionDirsUnder(dataDir: string): SessionDirs {
 	return {
 		chats: path.join(/* turbopackIgnore: true */ dataDir, "chats"),
-		sideTutor: path.join(/* turbopackIgnore: true */ dataDir, "side-tutor"),
 		notesSessions: path.join(/* turbopackIgnore: true */ dataDir, "notes", "sessions"),
 		jobs: path.join(/* turbopackIgnore: true */ dataDir, "jobs"),
 	};
 }
 
 export function productionSessionDirs(): SessionDirs {
-	return { chats: PATHS.chats, sideTutor: PATHS.sideTutor, notesSessions: path.join(/* turbopackIgnore: true */ PATHS.notes, "sessions"), jobs: path.join(/* turbopackIgnore: true */ PATHS.data, "jobs") };
+	return { chats: PATHS.chats, notesSessions: path.join(/* turbopackIgnore: true */ PATHS.notes, "sessions"), jobs: path.join(/* turbopackIgnore: true */ PATHS.data, "jobs") };
 }
 
 export interface SessionFiles {
@@ -64,9 +64,23 @@ function readText(file: string): string | null {
 	try { return fs.readFileSync(/* turbopackIgnore: true */ file, "utf-8"); } catch { return null; }
 }
 
-function writeText(file: string, text: string): void {
+function writeText(file: string, text: string, options: { strict?: boolean } = {}): void {
 	fs.mkdirSync(/* turbopackIgnore: true */ path.dirname(file), { recursive: true });
-	writeFileAtomicSync(file, text, { allowInPlaceFallback: true });
+	writeFileAtomicSync(file, text, options.strict ? { mode: 0o600 } : { allowInPlaceFallback: true });
+}
+
+/**
+ * A plugin-linked helper job (upstream 0.6.0) is written the way the job
+ * store writes one: replaced atomically, never in place, readable by its
+ * owner only (src/store/jobs.ts writeJob).
+ */
+function pluginLinked(text: string): boolean {
+	try {
+		const job = JSON.parse(text) as { kind?: unknown; plugin?: unknown };
+		return job.kind === "plugin" || job.plugin !== undefined;
+	} catch {
+		return false;
+	}
 }
 
 function removeFile(file: string): void {
@@ -79,7 +93,6 @@ export function sessionFiles(dirs: SessionDirs = productionSessionDirs()): Sessi
 	const jobOwners = new Map<string, { stamp: string; chatId: string | null }>();
 
 	const chatFile = (id: string) => path.join(/* turbopackIgnore: true */ dirs.chats, `${id}.json`);
-	const tutorFile = (id: string) => path.join(/* turbopackIgnore: true */ dirs.sideTutor, `${id}.json`);
 	const homeFile = (id: string) => path.join(/* turbopackIgnore: true */ dirs.notesSessions, `${id}.json`);
 	const jobFile = (jobId: string) => path.join(/* turbopackIgnore: true */ dirs.jobs, `${jobId}.json`);
 
@@ -119,7 +132,9 @@ export function sessionFiles(dirs: SessionDirs = productionSessionDirs()): Sessi
 	function stampOf(chatId: string, jobs: Array<{ jobId: string; stamp: string }>): string | null {
 		const chat = statPart(chatFile(chatId));
 		if (chat === "-") return null;
-		return `c${chat}|s${statPart(tutorFile(chatId))}|h${statPart(homeFile(chatId))}|j${jobs.map((j) => `${j.jobId}=${j.stamp}`).join(",")}`;
+		// "s-" was the side-tutor file's place (until upstream 0.6.0): kept as
+		// "none", so stamps saved before then still match.
+		return `c${chat}|s-|h${statPart(homeFile(chatId))}|j${jobs.map((j) => `${j.jobId}=${j.stamp}`).join(",")}`;
 	}
 
 	function listIds(): string[] {
@@ -151,7 +166,7 @@ export function sessionFiles(dirs: SessionDirs = productionSessionDirs()): Sessi
 				const text = readText(jobFile(jobId));
 				if (text !== null) jobs[jobId] = text;
 			}
-			return { chat, sideTutor: readText(tutorFile(chatId)), home: readText(homeFile(chatId)), jobs };
+			return { chat, home: readText(homeFile(chatId)), jobs };
 		},
 		write(chatId, bundle) {
 			if (!isSessionId(chatId)) throw new Error(`Invalid session id: ${chatId}`);
@@ -160,10 +175,8 @@ export function sessionFiles(dirs: SessionDirs = productionSessionDirs()): Sessi
 			const keep = new Set(Object.keys(bundle.jobs));
 			for (const { jobId } of jobsOf(chatId)) if (!keep.has(jobId)) removeFile(jobFile(jobId));
 			for (const [jobId, text] of Object.entries(bundle.jobs)) {
-				if (readText(jobFile(jobId)) !== text) writeText(jobFile(jobId), text);
+				if (readText(jobFile(jobId)) !== text) writeText(jobFile(jobId), text, { strict: pluginLinked(text) });
 			}
-			if (bundle.sideTutor === null) removeFile(tutorFile(chatId));
-			else if (readText(tutorFile(chatId)) !== bundle.sideTutor) writeText(tutorFile(chatId), bundle.sideTutor);
 			if (bundle.home === null) removeFile(homeFile(chatId));
 			else if (readText(homeFile(chatId)) !== bundle.home) writeText(homeFile(chatId), bundle.home);
 			if (readText(chatFile(chatId)) !== bundle.chat) writeText(chatFile(chatId), bundle.chat);
@@ -171,7 +184,6 @@ export function sessionFiles(dirs: SessionDirs = productionSessionDirs()): Sessi
 		remove(chatId) {
 			if (!isSessionId(chatId)) return;
 			for (const { jobId } of jobsOf(chatId)) removeFile(jobFile(jobId));
-			removeFile(tutorFile(chatId));
 			removeFile(homeFile(chatId));
 			removeFile(chatFile(chatId));
 		},

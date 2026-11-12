@@ -6,9 +6,16 @@
  * or the deletion rules both sides replay. The desktop and the server must
  * be EQUAL or sync pauses; the desktop keeps working on its own data. The
  * message names the side that is behind (the approved wording).
+ *
+ * 2 (upstream 0.6.0): the chat record format went from 1 to 2 (side
+ * questions inside the record; an older build refuses a v2 file), the
+ * session bundle lost its side-tutor file, pictures inside messages travel
+ * once, and theme files and more settings sync. A protocol-1 build must
+ * never receive any of that. tests/sync-sessions.test.ts pins which chat
+ * format needs which protocol.
  */
 
-export const SYNC_PROTOCOL_VERSION = 1;
+export const SYNC_PROTOCOL_VERSION = 2;
 
 /** Sent by the desktop on every sync request, and echoed by the server. */
 export const SYNC_PROTOCOL_HEADER = "x-lh-sync-protocol";

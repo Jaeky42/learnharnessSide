@@ -144,13 +144,15 @@ export function heldElsewhereResponse(chatId: string): Response | null {
 }
 
 /**
- * The paths that change one session: everything under /api/chats/<id>
- * that isn't a read. The notes home folder is left to its own route, which
- * skips the write quietly (the notes drawer keeps working on a held session).
+ * The paths that change one session: everything under /api/chats/<id>,
+ * at any depth, that isn't a read (since upstream 0.6.0 that includes a
+ * side question's PATCH /side-chats/<thread> and POST …/stop). The notes
+ * home folder is left to its own route, which skips the write quietly
+ * (the notes drawer keeps working on a held session).
  */
 export function sessionWritePath(method: string, pathname: string): string | null {
 	if (["GET", "HEAD", "OPTIONS"].includes(method.toUpperCase())) return null;
-	const match = /^\/api\/chats\/([A-Za-z0-9_-]+)(?:\/([^/]+))?\/?$/.exec(pathname);
+	const match = /^\/api\/chats\/([A-Za-z0-9_-]+)(?:\/([^/]+)(?:\/[^/]+)*)?\/?$/.exec(pathname);
 	if (!match || match[2] === "notes") return null;
 	return match[1]!;
 }

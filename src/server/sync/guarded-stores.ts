@@ -14,7 +14,6 @@
  */
 
 import type { ChatStore, JobStore } from "../../core/ports.ts";
-import type { SideTutorStore } from "../../core/side-tutor.ts";
 
 function dropped(what: string, chatId: string): void {
 	console.warn(`[LearnHarness] sync: ${what} for a session another device holds was not saved (${chatId}).`);
@@ -53,22 +52,9 @@ export function guardChatStore(inner: ChatStore, holds: (chatId: string) => bool
 		// the threads stay as they are, and `update` is never run.
 		updateSideChats(id, update) {
 			if (!held("a side question", id)) return inner.updateSideChats(id, update);
-			return inner.getChat(id)?.sideChats ?? null;
-		},
-	};
-}
-
-export function guardSideTutorStore(inner: SideTutorStore, holds: (chatId: string) => boolean): SideTutorStore {
-	return {
-		read: (chatId) => inner.read(chatId),
-		append(chatId, entry) {
-			if (holds(chatId)) return inner.append(chatId, entry);
-			dropped("a side-tutor answer", chatId);
-			return inner.read(chatId);
-		},
-		clear(chatId) {
-			if (holds(chatId)) inner.clear(chatId);
-			else dropped("clearing the side tutor", chatId);
+			// null would mean "no such session"; a record without threads has none.
+			const record = inner.getChat(id);
+			return record ? record.sideChats ?? [] : null;
 		},
 	};
 }

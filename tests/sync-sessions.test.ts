@@ -1,8 +1,8 @@
 /**
  * Cloud sync Phase 5, slice 2 (docs/cloud-sync.md): sessions and leases.
  *
- * Pins the owner's decisions: a session travels whole (chat record,
- * side-tutor thread, notes home folder, helper jobs); only its holder may
+ * Pins the owner's decisions: a session travels whole (chat record with
+ * its side questions inside, notes home folder, helper jobs); only its holder may
  * change or send it; a held session is read-only everywhere else; the first
  * sync combines both libraries after a backup on each side and deletes
  * nothing; and where no desktop has synced, nothing happens at all.
@@ -29,6 +29,8 @@ const { createAuthority, isAuthorityState } = await import("../src/server/sync/a
 const { createDesktopSync, isDesktopState } = await import("../src/server/sync/desktop-sync.ts");
 const guards = await import("../src/server/sync/guarded-stores.ts");
 const engine = await import("../src/server/sync/engine.ts");
+const protocol = await import("../src/core/sync/protocol.ts");
+const { CURRENT_CHAT_VERSION } = await import("../src/core/contracts/chat.ts");
 import type { SyncReply } from "../src/server/sync/client.ts";
 import type { AuthorityReply } from "../src/server/sync/authority.ts";
 
@@ -41,13 +43,14 @@ function writeJson(file: string, value: unknown): void {
 	fs.writeFileSync(file, JSON.stringify(value, null, "\t"));
 }
 
-/** A session on disk the way the app writes it. */
-function makeSession(dataDir: string, id: string, turns: string[], extras: { tutor?: boolean; home?: string; jobs?: string[] } = {}): void {
+/** A session on disk the way the app writes it; `side` gives it a side question (inside the record since upstream 0.6.0). */
+function makeSession(dataDir: string, id: string, turns: string[], extras: { side?: boolean; home?: string; jobs?: string[]; version?: number } = {}): void {
 	writeJson(path.join(dataDir, "chats", `${id}.json`), {
-		id, title: `Session ${id}`, createdAt: "2026-11-01T10:00:00.000Z", updatedAt: "2026-11-01T10:00:00.000Z", version: 1,
+		id, title: `Session ${id}`, createdAt: "2026-11-01T10:00:00.000Z", updatedAt: "2026-11-01T10:00:00.000Z",
 		messages: turns.map((text, i) => ({ role: i % 2 ? "assistant" : "user", content: text })),
+		...(extras.side ? { sideChats: [{ id: "side_1", anchor: { messageId: "m1", partId: "m1-t0", blockIndex: 0, blockText: "Ohm" }, open: true, messages: [{ id: "q1", role: "user", text: "why?", at: "2026-11-01T10:00:00.000Z" }, { id: "a1", role: "assistant", text: "because", at: "2026-11-01T10:00:01.000Z" }] }] } : {}),
+		version: extras.version ?? 2,
 	});
-	if (extras.tutor) writeJson(path.join(dataDir, "side-tutor", `${id}.json`), { version: 1, chatId: id, entries: [{ id: "q1", question: "why?", answer: "because", status: "done", askedAt: 1 }] });
 	if (extras.home) writeJson(path.join(dataDir, "notes", "sessions", `${id}.json`), { homeFolder: extras.home });
 	for (const jobId of extras.jobs ?? []) writeJson(path.join(dataDir, "jobs", `${jobId}.json`), { id: jobId, kind: "research", chatId: id, toolCallId: `t_${jobId}`, status: "done", activity: "done", createdAt: "x", updatedAt: "x", result: { text: "found" } });
 }
@@ -67,7 +70,7 @@ function turnsOf(dataDir: string, id: string): string[] {
 /** Every synced file under a data folder, with its text. */
 function library(dataDir: string): Record<string, string> {
 	const out: Record<string, string> = {};
-	for (const part of ["chats", "side-tutor", path.join("notes", "sessions"), "jobs"]) {
+	for (const part of ["chats", path.join("notes", "sessions"), "jobs"]) {
 		const dir = path.join(dataDir, part);
 		if (!fs.existsSync(dir)) continue;
 		for (const name of fs.readdirSync(dir).sort()) out[path.join(part, name)] = fs.readFileSync(path.join(dir, name), "utf-8");
@@ -169,9 +172,9 @@ describe("the first sync combines both libraries", () => {
 	it("everything goes both ways, held by the side it came from, after one backup each", async () => {
 		const w = world();
 		const desk = w.desktop("dev_aaaaaaaaaaaaaaaa", "Office PC");
-		makeSession(desk.dataDir, "chat_d1", ["one", "two"], { tutor: true, home: "LearnHarness/Physics", jobs: ["job_1", "job_2"] });
-		makeSession(desk.dataDir, "chat_d2", ["alpha"]);
-		makeSession(w.serverDir, "chat_c1", ["from the phone"], { tutor: true, jobs: ["job_9"] });
+		makeSession(desk.dataDir, "chat_d1", ["one", "two"], { side: true, home: "LearnHarness/Physics", jobs: ["job_1", "job_2"] });
+		makeSession(desk.dataDir, "chat_d2", ["alpha"], { version: 1 });
+		makeSession(w.serverDir, "chat_c1", ["from the phone"], { side: true, jobs: ["job_9"] });
 		const before = { ...library(desk.dataDir), ...library(w.serverDir) };
 
 		const round = await desk.sync.tick();
@@ -204,11 +207,16 @@ describe("the first sync combines both libraries", () => {
 
 	it("the backup holds the synced parts of the data folder and nothing private", () => {
 		const dataDir = path.join(TMP, "backup-src", "data");
-		makeSession(dataDir, "chat_x", ["hi"], { tutor: true, home: "LearnHarness/A", jobs: ["job_x"] });
+		makeSession(dataDir, "chat_x", ["hi"], { side: true, home: "LearnHarness/A", jobs: ["job_x"] });
 		writeJson(path.join(dataDir, "graph", "sources.json"), {});
 		fs.writeFileSync(path.join(dataDir, "graph", "nodes.jsonl"), "{}\n");
 		writeJson(path.join(dataDir, "settings.json"), { version: 1 });
 		writeJson(path.join(dataDir, "prompts", "system-prompt.md"), "mine");
+		writeJson(path.join(dataDir, "themes", "dusk.json"), { name: "Dusk" });
+		writeJson(path.join(dataDir, "plugins-state.json"), { version: 1, enabled: {} });
+		writeJson(path.join(dataDir, "core-plugin-data", "flashcards", "deck.json"), {});
+		writeJson(path.join(dataDir, "plugins", "community-one", "main.js"), "code");
+		writeJson(path.join(dataDir, "side-tutor", "chat_x.json"), { leftover: true });
 		writeJson(path.join(dataDir, "notes", "settings.json"), { vaultPath: "/vault" });
 		writeJson(path.join(dataDir, "notes", "pending", "x.json"), { body: "private note text" });
 		writeJson(path.join(dataDir, "obsidian-sync.json"), {});
@@ -216,8 +224,8 @@ describe("the first sync combines both libraries", () => {
 		const listed = (dir: string, prefix = ""): string[] => fs.readdirSync(dir, { withFileTypes: true })
 			.flatMap((e) => e.isDirectory() ? listed(path.join(dir, e.name), `${prefix}${e.name}/`) : [`${prefix}${e.name}`]).sort();
 		assert.deepEqual(listed(first), [
-			"chats/chat_x.json", "graph/nodes.jsonl", "graph/sources.json", "jobs/job_x.json", "notes/sessions/chat_x.json",
-			"prompts/system-prompt.md", "settings.json", "side-tutor/chat_x.json",
+			"chats/chat_x.json", "core-plugin-data/flashcards/deck.json", "graph/nodes.jsonl", "graph/sources.json", "jobs/job_x.json",
+			"notes/sessions/chat_x.json", "plugins-state.json", "prompts/system-prompt.md", "settings.json", "themes/dusk.json",
 		]);
 		const second = makeFirstSyncBackup(dataDir, new Date(2026, 10, 20));
 		assert.equal(path.basename(second), "before-first-sync 2026-11-20 (2)", "an existing backup is never overwritten");
@@ -248,7 +256,7 @@ describe("only the holder's version travels", () => {
 	async function synced() {
 		const w = world();
 		const desk = w.desktop("dev_aaaaaaaaaaaaaaaa", "Office PC");
-		makeSession(desk.dataDir, "chat_d1", ["one"], { tutor: true, jobs: ["job_1"] });
+		makeSession(desk.dataDir, "chat_d1", ["one"], { side: true, jobs: ["job_1"] });
 		makeSession(w.serverDir, "chat_c1", ["phone"]);
 		await desk.sync.tick();
 		w.tick();
@@ -271,15 +279,39 @@ describe("only the holder's version travels", () => {
 		assert.equal(w.announced.includes("dev_aaaaaaaaaaaaaaaa:written:chat_c1"), true);
 	});
 
-	it("the side-tutor thread, the home folder and the helper jobs ride along, removals too", async () => {
+	it("the side questions, the home folder and the helper jobs ride along, removals too", async () => {
 		const { w, desk } = await synced();
-		makeSession(desk.dataDir, "chat_d1", ["one", "two"], { tutor: false, home: "LearnHarness/Maths", jobs: ["job_2"] });
-		fs.rmSync(path.join(desk.dataDir, "side-tutor", "chat_d1.json"));
+		assert.equal((JSON.parse(fs.readFileSync(path.join(w.serverDir, "chats", "chat_d1.json"), "utf-8")) as { sideChats?: unknown[] }).sideChats?.length, 1);
+		makeSession(desk.dataDir, "chat_d1", ["one", "two"], { side: false, home: "LearnHarness/Maths", jobs: ["job_2"] });
 		fs.rmSync(path.join(desk.dataDir, "jobs", "job_1.json"));
 		await desk.sync.tick();
 		assert.deepEqual(library(w.serverDir), { ...library(desk.dataDir) });
-		assert.equal(fs.existsSync(path.join(w.serverDir, "side-tutor", "chat_d1.json")), false);
+		assert.equal((JSON.parse(fs.readFileSync(path.join(w.serverDir, "chats", "chat_d1.json"), "utf-8")) as { sideChats?: unknown[] }).sideChats, undefined);
 		assert.deepEqual(fs.readdirSync(path.join(w.serverDir, "jobs")), ["job_2.json"]);
+	});
+
+	it("a plugin helper's job travels with its linkage, written the way the job store writes one", async () => {
+		const { w, desk } = await synced();
+		writeJson(path.join(desk.dataDir, "jobs", "job_p.json"), {
+			id: "job_p", kind: "plugin", chatId: "chat_d1", toolCallId: "t_p", status: "running", activity: "starting", createdAt: "x", updatedAt: "x",
+			plugin: { pluginId: "flashcards", toolName: "make_deck", workerId: "w1", requestId: "r1", taskId: "task_1" },
+		});
+		await desk.sync.tick();
+		const there = path.join(w.serverDir, "jobs", "job_p.json");
+		assert.equal(fs.readFileSync(there, "utf-8"), fs.readFileSync(path.join(desk.dataDir, "jobs", "job_p.json"), "utf-8"));
+		if (process.platform !== "win32") assert.equal(fs.statSync(there).mode & 0o777, 0o600);
+	});
+
+	it("a leftover side-tutor file from before upstream 0.6.0 no longer travels, and doesn't change the fingerprints", async () => {
+		const { w, desk } = await synced();
+		const files = sessionFiles(sessionDirsUnder(desk.dataDir));
+		const before = { stamp: files.stamp("chat_d1"), digest: sessions.bundleDigest(files.read("chat_d1")!) };
+		writeJson(path.join(desk.dataDir, "side-tutor", "chat_d1.json"), { version: 1, chatId: "chat_d1", entries: [] });
+		assert.deepEqual({ stamp: files.stamp("chat_d1"), digest: sessions.bundleDigest(files.read("chat_d1")!) }, before);
+		assert.equal("sideTutor" in files.read("chat_d1")!, false);
+		assert.match(before.stamp!, /\|s-\|/, "the old stamp's \"no side-tutor file\" stays, so stamps saved by protocol 1 still match");
+		assert.deepEqual(await desk.sync.tick(), { ok: true, fetched: [], sent: [], removed: [], lost: [], handed: [] });
+		assert.equal(fs.existsSync(path.join(w.serverDir, "side-tutor", "chat_d1.json")), false);
 	});
 
 	it("a session rewritten with the same content is not sent again", async () => {
@@ -343,10 +375,10 @@ describe("deleting a session", () => {
 		const w = world();
 		const desk = w.desktop("dev_aaaaaaaaaaaaaaaa", "Office PC");
 		const laptop = w.desktop("dev_bbbbbbbbbbbbbbbb", "Laptop");
-		makeSession(desk.dataDir, "chat_d1", ["one"], { tutor: true, home: "LearnHarness/A", jobs: ["job_1"] });
+		makeSession(desk.dataDir, "chat_d1", ["one"], { side: true, home: "LearnHarness/A", jobs: ["job_1"] });
 		await desk.sync.tick();
 		await laptop.sync.tick();
-		desk.sync; // the desktop deletes it (the app removes all four kinds of file)
+		desk.sync; // the desktop deletes it (the app removes all three kinds of file)
 		sessionFiles(sessionDirsUnder(desk.dataDir)).remove("chat_d1");
 		w.tick();
 		assert.deepEqual(await desk.sync.tick(), { ok: true, fetched: [], sent: [], removed: ["chat_d1"], lost: [], handed: [] });
@@ -396,13 +428,15 @@ describe("deleting a session", () => {
 describe("what the server accepts", () => {
 	it("only files that are what they claim to be", () => {
 		const chat = JSON.stringify({ id: "chat_a", messages: [] });
-		const good = { chat, sideTutor: null, home: null, jobs: {} };
+		const good = { chat, home: null, jobs: {} };
 		assert.notEqual(sessions.checkBundle("chat_a", good), null);
 		assert.equal(sessions.checkBundle("chat_b", good), null, "another session's record");
 		assert.equal(sessions.checkBundle("../chat_a", good), null);
 		assert.equal(sessions.checkBundle("chat_a", { ...good, chat: "not json" }), null);
 		assert.equal(sessions.checkBundle("chat_a", { ...good, chat: JSON.stringify({ id: "chat_a" }) }), null, "no messages");
-		assert.equal(sessions.checkBundle("chat_a", { ...good, sideTutor: "[]" }), null);
+		assert.equal(sessions.checkBundle("chat_a", { ...good, home: "[]" }), null);
+		assert.notEqual(sessions.checkBundle("chat_a", { ...good, chat: JSON.stringify({ id: "chat_a", messages: [], version: CURRENT_CHAT_VERSION }) }), null);
+		assert.equal(sessions.checkBundle("chat_a", { ...good, chat: JSON.stringify({ id: "chat_a", messages: [], version: CURRENT_CHAT_VERSION + 1 }) }), null, "a chat format newer than this build reads");
 		assert.equal(sessions.checkBundle("chat_a", { ...good, jobs: { job_1: JSON.stringify({ id: "job_1", chatId: "chat_other" }) } }), null, "another session's job");
 		assert.equal(sessions.checkBundle("chat_a", { ...good, jobs: { "../x": JSON.stringify({ id: "../x", chatId: "chat_a" }) } }), null);
 		assert.equal(sessions.checkBundle("chat_a", { ...good, jobs: { job_1: JSON.stringify({ id: "job_2", chatId: "chat_a" }) } }), null);
@@ -414,7 +448,7 @@ describe("what the server accepts", () => {
 		const desk = w.desktop("dev_aaaaaaaaaaaaaaaa", "Office PC");
 		makeSession(desk.dataDir, "chat_d1", ["one"]);
 		await desk.sync.tick();
-		const refused = w.authority.store(desk.deviceId, "chat_d1", { baseVersion: 1, bundle: { chat: "{", sideTutor: null, home: null, jobs: {} } });
+		const refused = w.authority.store(desk.deviceId, "chat_d1", { baseVersion: 1, bundle: { chat: "{", home: null, jobs: {} } });
 		assert.equal(refused.status, 400);
 		assert.deepEqual(turnsOf(w.serverDir, "chat_d1"), ["one"]);
 	});
@@ -460,6 +494,7 @@ describe("a held session is read-only here", () => {
 			saveSettings: (id: string) => { calls.push(`settings:${id}`); },
 			renameChat: (id: string) => { calls.push(`rename:${id}`); return record; },
 			deleteChat: (id: string) => { calls.push(`delete:${id}`); return true; },
+			updateSideChats: (id: string, update: (threads: never[]) => never[]) => { calls.push(`side:${id}`); return update([]); },
 		};
 		const warn = console.warn;
 		console.warn = () => {};
@@ -473,19 +508,19 @@ describe("a held session is read-only here", () => {
 			chats.saveSettings("chat_held", {});
 			assert.equal(chats.renameChat("chat_held", "New").title, "T");
 			assert.equal(chats.deleteChat("chat_held"), false);
+			// A side answer that lands after the session moved: the threads stay as they are.
+			let ran = false;
+			const sideRecord = { ...record, sideChats: [{ id: "side_1" }] };
+			const withSide = guards.guardChatStore({ ...inner, getChat: () => sideRecord } as never, (id) => id !== "chat_held");
+			assert.deepEqual(withSide.updateSideChats("chat_held", (threads) => { ran = true; return threads; }), [{ id: "side_1" }]);
+			assert.equal(ran, false, "the update is never run");
 			assert.deepEqual(calls, []);
 			chats.saveMessages("chat_mine", []);
 			assert.equal(chats.deleteChat("chat_mine"), true);
+			assert.deepEqual(chats.updateSideChats("chat_mine", (threads) => threads), []);
 			chats.createChat("x");
-			assert.deepEqual(calls, ["messages:chat_mine", "delete:chat_mine", "create"]);
+			assert.deepEqual(calls, ["messages:chat_mine", "delete:chat_mine", "side:chat_mine", "create"]);
 
-			const thread = { version: 1 as const, chatId: "chat_held", entries: [] };
-			const tutorCalls: string[] = [];
-			const tutor = guards.guardSideTutorStore({ read: () => thread, append: (id) => { tutorCalls.push(`append:${id}`); return thread; }, clear: (id) => { tutorCalls.push(`clear:${id}`); } }, (id) => id !== "chat_held");
-			assert.equal(tutor.append("chat_held", {} as never), thread);
-			tutor.clear("chat_held");
-			tutor.clear("chat_mine");
-			assert.deepEqual(tutorCalls, ["clear:chat_mine"]);
 
 			const job = { id: "job_1", chatId: "chat_held" };
 			const jobCalls: string[] = [];
@@ -510,9 +545,13 @@ describe("a held session is read-only here", () => {
 		assert.equal(engine.sessionWritePath("POST", `/api/chats/${id}/dismiss`), id);
 		assert.equal(engine.sessionWritePath("POST", `/api/chats/${id}/artifact-ui`), id);
 		assert.equal(engine.sessionWritePath("POST", `/api/chats/${id}/steer`), id);
-		assert.equal(engine.sessionWritePath("POST", `/api/chats/${id}/side-tutor`), id);
-		assert.equal(engine.sessionWritePath("DELETE", `/api/chats/${id}/side-tutor`), id);
+		assert.equal(engine.sessionWritePath("POST", `/api/chats/${id}/side-chats`), id, "asking a side question");
+		assert.equal(engine.sessionWritePath("PATCH", `/api/chats/${id}/side-chats/side_1`), id, "opening or closing one (upstream 0.6.0)");
+		assert.equal(engine.sessionWritePath("POST", `/api/chats/${id}/side-chats/side_1/stop`), id, "stopping its answer");
+		assert.equal(engine.sessionWritePath("POST", `/api/chats/${id}/side-chats/side_1/stop/`), id);
 		assert.equal(engine.sessionWritePath("PUT", `/api/chats/${id}/notes`), null, "the drawer keeps working");
+		assert.equal(engine.sessionWritePath("GET", `/api/chats/${id}/side-chats/side_1`), null);
+		assert.equal(engine.sessionWritePath("GET", `/api/chats/${id}/images/${"a".repeat(64)}`), null);
 		assert.equal(engine.sessionWritePath("GET", `/api/chats/${id}`), null);
 		assert.equal(engine.sessionWritePath("GET", `/api/chats/${id}/stream`), null);
 		assert.equal(engine.sessionWritePath("POST", "/api/chats"), null, "a new session is always allowed");
@@ -543,5 +582,99 @@ describe("a round in which nothing changed", () => {
 		assert.notEqual(identity()[1], before[1]);
 		w.tick(45_000);
 		assert.equal(w.authority.held().chat_d1!.online, false, "45 silent seconds later it counts as offline");
+	});
+});
+
+describe("the chat record format and the sync protocol", () => {
+	/**
+	 * Which sync protocol each chat record format needs. A build that raises
+	 * CURRENT_CHAT_VERSION must raise SYNC_PROTOCOL_VERSION too (an older build
+	 * refuses a newer record, so the two may never sync with each other) and
+	 * add the row here.
+	 */
+	const PROTOCOL_FOR_CHAT_FORMAT: Record<number, number> = {
+		1: 1,
+		2: 2, // upstream 0.6.0: side questions inside the record
+	};
+
+	it("the session format never changes without a protocol bump", () => {
+		const needed = PROTOCOL_FOR_CHAT_FORMAT[CURRENT_CHAT_VERSION];
+		assert.notEqual(needed, undefined,
+			`The chat record format is now ${CURRENT_CHAT_VERSION}, and no sync protocol is listed for it. Raise SYNC_PROTOCOL_VERSION (src/core/sync/protocol.ts) and add the row ${CURRENT_CHAT_VERSION}: <new protocol> to PROTOCOL_FOR_CHAT_FORMAT in this test.`);
+		assert.equal(protocol.SYNC_PROTOCOL_VERSION >= needed!, true,
+			`Chat record format ${CURRENT_CHAT_VERSION} needs sync protocol ${needed}, but SYNC_PROTOCOL_VERSION is ${protocol.SYNC_PROTOCOL_VERSION}.`);
+		const rows = Object.entries(PROTOCOL_FOR_CHAT_FORMAT).map(([format, needs]) => [Number(format), needs] as const).sort((a, b) => a[0] - b[0]);
+		for (let i = 1; i < rows.length; i++) {
+			assert.equal(rows[i]![1] > rows[i - 1]![1], true, `Chat record format ${rows[i]![0]} must need a higher sync protocol than format ${rows[i - 1]![0]}.`);
+		}
+		assert.equal(rows.at(-1)![0], CURRENT_CHAT_VERSION, "the table ends at the format this build writes");
+	});
+
+	it("a chat file newer than this build reads is never sent, never replaced, and never taken (the second lock)", async () => {
+		const w = world();
+		const desk = w.desktop("dev_aaaaaaaaaaaaaaaa", "Office PC");
+		makeSession(desk.dataDir, "chat_d1", ["one"]);
+		makeSession(desk.dataDir, "chat_new", ["from a newer build"], { version: CURRENT_CHAT_VERSION + 1 });
+		makeSession(w.serverDir, "chat_c1", ["phone"]);
+		const round = await desk.sync.tick();
+		assert.deepEqual(round, { ok: true, fetched: ["chat_c1"], sent: ["chat_d1"], removed: [], lost: [], handed: [] });
+		assert.equal(fs.existsSync(path.join(w.serverDir, "chats", "chat_new.json")), false, "not sent");
+		const text = fs.readFileSync(path.join(desk.dataDir, "chats", "chat_new.json"), "utf-8");
+		w.tick();
+		addTurn(desk.dataDir, "chat_new", "more");
+		const more = fs.readFileSync(path.join(desk.dataDir, "chats", "chat_new.json"), "utf-8");
+		assert.notEqual(more, text);
+		assert.deepEqual(await desk.sync.tick(), { ok: true, fetched: [], sent: [], removed: [], lost: [], handed: [] }, "and nothing is said about it");
+		assert.equal(fs.readFileSync(path.join(desk.dataDir, "chats", "chat_new.json"), "utf-8"), more, "left exactly as it is");
+
+		// The server never takes one either, and never sends its own.
+		const bundle = sessionFiles(sessionDirsUnder(desk.dataDir)).read("chat_new")!;
+		assert.equal(w.authority.store(desk.deviceId, "chat_new", { baseVersion: 0, bundle }).status, 400);
+		makeSession(w.serverDir, "chat_c1", ["phone", "from a newer server"], { version: CURRENT_CHAT_VERSION + 1 });
+		const refused = w.authority.fetch(desk.deviceId, "chat_c1");
+		assert.equal(refused.status, 409);
+		assert.equal(refused.body.code, sessions.NEWER_FORMAT_CODE);
+		w.tick();
+		await desk.sync.tick();
+		assert.deepEqual(turnsOf(desk.dataDir, "chat_c1"), ["phone"], "the desktop keeps the copy it could read");
+	});
+
+	it("a session lost while its file is in a newer format is left as it is", async () => {
+		const w = world();
+		const desk = w.desktop("dev_aaaaaaaaaaaaaaaa", "Office PC");
+		makeSession(desk.dataDir, "chat_d1", ["one"]);
+		await desk.sync.tick();
+		w.tick(60_000);
+		assert.equal(w.authority.takeOver("cloud", "chat_d1", true).body.status, "moved");
+		makeSession(desk.dataDir, "chat_d1", ["one", "written by a newer build"], { version: CURRENT_CHAT_VERSION + 1 });
+		const text = fs.readFileSync(path.join(desk.dataDir, "chats", "chat_d1.json"), "utf-8");
+		w.tick();
+		await desk.sync.tick();
+		assert.equal(fs.readFileSync(path.join(desk.dataDir, "chats", "chat_d1.json"), "utf-8"), text, "not replaced by the server's version");
+		assert.deepEqual(desk.sync.notices(), []);
+	});
+});
+
+describe("a connection lost in the middle of a round", () => {
+	it("a session the server named but couldn't send is asked for again at the next round", async () => {
+		const w = world();
+		const desk = w.desktop("dev_aaaaaaaaaaaaaaaa", "Office PC");
+		makeSession(w.serverDir, "chat_c1", ["phone"]);
+		makeSession(w.serverDir, "chat_c2", ["phone too"]);
+		await desk.sync.tick();
+		addTurn(w.serverDir, "chat_c1", "more");
+		addTurn(w.serverDir, "chat_c2", "more too");
+		w.tick();
+		// The list of changes arrives and one session comes down; then the connection drops.
+		const real = w.authority.fetch.bind(w.authority);
+		(w.authority as { fetch: typeof real }).fetch = (deviceId, chatId) => { w.setOnline(false); return real(deviceId, chatId); };
+		await desk.sync.tick();
+		(w.authority as { fetch: typeof real }).fetch = real;
+		w.setOnline(true);
+		assert.equal(turnsOf(desk.dataDir, "chat_c1").length + turnsOf(desk.dataDir, "chat_c2").length, 3, "one came down, one didn't");
+		w.tick();
+		await desk.sync.tick();
+		assert.deepEqual(turnsOf(desk.dataDir, "chat_c1"), ["phone", "more"]);
+		assert.deepEqual(turnsOf(desk.dataDir, "chat_c2"), ["phone too", "more too"]);
 	});
 });

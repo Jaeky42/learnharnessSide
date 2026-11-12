@@ -170,3 +170,66 @@ describe("the real files", () => {
 		assert.equal(desktopVaultFolders(), null, "the vault is offline: nothing is said, rather than 'no folders'");
 	});
 });
+
+const { THEME_COLOR_KEYS } = await import("../src/core/themes.ts");
+const { themeStore } = await import("../src/store/themes.ts");
+
+describe("upstream 0.6.0 on the real files", () => {
+	const THEMES = path.join(DATA, "themes");
+	const colors = (accent: string) => Object.fromEntries(THEME_COLOR_KEYS.map((key) => [key, key === "accent" ? accent : "#202020"])) as never;
+	const cursorNow = () => exchange(DESK, { cursor: 0, all: false, changes: [] }).body.cursor;
+
+	it("custom themes are read and written through the theme store, one item per file; a deletion travels", () => {
+		themeStore.writeTheme("phone-made", { name: "Phone made", mode: "light", colors: colors("#00aa00") });
+		fs.writeFileSync(path.join(THEMES, "default.json"), "{}"); // a built-in id: not a custom theme, for the store or for sync
+		fs.writeFileSync(path.join(THEMES, "notes.txt"), "not a theme");
+		const read = mapFiles.read();
+		assert.deepEqual([...read.items.keys()].filter((key) => key.startsWith("t|")), ["t|phone-made"]);
+		assert.deepEqual(read.items.get("t|phone-made")!.value, { name: "Phone made", mode: "light", colors: colors("#00aa00") });
+
+		const cursor = cursorNow();
+		const reply = exchange(DESK, { cursor, all: false, changes: [change("t|desk-made", { name: "Desk made", mode: "dark", colors: colors("#aa0000") }, Date.now())] });
+		assert.equal(reply.status, 200);
+		assert.deepEqual(themeStore.readTheme("desk-made"), { id: "desk-made", builtin: false, name: "Desk made", mode: "dark", colors: colors("#aa0000") });
+		assert.deepEqual(reply.body.items.map((i) => [i.key, i.same ?? null]), [["t|desk-made", true]], "written exactly as sent");
+
+		const removed = exchange(DESK, { cursor: reply.body.cursor, all: false, changes: [change("t|desk-made", null, Date.now() + 1)] });
+		assert.equal(removed.status, 200);
+		assert.equal(fs.existsSync(path.join(THEMES, "desk-made.json")), false);
+		assert.equal(themeStore.readTheme("phone-made")?.name, "Phone made", "the others stay");
+	});
+
+	it("a damaged theme file is left alone: not sent as deleted, not written over", () => {
+		const cursor = cursorNow();
+		fs.writeFileSync(path.join(THEMES, "phone-made.json"), "{ not json");
+		const read = mapFiles.read();
+		assert.equal(read.items.has("t|phone-made"), false);
+		assert.deepEqual([...(read.unreadableKeys ?? [])], ["t|phone-made"]);
+		const reply = exchange(DESK, { cursor, all: false, changes: [change("t|phone-made", { name: "Phone made", mode: "dark", colors: colors("#ffffff") }, Date.now() + 10)] });
+		assert.equal(reply.status, 200);
+		assert.equal(fs.readFileSync(path.join(THEMES, "phone-made.json"), "utf-8"), "{ not json");
+		assert.deepEqual(reply.body.items.filter((i) => i.key.startsWith("t|")), []);
+	});
+
+	it("appearance.mode, which the settings store drops: a record still naming it neither stalls nor comes back", () => {
+		// A settings file from before the update (written as it was then, not through the store).
+		const record = JSON.parse(fs.readFileSync(path.join(DATA, "settings.json"), "utf-8")) as { appearance?: Record<string, unknown> };
+		fs.writeFileSync(path.join(DATA, "settings.json"), JSON.stringify({ ...record, appearance: { ...record.appearance, mode: "light" } }, null, "\t"));
+		assert.equal(mapFiles.read().items.has("s|appearance.mode"), false, "read through the store, it isn't there");
+		// The server's own table remembers it from before: the next exchange records it as gone.
+		const state = JSON.parse(fs.readFileSync(path.join(SYNC, "maps.json"), "utf-8")) as { items: Record<string, unknown>; seq: number };
+		state.items["s|appearance.mode"] = { h: "stale0000000000000000000", t: 1, seq: state.seq };
+		fs.writeFileSync(path.join(SYNC, "maps.json"), JSON.stringify(state));
+		const cursor = state.seq;
+		const first = exchange(DESK, { cursor, all: false, changes: [] });
+		assert.equal(first.status, 200);
+		assert.deepEqual(first.body.items.filter((i) => i.key === "s|appearance.mode").map((i) => i.value), [null], "the desktop is told it is gone");
+		// A desktop that still sends a value for it: taken, dropped by the store, answered as gone.
+		const second = exchange(DESK, { cursor: first.body.cursor, all: false, changes: [change("s|appearance.mode", "dark", Date.now() + 20)] });
+		assert.equal(second.status, 200, "an accepted key: the rest of the request isn't refused with it");
+		assert.equal((readSettings()!.appearance as Record<string, unknown>).mode, undefined);
+		assert.deepEqual(second.body.items.filter((i) => i.key === "s|appearance.mode").map((i) => [i.value ?? null, i.same ?? false]), [[null, false]]);
+		const third = exchange(DESK, { cursor: second.body.cursor, all: false, changes: [] });
+		assert.deepEqual(third.body.items, [], "and nothing more after that");
+	});
+});

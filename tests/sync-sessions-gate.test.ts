@@ -1,7 +1,7 @@
 /**
  * Cloud sync Phase 5, slice 2: the read-only rule at the app's real entry
  * points (owner's decision: a session another device holds can be read, and
- * sending a message, the side tutor, renaming, its model and deleting wait
+ * sending a message, a side question, renaming, its model and deleting wait
  * for Take over; the notes drawer keeps working).
  *
  * This process plays a paired DESKTOP whose sync state says one session is
@@ -81,8 +81,8 @@ describe("a session the cloud holds, on a paired desktop", () => {
 		assert.equal(heldBytes(), before);
 	});
 
-	it("rename, model, delete, dismiss, the side tutor and steering are refused at the door", async () => {
-		for (const [method, suffix] of [["PUT", ""], ["DELETE", "?mode=delete-nodes"], ["PUT", "/settings"], ["POST", "/dismiss"], ["POST", "/artifact-ui"], ["POST", "/steer"], ["POST", "/side-tutor"], ["DELETE", "/side-tutor"]] as const) {
+	it("rename, model, delete, dismiss, side questions and steering are refused at the door", async () => {
+		for (const [method, suffix] of [["PUT", ""], ["DELETE", "?mode=delete-nodes"], ["PUT", "/settings"], ["POST", "/dismiss"], ["POST", "/artifact-ui"], ["POST", "/steer"], ["POST", "/side-chats"], ["PATCH", "/side-chats/side_1"], ["POST", "/side-chats/side_1/stop"]] as const) {
 			const response = call(method, `/api/chats/${held.id}${suffix}`);
 			assert.equal(response.status, 409, `${method} ${suffix}`);
 			assert.equal(((await response.json()) as { code: string }).code, "session_held_elsewhere");
@@ -91,9 +91,11 @@ describe("a session the cloud holds, on a paired desktop", () => {
 
 	it("reading it, and everything on a session this desktop holds, passes", () => {
 		assert.notEqual(call("GET", `/api/chats/${held.id}`).status, 409);
-		assert.notEqual(call("GET", `/api/chats/${held.id}/side-tutor`).status, 409);
+		assert.notEqual(call("GET", `/api/chats/${held.id}/side-chats`).status, 409);
+		assert.notEqual(call("GET", `/api/chats/${held.id}/side-chats/side_1`).status, 409);
 		assert.notEqual(call("PUT", `/api/chats/${mine.id}`).status, 409);
-		assert.notEqual(call("POST", `/api/chats/${mine.id}/side-tutor`).status, 409);
+		assert.notEqual(call("POST", `/api/chats/${mine.id}/side-chats`).status, 409);
+		assert.notEqual(call("PATCH", `/api/chats/${mine.id}/side-chats/side_1`).status, 409);
 		assert.notEqual(call("POST", "/api/chats").status, 409);
 	});
 
@@ -121,12 +123,13 @@ describe("a session the cloud holds, on a paired desktop", () => {
 			stores.chatStore.saveSettings(held.id, { thinkingLevel: "low" });
 			assert.equal(stores.chatStore.renameChat(held.id, "Renamed").title, "Held by the cloud");
 			assert.equal(stores.chatStore.deleteChat(held.id), false);
-			stores.sideTutorStore.append(held.id, { id: "q", question: "?", answer: "!", status: "done", askedAt: 1 } as never);
+			let ran = false;
+			assert.deepEqual(stores.chatStore.updateSideChats(held.id, (threads) => { ran = true; return [...threads, { id: "side_late" } as never]; }), []);
+			assert.equal(ran, false, "a side answer that lands late is not saved");
 		} finally {
 			console.warn = warn;
 		}
 		assert.equal(heldBytes(), before);
-		assert.equal(fs.existsSync(path.join(TMP, "data", "side-tutor", `${held.id}.json`)), false);
 		stores.chatStore.renameChat(mine.id, "Mine, renamed");
 		assert.equal(stores.chatStore.getChat(mine.id)?.title, "Mine, renamed");
 	});

@@ -5,9 +5,10 @@
  *
  * An item is a key and a JSON value (or nothing, when it was removed):
  *
- *   s|appearance.mode            one synced setting
+ *   s|appearance.theme           one synced setting
  *   s|agent.tools|<tool id>      one tool switch (and s|agent.prompts|<segment>)
  *   p|<segment path>             one prompt override text
+ *   t|<theme id>                 one custom theme file (themes/<id>.json)
  *   r|<field>                    one field of the graph view's sliders
  *   f|<folder id>                one chains-view folder
  *   o|<source id>                where one source is filed
@@ -18,12 +19,15 @@
  * travel. Everything else in settings.json stays per device: model slots
  * and per-role models, the custom provider, the Claude Code switch,
  * file-access folders, the reading font, automatic updates, keyboard
- * shortcuts. A setting this list doesn't name is never read or written by
- * sync, whatever a request says.
+ * shortcuts; since upstream 0.6.0 also the side-question model
+ * (agent.models.sideQuestion) and the helpers' request limit
+ * (agent.workerRequestConcurrency). A setting this list doesn't name is
+ * never read or written by sync, whatever a request says.
  */
 
 import { createHash } from "node:crypto";
 import type { SourceFolder, SourceOrganization, SourcePlacement } from "../source-organization.ts";
+import { COLOR_OVERRIDE_KEYS, isBuiltinThemeId, isThemeId, sanitizeThemeFile } from "../themes.ts";
 
 /** One item as it travels: `value: null` means "not there". */
 export interface MapChange {
@@ -65,7 +69,11 @@ export const SYNCED_SETTINGS: ReadonlyArray<readonly string[]> = [
 	["appearance", "mode"],
 	["appearance", "theme"],
 	["appearance", "background"],
+	// The per-color overrides on top of the theme (upstream 0.6.0), each its
+	// own item. null and absent both mean "the theme's color".
+	...COLOR_OVERRIDE_KEYS.map((key) => ["appearance", "colors", key] as const),
 	["appearance", "proseFontSize"],
+	["appearance", "codeLigatures"],
 	["appearance", "sessionNameSerif"],
 	["appearance", "mdRendering", "headingWeight"],
 	["appearance", "mdRendering", "boldColor"],
@@ -75,6 +83,7 @@ export const SYNCED_SETTINGS: ReadonlyArray<readonly string[]> = [
 	["graph", "rendering"],
 	["graph", "extractionChunkTokens"],
 	["compaction", "thresholdTokens"],
+	["compaction", "includeReasoning"],
 	["agent", "search", "engine"],
 	["agent", "graphTools", "enabled"],
 ];
@@ -213,8 +222,14 @@ const isFolder = (v: unknown): boolean => isObject(v) && typeof v.id === "string
 const isPlacement = (v: unknown): boolean => isObject(v) && (v.folderId === null || typeof v.folderId === "string") && (v.name === undefined || (typeof v.name === "string" && !!v.name.trim()));
 const isPosition = (v: unknown): boolean => isObject(v) && typeof v.x === "number" && Number.isFinite(v.x) && typeof v.y === "number" && Number.isFinite(v.y);
 
+/** A custom theme's key, t|<id>: a theme id, and not one of the built-in themes (those never travel). */
+export function isCustomThemeKey(key: string): boolean {
+	const id = key.slice(2);
+	return key.startsWith("t|") && isThemeId(id) && !isBuiltinThemeId(id);
+}
+
 /** The kinds of item, by the key's first letter. */
-export const MAP_KINDS = ["s", "p", "r", "f", "o", "n", "x"] as const;
+export const MAP_KINDS = ["s", "p", "t", "r", "f", "o", "n", "x"] as const;
 export type MapKind = (typeof MAP_KINDS)[number];
 
 export function kindOf(key: string): MapKind | null {
@@ -234,13 +249,14 @@ export function checkMapChange(raw: unknown): MapChange | null {
 		const id = raw.key.slice(2);
 		const fine = kind === "s" ? settingPath(raw.key) !== null && (typeof value !== "object")
 			: kind === "p" ? typeof value === "string"
+			: kind === "t" ? isCustomThemeKey(raw.key) && canonical(sanitizeThemeFile(value)) === canonical(value)
 			: kind === "r" ? true
 			: kind === "f" ? isFolder(value) && (value as { id: string }).id === id
 			: kind === "o" ? isPlacement(value)
 			: kind === "n" ? isObject(value) && value.id === id
 			: isPosition(value);
 		if (!fine) return null;
-	} else if (kind === "s" && settingPath(raw.key) === null) return null;
+	} else if ((kind === "s" && settingPath(raw.key) === null) || (kind === "t" && !isCustomThemeKey(raw.key))) return null;
 	return { key: raw.key, value, t: raw.t };
 }
 

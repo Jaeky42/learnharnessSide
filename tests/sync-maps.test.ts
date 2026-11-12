@@ -39,9 +39,10 @@ const MONDAY = Date.UTC(2026, 10, 2, 12);
 function memoryFiles(clock: () => number) {
 	const items = new Map<string, MapItem>();
 	const unreadable = new Set<MapKind>();
+	const unreadableKeys = new Set<string>();
 	let adjust: (key: string, value: unknown) => unknown = (_key, value) => value;
 	const files: MapFiles = {
-		read: () => ({ items: new Map(items), unreadable: new Set(unreadable), fileTimes: new Map() }),
+		read: () => ({ items: new Map(items), unreadable: new Set(unreadable), unreadableKeys: new Set(unreadableKeys), fileTimes: new Map() }),
 		apply(changes) {
 			for (const [key, value] of changes) {
 				const next = value === null ? null : adjust(key, value);
@@ -56,6 +57,9 @@ function memoryFiles(clock: () => number) {
 		get: (key: string) => items.get(key)?.value ?? null,
 		all: () => Object.fromEntries([...items].map(([key, item]) => [key, item.value]).sort(([a], [b]) => String(a).localeCompare(String(b)))),
 		damage(kind: MapKind) { unreadable.add(kind); for (const key of [...items.keys()]) if (key.startsWith(`${kind}|`)) items.delete(key); },
+		/** One item's own file is damaged (a theme file): it reads as nothing, and is marked. */
+		damageKey(key: string) { unreadableKeys.add(key); items.delete(key); },
+		repairKey(key: string, value: unknown) { unreadableKeys.delete(key); items.set(key, { value, mtime: clock() }); },
 		adjustWith(fn: typeof adjust) { adjust = fn; },
 	};
 }
@@ -120,11 +124,16 @@ describe("the settings split", () => {
 		claudeCode: { enabled: true },
 		models: { strong: { provider: "x", model: "y" } },
 		customProvider: { baseUrl: "http://localhost:1234" },
-		appearance: { mode: "light", background: "#101010", fontFamily: "Georgia", proseFontSize: 18, sessionNameSerif: false, mdRendering: { headingWeight: 700, boldColor: "#ff0000", italicColor: null } },
+		appearance: {
+			mode: "light", theme: "rose-pine", background: "#101010", colors: { surface: "#111111", accent: null, notAColor: "#222222" },
+			fontFamily: "Georgia", proseFontSize: 18, codeLigatures: true, sessionNameSerif: false,
+			mdRendering: { headingWeight: 700, boldColor: "#ff0000", italicColor: null },
+		},
 		graph: { enabled: true, rendering: false, extractionChunkTokens: 2048 },
-		compaction: { thresholdTokens: 90_000 },
+		compaction: { thresholdTokens: 90_000, includeReasoning: true },
 		agent: {
-			models: { extractor: { model: "m" } },
+			models: { extractor: { model: "m" }, sideQuestion: { provider: "x", model: "side" } },
+			workerRequestConcurrency: 4,
 			tools: { web_search: false, read_file: true },
 			search: { engine: "brave" },
 			graphTools: { enabled: false },
@@ -136,9 +145,14 @@ describe("the settings split", () => {
 
 	it("what travels: appearance without the font, dictation language, graph, compaction, agent switches, prompt switches", () => {
 		assert.deepEqual(Object.fromEntries(maps.settingsItems(record)), {
+			// Still read from a raw record; the settings store itself drops it (see sync-maps-wiring).
 			"s|appearance.mode": "light",
+			"s|appearance.theme": "rose-pine",
 			"s|appearance.background": "#101010",
+			"s|appearance.colors.surface": "#111111",
+			"s|appearance.colors.accent": null,
 			"s|appearance.proseFontSize": 18,
+			"s|appearance.codeLigatures": true,
 			"s|appearance.sessionNameSerif": false,
 			"s|appearance.mdRendering.headingWeight": 700,
 			"s|appearance.mdRendering.boldColor": "#ff0000",
@@ -148,6 +162,7 @@ describe("the settings split", () => {
 			"s|graph.rendering": false,
 			"s|graph.extractionChunkTokens": 2048,
 			"s|compaction.thresholdTokens": 90_000,
+			"s|compaction.includeReasoning": true,
 			"s|agent.search.engine": "brave",
 			"s|agent.graphTools.enabled": false,
 			"s|agent.tools|web_search": false,
@@ -159,13 +174,18 @@ describe("the settings split", () => {
 	it("applying items changes those settings and nothing else in the record", () => {
 		const next = maps.withSettingsItems(record, new Map<string, unknown>([
 			["s|appearance.mode", "dark"],
+			["s|appearance.colors.accent", "#00ff00"],
+			["s|appearance.colors.surface", null],
 			["s|agent.tools|web_search", null],
 			["s|agent.tools|run_code", false],
 			["s|compaction.thresholdTokens", null],
+			["s|compaction.includeReasoning", null],
 			["s|models.strong", { provider: "evil", model: "z" }],
 			["s|agent.fileAccess", { restricted: false, folders: [] }],
 		]));
 		assert.equal(next.appearance.mode, "dark");
+		assert.deepEqual(next.appearance.colors, { accent: "#00ff00", notAColor: "#222222" }, "one color at a time; what isn't a synced color is left as it is");
+		assert.equal(next.agent.workerRequestConcurrency, 4);
 		assert.deepEqual(next.agent.tools, { read_file: true, run_code: false });
 		assert.equal("compaction" in next, false, "an emptied section goes");
 		for (const section of ["general", "claudeCode", "models", "customProvider", "keyboard"] as const) assert.deepEqual(next[section], record[section]);
@@ -177,12 +197,21 @@ describe("the settings split", () => {
 
 	it("a request can't reach a per-device setting, whatever it says", () => {
 		const t = 1;
-		for (const key of ["s|models.strong", "s|appearance.fontFamily", "s|agent.fileAccess", "s|agent.models|extractor", "s|general.autoUpdate", "s|claudeCode.enabled", "s|customProvider.baseUrl", "s|keyboard.toggle-notes", "s|agent.tools|", "s|", "z|x", "appearance.mode"]) {
+		for (const key of [
+			"s|models.strong", "s|appearance.fontFamily", "s|agent.fileAccess", "s|agent.models|extractor", "s|general.autoUpdate", "s|claudeCode.enabled",
+			"s|customProvider.baseUrl", "s|keyboard.toggle-notes", "s|agent.tools|", "s|", "z|x", "appearance.mode",
+			// Per device since upstream 0.6.0 as well.
+			"s|agent.workerRequestConcurrency", "s|agent.models.sideQuestion", "s|agent.models|sideQuestion", "s|appearance.colors", "s|appearance.colors.notAColor", "s|appearance.colors.bold",
+		]) {
 			assert.equal(maps.checkMapChange({ key, value: true, t }), null, key);
 			if (key.startsWith("s|")) assert.equal(maps.checkMapChange({ key, value: null, t }), null, `${key} (removal)`);
 		}
 		assert.notEqual(maps.checkMapChange({ key: "s|appearance.mode", value: "dark", t }), null);
 		assert.notEqual(maps.checkMapChange({ key: "s|agent.tools|web_search", value: false, t }), null);
+		assert.notEqual(maps.checkMapChange({ key: "s|appearance.colors.warning", value: "#abcdef", t }), null);
+		assert.notEqual(maps.checkMapChange({ key: "s|appearance.colors.warning", value: null, t }), null);
+		assert.notEqual(maps.checkMapChange({ key: "s|appearance.codeLigatures", value: true, t }), null);
+		assert.notEqual(maps.checkMapChange({ key: "s|compaction.includeReasoning", value: false, t }), null);
 		assert.equal(maps.checkMapChange({ key: "s|appearance.mode", value: { nested: true }, t }), null);
 		assert.equal(maps.checkMapChange({ key: "p|teacher/20-teaching.md", value: 5, t }), null);
 		assert.equal(maps.checkMapChange({ key: "f|fold_1", value: { id: "fold_2", name: "x", parentId: null, createdAt: "2026" }, t }), null, "a folder under another folder's key");
@@ -606,5 +635,131 @@ describe("the vault's folder names", () => {
 	it("only names: anything with a path in it is dropped by the server", () => {
 		assert.equal(maps.isVaultFolderName("Work"), true);
 		for (const bad of ["", "a/b", "a\\b", "..", ".", "x".repeat(300), 5, null]) assert.equal(maps.isVaultFolderName(bad), false, String(bad));
+	});
+});
+
+const { COLOR_OVERRIDE_KEYS, THEME_COLOR_KEYS } = await import("../src/core/themes.ts");
+
+describe("upstream 0.6.0: colors, and custom theme files", () => {
+	const palette = (accent: string) => Object.fromEntries(THEME_COLOR_KEYS.map((key) => [key, key === "accent" ? accent : "#123456"]));
+	const theme = (name: string, accent = "#ff8800") => ({ name, mode: "dark", colors: palette(accent) });
+
+	it("each color override travels as its own setting", () => {
+		for (const key of COLOR_OVERRIDE_KEYS) {
+			assert.deepEqual([...maps.settingsItems({ appearance: { colors: { [key]: "#010203" } } })], [[`s|appearance.colors.${key}`, "#010203"]], key);
+		}
+	});
+
+	it("a theme item is a valid custom theme, under its own id", () => {
+		const t = 1;
+		assert.notEqual(maps.checkMapChange({ key: "t|dusk", value: theme("Dusk"), t }), null);
+		assert.notEqual(maps.checkMapChange({ key: "t|dusk", value: null, t }), null, "deleting it");
+		assert.equal(maps.checkMapChange({ key: "t|default", value: theme("Default"), t }), null, "a built-in theme can't be replaced");
+		assert.equal(maps.checkMapChange({ key: "t|default", value: null, t }), null, "or deleted");
+		assert.equal(maps.checkMapChange({ key: "t|../escape", value: theme("X"), t }), null);
+		assert.equal(maps.checkMapChange({ key: "t|Dusk", value: theme("Dusk"), t }), null, "not the id grammar");
+		assert.equal(maps.checkMapChange({ key: "t|dusk", value: { ...theme("Dusk"), mode: "dim" }, t }), null);
+		assert.equal(maps.checkMapChange({ key: "t|dusk", value: { ...theme("Dusk"), colors: { accent: "red" } }, t }), null);
+		assert.equal(maps.checkMapChange({ key: "t|dusk", value: { ...theme("Dusk"), extra: true }, t }), null, "only what the theme store would keep");
+		assert.equal(maps.checkMapChange({ key: "t|dusk", value: theme(" Dusk "), t }), null);
+	});
+
+	it("first desktop: a theme only one side has is kept on both; the same id with different colors takes the desktop's", async () => {
+		const w = world();
+		const desk = w.desktop("dev_aaaaaaaaaaaaaaaa");
+		desk.set("t|dusk", theme("Dusk", "#aa0000"));
+		desk.set("t|desk-only", theme("Desk only"));
+		w.server.set("t|dusk", theme("Dusk", "#00aa00"));
+		w.server.set("t|phone-only", theme("Phone only"));
+		w.pass(HOUR);
+		await desk.sync.round();
+		assert.deepEqual(desk.all(), w.server.all());
+		assert.deepEqual(Object.keys(w.server.all()), ["t|desk-only", "t|dusk", "t|phone-only"]);
+		assert.equal((w.server.get("t|dusk") as { colors: { accent: string } }).colors.accent, "#aa0000");
+	});
+
+	it("a desktop paired later: the server's theme stands, a new one is added, and later changes and deletions travel", async () => {
+		const w = world();
+		const desk = w.desktop("dev_aaaaaaaaaaaaaaaa");
+		desk.set("t|dusk", theme("Dusk", "#aa0000"));
+		await desk.sync.round();
+		w.pass(HOUR);
+		const laptop = w.desktop("dev_bbbbbbbbbbbbbbbb");
+		laptop.set("t|dusk", theme("Dusk", "#0000aa"));
+		laptop.set("t|laptop-only", theme("Laptop only"));
+		await laptop.sync.round();
+		assert.equal((laptop.get("t|dusk") as { colors: { accent: string } }).colors.accent, "#aa0000", "the server's is kept");
+		assert.notEqual(w.server.get("t|laptop-only"), null, "one only the new PC has is added");
+
+		w.pass(HOUR);
+		laptop.set("t|dusk", null);
+		laptop.set("t|laptop-only", theme("Laptop only", "#ffffff"));
+		await laptop.sync.round();
+		await desk.sync.round();
+		assert.equal(desk.get("t|dusk"), null, "a deleted theme goes everywhere");
+		assert.equal((desk.get("t|laptop-only") as { colors: { accent: string } }).colors.accent, "#ffffff");
+		assert.deepEqual(desk.all(), w.server.all());
+	});
+
+	it("a damaged theme file is left alone on both sides; the others still sync", async () => {
+		const w = world();
+		const desk = w.desktop("dev_aaaaaaaaaaaaaaaa");
+		desk.set("t|dusk", theme("Dusk"));
+		desk.set("t|dawn", theme("Dawn"));
+		await desk.sync.round();
+		w.pass(HOUR);
+		desk.damageKey("t|dusk");
+		desk.set("t|dawn", theme("Dawn", "#000000"));
+		assert.deepEqual(await desk.sync.round(), { ok: true, sent: 1, applied: 0 });
+		assert.notEqual(w.server.get("t|dusk"), null, "not taken as deleted");
+		assert.equal((w.server.get("t|dawn") as { colors: { accent: string } }).colors.accent, "#000000");
+		// Changed on the server meanwhile: still not written over the damaged file.
+		w.pass(HOUR);
+		w.server.set("t|dusk", theme("Dusk", "#999999"));
+		await desk.sync.round();
+		assert.equal(desk.get("t|dusk"), null);
+		desk.repairKey("t|dusk", theme("Dusk"));
+		w.pass(1000);
+		await desk.sync.round();
+		assert.notEqual(desk.get("t|dusk"), null, "repaired: nothing was deleted on either side");
+		assert.notEqual(w.server.get("t|dusk"), null);
+	});
+});
+
+describe("a setting the app no longer keeps (appearance.mode, gone since upstream 0.6.0)", () => {
+	it("an old record naming it on either side: the deletion is exchanged once, then nothing; it never stalls or comes back", async () => {
+		const w = world();
+		const desk = w.desktop("dev_aaaaaaaaaaaaaaaa");
+		desk.set("s|appearance.mode", "light");
+		desk.set("s|appearance.theme", "rose-pine");
+		await desk.sync.round();
+		w.pass(HOUR);
+		desk.set("s|appearance.mode", "dark");
+		desk.sync.detect(); // a change noted before the update, never sent
+		assert.equal(w.server.get("s|appearance.mode"), "light");
+
+		// Both sides update: the settings store no longer reads the key, and drops it on every write.
+		const drop = (key: string, value: unknown) => (key === "s|appearance.mode" ? null : value);
+		for (const side of [w.server, desk]) { side.set("s|appearance.mode", null); side.adjustWith(drop); }
+		w.pass(HOUR);
+		assert.deepEqual(await desk.sync.round(), { ok: true, sent: 1, applied: 0 }, "the desktop says it is gone");
+		assert.equal(w.server.get("s|appearance.mode"), null);
+		w.pass(10_000);
+		assert.deepEqual(await desk.sync.round(), { ok: true, sent: 0, applied: 0 }, "and then there is nothing more to say");
+		w.pass(10_000);
+		assert.deepEqual(await desk.sync.round(), { ok: true, sent: 0, applied: 0 });
+		assert.equal(desk.get("s|appearance.theme"), "rose-pine", "the other settings carry on");
+
+		// A desktop that still sends a value for it (a hand-edited state, say): taken, dropped, and answered as gone.
+		const laptop = w.desktop("dev_bbbbbbbbbbbbbbbb");
+		laptop.adjustWith(drop);
+		laptop.set("s|appearance.mode", "dark");
+		w.pass(HOUR);
+		assert.equal((await laptop.sync.round()).ok, true);
+		assert.equal(w.server.get("s|appearance.mode"), null);
+		assert.equal(laptop.get("s|appearance.mode"), null, "it drops out there too");
+		w.pass(10_000);
+		assert.deepEqual(await laptop.sync.round(), { ok: true, sent: 0, applied: 0 });
+		assert.deepEqual(await desk.sync.round(), { ok: true, sent: 0, applied: 0 });
 	});
 });

@@ -33,6 +33,7 @@ const { shouldAutostart } = await import("../src/server/sync/autostart.ts");
 const { syncInUse } = await import("../src/server/sync/engine.ts");
 const { deleteChatSession } = await import("../src/server/chats.ts");
 const { deleteGraphNode } = await import("../src/server/graph.ts");
+const { initializePlugins } = await import("../src/server/plugins.ts");
 
 after(() => {
 	globalThis.fetch = realFetch;
@@ -62,7 +63,7 @@ async function useTheApp(tag: string): Promise<void> {
 	stores.graphStore.appendNode(node(`n_${tag}_2`, chat.id));
 	stores.graphStore.appendChain({ id: `arg_${tag}`, premises: [`n_${tag}_1`], conclusion: `n_${tag}_2`, createdAt: "2026-11-01T10:00:00.000Z", provenance: [{ chatId: chat.id, messageId: "" }] });
 	stores.graphStore.writePositions({ [`n_${tag}_1`]: { x: 1, y: 2 } });
-	writeSettings({ version: 1, appearance: { mode: "light" } });
+	writeSettings({ version: 1, appearance: { theme: "catppuccin-latte" } });
 	assert.equal(deleteGraphNode(`n_${tag}_2`).ok, true);
 	const second = stores.chatStore.createChat(`Motors ${tag}`);
 	assert.equal((await deleteChatSession(second.id, "delete-nodes")).ok, true);
@@ -80,8 +81,12 @@ describe("a desktop app that was never paired", () => {
 	});
 
 	it("uses the app as ever: no sync folder, no pairing file, no backup, no request", async () => {
+		// What the app itself starts with since upstream 0.6.0: the plugin host makes its (empty) plugins/ folder.
+		await initializePlugins();
 		await useTheApp("desk");
 		await runSyncRound();
+		assert.deepEqual(fs.readdirSync(DATA).sort(), ["chats", "graph", "jobs", "plugins", "settings.json"], "the app's own files, and nothing for sync");
+		assert.deepEqual(fs.readdirSync(path.join(DATA, "plugins")), []);
 		assert.equal(fs.existsSync(path.join(DATA, "sync")), false);
 		assert.equal(fs.existsSync(path.join(TMP, "backups")), false);
 		assert.deepEqual(fs.existsSync(SECRETS) ? fs.readdirSync(SECRETS) : [], []);
@@ -91,7 +96,7 @@ describe("a desktop app that was never paired", () => {
 	});
 
 	it("every sync address answers 404 on a desktop: there is nothing to pair with", async () => {
-		const call = (pathname: string, method = "POST") => new Request(`http://localhost${pathname}`, { method, headers: { "content-type": "application/json", authorization: `Bearer ${"k".repeat(43)}`, "x-lh-sync-protocol": "1" }, body: method === "GET" ? undefined : "{}" });
+		const call = (pathname: string, method = "POST") => new Request(`http://localhost${pathname}`, { method, headers: { "content-type": "application/json", authorization: `Bearer ${"k".repeat(43)}`, "x-lh-sync-protocol": "2" }, body: method === "GET" ? undefined : "{}" });
 		assert.equal((await server.pairResponse(call("/api/sync/pair"))).status, 404);
 		assert.equal(server.helloResponse(call("/api/sync/hello")).status, 404);
 		assert.equal((await server.sessionsExchangeResponse(call("/api/sync/sessions"))).status, 404);
@@ -111,7 +116,7 @@ describe("a server no desktop has paired with", () => {
 		const status = await (server.cloudStatusResponse()).json();
 		assert.deepEqual(status, { role: "server", held: {}, desktops: [] });
 		await useTheApp("cloud");
-		const call = (pathname: string, method = "POST") => new Request(`http://localhost${pathname}`, { method, headers: { "content-type": "application/json", authorization: `Bearer ${"k".repeat(43)}`, "x-lh-sync-protocol": "1" }, body: method === "GET" ? undefined : "{}" });
+		const call = (pathname: string, method = "POST") => new Request(`http://localhost${pathname}`, { method, headers: { "content-type": "application/json", authorization: `Bearer ${"k".repeat(43)}`, "x-lh-sync-protocol": "2" }, body: method === "GET" ? undefined : "{}" });
 		assert.equal((await server.sessionsExchangeResponse(call("/api/sync/sessions"))).status, 401);
 		assert.equal((await server.graphLogResponse(call("/api/sync/graph?after=0", "GET"))).status, 401);
 		assert.equal((await server.mapsExchangeResponse(call("/api/sync/maps"))).status, 401);

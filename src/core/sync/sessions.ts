@@ -1,14 +1,15 @@
 /**
  * Cloud sync (Phase 5, docs/cloud-sync.md): sessions and leases, the pure
- * part. A session travels WHOLE: its chat record, its side-tutor thread,
- * its notes home-folder record and its helper job files. Only the device
- * that holds the session's lease may change it or send it; the server is
- * the lease authority.
+ * part. A session travels WHOLE: its chat record (with its side questions
+ * inside it, since upstream 0.6.0), its notes home-folder record and its
+ * helper job files. Only the device that holds the session's lease may
+ * change it or send it; the server is the lease authority.
  *
  * The files travel as their exact text, so both sides hold the same bytes.
  */
 
 import { createHash } from "node:crypto";
+import { CURRENT_CHAT_VERSION } from "../contracts/chat.ts";
 
 /** The server's own holder id (what the phone works through). */
 export const CLOUD_HOLDER = "cloud";
@@ -17,8 +18,6 @@ export const CLOUD_HOLDER = "cloud";
 export interface SessionBundle {
 	/** chats/<id>.json */
 	chat: string;
-	/** side-tutor/<id>.json, or null when there is none. */
-	sideTutor: string | null;
 	/** notes/sessions/<id>.json, or null when there is none. */
 	home: string | null;
 	/** jobs/<jobId>.json for every helper job of this session. */
@@ -45,16 +44,35 @@ function parsedObject(text: unknown): Record<string, unknown> | null {
 }
 
 /**
+ * A chat record this build can't read as its own format: stamped with a
+ * newer `version` than CURRENT_CHAT_VERSION (written by a newer build). The
+ * app's own store refuses to read such a file; sync neither sends one nor
+ * takes one ("the second lock" beside the protocol number).
+ */
+export function chatFormatTooNew(chat: Record<string, unknown>): boolean {
+	return typeof chat.version === "number" && chat.version > CURRENT_CHAT_VERSION;
+}
+
+/** The refusal for a session whose chat file is newer than this build's format. */
+export const NEWER_FORMAT_CODE = "newer_format";
+
+/** The same check on a chat file's text. An unreadable file isn't "too new" (it is refused elsewhere). */
+export function chatFileTooNew(text: string): boolean {
+	const chat = parsedObject(text);
+	return chat !== null && chatFormatTooNew(chat);
+}
+
+/**
  * A bundle received from the other side, checked before anything is
  * written: every file must be the JSON it claims to be and belong to this
- * session. Returns null when it can't be trusted.
+ * session, and the chat record must be in a format this build reads.
+ * Returns null when it can't be trusted.
  */
 export function checkBundle(chatId: string, value: unknown): SessionBundle | null {
 	if (!isSessionId(chatId) || !value || typeof value !== "object" || Array.isArray(value)) return null;
 	const raw = value as Record<string, unknown>;
 	const chat = parsedObject(raw.chat);
-	if (!chat || chat.id !== chatId || !Array.isArray(chat.messages)) return null;
-	if (raw.sideTutor !== null && !parsedObject(raw.sideTutor)) return null;
+	if (!chat || chat.id !== chatId || !Array.isArray(chat.messages) || chatFormatTooNew(chat)) return null;
 	if (raw.home !== null && !parsedObject(raw.home)) return null;
 	if (!raw.jobs || typeof raw.jobs !== "object" || Array.isArray(raw.jobs)) return null;
 	const jobs: Record<string, string> = {};
@@ -63,12 +81,12 @@ export function checkBundle(chatId: string, value: unknown): SessionBundle | nul
 		if (!isSessionId(jobId) || !job || job.id !== jobId || job.chatId !== chatId) return null;
 		jobs[jobId] = text as string;
 	}
-	const bundle: SessionBundle = { chat: raw.chat as string, sideTutor: raw.sideTutor as string | null, home: raw.home as string | null, jobs };
+	const bundle: SessionBundle = { chat: raw.chat as string, home: raw.home as string | null, jobs };
 	return bundleBytes(bundle) <= MAX_BUNDLE_BYTES ? bundle : null;
 }
 
 export function bundleBytes(bundle: SessionBundle): number {
-	let total = Buffer.byteLength(bundle.chat) + Buffer.byteLength(bundle.sideTutor ?? "") + Buffer.byteLength(bundle.home ?? "");
+	let total = Buffer.byteLength(bundle.chat) + Buffer.byteLength(bundle.home ?? "");
 	for (const text of Object.values(bundle.jobs)) total += Buffer.byteLength(text);
 	return total;
 }
@@ -81,7 +99,11 @@ export function bundleDigest(bundle: SessionBundle): string {
 		if (text !== null) hash.update(text);
 	};
 	part("chat", bundle.chat);
-	part("sideTutor", bundle.sideTutor);
+	// The bundle had a side-tutor file until upstream 0.6.0. Its "none" stays
+	// in the fingerprint, so the digests both sides saved before then still
+	// match a session that had no such file (no mass re-send at the update,
+	// and the re-pairing rules in desktop-sync.ts compare against them).
+	part("sideTutor", null);
 	part("home", bundle.home);
 	for (const jobId of Object.keys(bundle.jobs).sort()) part(`job:${jobId}`, bundle.jobs[jobId]!);
 	return hash.digest("hex");

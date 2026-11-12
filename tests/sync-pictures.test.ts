@@ -130,13 +130,15 @@ describe("a chat file without its pictures", () => {
 	it("a picture list from the other side is checked", () => {
 		const good = pictures.withoutPictures(text)!.pictures;
 		assert.deepEqual(pictures.checkPictureList(JSON.parse(JSON.stringify(good))), good);
-		assert.equal(pictures.checkPictureList({ at: 0, list: [] }), null);
-		assert.equal(pictures.checkPictureList({ at: -1, list: good.list }), null);
-		assert.equal(pictures.checkPictureList({ at: 0, list: [["zz", { data: "" }]] }), null);
-		assert.equal(pictures.checkPictureList({ at: 0, list: [[a.id, { data: "smuggled" }]] }), null);
-		assert.equal(pictures.checkPictureList({ at: 0, list: [good.list[0], good.list[0]] }), null, "the same picture twice");
+		assert.equal(pictures.checkPictureList({ at: 0, list: [], inline: [] }), null, "no pictures at all");
+		assert.equal(pictures.checkPictureList({ at: -1, list: good.list, inline: [] }), null, "snapshots with no place");
+		assert.equal(pictures.checkPictureList({ at: 0, list: good.list }), null, "no inline list (a protocol-1 sender)");
+		assert.equal(pictures.checkPictureList({ at: 0, list: [["zz", { data: "" }]], inline: [] }), null);
+		assert.equal(pictures.checkPictureList({ at: 0, list: [[a.id, { data: "smuggled" }]], inline: [] }), null);
+		assert.equal(pictures.checkPictureList({ at: 0, list: [good.list[0], good.list[0]], inline: [] }), null, "the same picture twice");
 		assert.equal(pictures.pictureMatches(a.id, a.snapshot.data), true);
 		assert.equal(pictures.pictureMatches(a.id, b.snapshot.data), false);
+		assert.equal(pictures.pictureMatches(a.id, `${a.snapshot.data}\n`), false, "another spelling of the same bytes");
 	});
 });
 
@@ -257,9 +259,133 @@ describe("what the server refuses", () => {
 		// A session sent with a list that names a picture nobody sent: asked for, never stored.
 		const before = fs.readFileSync(chatFile(w.serverDir, "chat_d1"), "utf-8");
 		const slim = pictures.withoutPictures(before)!;
-		const reply = w.authority.store("dev_aaaaaaaaaaaaaaaa", "chat_d1", { bundle: { chat: slim.chat, sideTutor: null, home: null, jobs: {}, pictures: { at: slim.pictures.at, list: [...slim.pictures.list, [other.id, { mimeType: "image/png", data: "", width: 1, height: 1 }]] } } });
+		const reply = w.authority.store("dev_aaaaaaaaaaaaaaaa", "chat_d1", { bundle: { chat: slim.chat, home: null, jobs: {}, pictures: { at: slim.pictures.at, list: [...slim.pictures.list, [other.id, { mimeType: "image/png", data: "", width: 1, height: 1 }]], inline: [] } } });
 		assert.equal(reply.status, 409);
 		assert.deepEqual(reply.body.ids, [other.id]);
 		assert.equal(fs.readFileSync(chatFile(w.serverDir, "chat_d1"), "utf-8"), before);
+	});
+});
+
+// ─── Pictures inside messages (upstream 0.6.0) ───────────────────────────────
+
+/** An image block the way upstream keeps it inside a message: { type, mimeType, data }. */
+function block(bytes: number) {
+	const raw = randomBytes(bytes);
+	return { id: createHash("sha256").update(raw).digest("hex"), image: { type: "image", mimeType: "image/png", data: raw.toString("base64") } };
+}
+
+/** A session whose pictures sit inside its messages: a learner's attachment, a tool's result and a practice thinking marker. */
+function makeInlineSession(dataDir: string, id: string, images: Array<ReturnType<typeof block>>, snapshots: Array<ReturnType<typeof picture>> = []): void {
+	const [first, second, third] = images;
+	writeChat(dataDir, id, {
+		id, title: `Session ${id}`, createdAt: "2026-11-01T10:00:00.000Z", updatedAt: "2026-11-01T10:00:00.000Z",
+		messages: [
+			{ id: "m1", role: "user", content: [{ type: "text", text: "what is this?" }, ...(first ? [first.image] : [])], timestamp: 1 },
+			...(second ? [{ id: "m2", role: "toolResult", toolCallId: "call_1", toolName: "read", content: [second.image], isError: false, timestamp: 2 }] : []),
+			...(third ? [{ id: "m3", role: "custom", customType: "practice-thinking", content: "", display: true, details: { problemCallId: "p", text: "", images: [third.image] }, timestamp: 3 }] : []),
+		],
+		...(snapshots.length ? { imageSnapshots: Object.fromEntries(snapshots.map((p) => [p.id, p.snapshot])) } : {}),
+		kind: "teach", version: 2,
+	});
+}
+
+describe("pictures inside messages", () => {
+	const a = block(4000), b = block(3000), c = block(2500), snap = picture(2000);
+
+	it("come apart and go back together into the very same file", () => {
+		const dir = path.join(TMP, "inline-unit");
+		makeInlineSession(dir, "chat_i", [a, b, c], [snap]);
+		const text = fs.readFileSync(chatFile(dir, "chat_i"), "utf-8");
+		const slim = pictures.withoutPictures(text)!;
+		for (const p of [a, b, c]) assert.equal(slim.chat.includes(p.image.data), false);
+		assert.ok(slim.chat.length < 1500, `the chat without them: ${slim.chat.length}`);
+		assert.deepEqual(slim.pictures.inline, [
+			[["messages", 0, "content", 1], a.id],
+			[["messages", 1, "content", 0], b.id],
+			[["messages", 2, "details", "images", 0], c.id],
+		]);
+		assert.deepEqual(slim.pictures.list.map(([id]) => id), [snap.id]);
+		assert.deepEqual(pictures.withPictures(slim.chat, slim.pictures, (id) => slim.data.get(id) ?? null), { text });
+		assert.deepEqual(pictures.withPictures(slim.chat, slim.pictures, (id) => (id === b.id ? null : slim.data.get(id) ?? null)), { missing: [b.id] });
+		assert.deepEqual(new Set(pictures.picturesIn(text).keys()), new Set([snap.id, a.id, b.id, c.id]));
+		assert.deepEqual(pictures.checkPictureList(JSON.parse(JSON.stringify(slim.pictures))), slim.pictures);
+	});
+
+	it("a picture in two places is named once; a tiny one stays in the chat; another spelling of the bytes travels whole", () => {
+		const dir = path.join(TMP, "inline-unit-2");
+		const tiny = block(100);
+		makeInlineSession(dir, "chat_twice", [a, a, tiny]);
+		const text = fs.readFileSync(chatFile(dir, "chat_twice"), "utf-8");
+		const slim = pictures.withoutPictures(text)!;
+		assert.deepEqual(slim.pictures.inline.map(([, id]) => id), [a.id, a.id]);
+		assert.deepEqual(pictures.pictureIds(slim.pictures), [a.id]);
+		assert.equal(slim.chat.includes(tiny.image.data), true, "under MIN_INLINE_CHARS it rides along");
+		assert.deepEqual(pictures.withPictures(slim.chat, slim.pictures, (id) => slim.data.get(id) ?? null), { text });
+
+		// Base64 with a line break decodes to the same bytes: such a block isn't taken out.
+		makeInlineSession(dir, "chat_odd", [{ ...a, image: { ...a.image, data: `${a.image.data.slice(0, 76)}\n${a.image.data.slice(76)}` } }]);
+		assert.equal(pictures.withoutPictures(fs.readFileSync(chatFile(dir, "chat_odd"), "utf-8")), null);
+		assert.equal(pictures.withoutPictures(JSON.stringify(JSON.parse(text))), null, "not the app's formatting");
+	});
+
+	it("a list that doesn't fit the chat is refused", () => {
+		const dir = path.join(TMP, "inline-unit-3");
+		makeInlineSession(dir, "chat_i", [a]);
+		const slim = pictures.withoutPictures(fs.readFileSync(chatFile(dir, "chat_i"), "utf-8"))!;
+		const get = (id: string) => slim.data.get(id) ?? null;
+		assert.throws(() => pictures.withPictures(slim.chat, { ...slim.pictures, inline: [[["messages", 0, "content", 0], a.id]] }, get), "a text block, not an emptied image");
+		assert.throws(() => pictures.withPictures(slim.chat, { ...slim.pictures, inline: [[["messages", 9, "content", 1], a.id]] }, get));
+		assert.throws(() => pictures.withPictures(slim.chat, { ...slim.pictures, inline: [[["__proto__", "x"], a.id]] }, get));
+		assert.equal(pictures.checkPictureList({ at: -1, list: [], inline: [[[], a.id]] }), null, "an empty path");
+		assert.equal(pictures.checkPictureList({ at: -1, list: [], inline: [[["messages", -1], a.id]] }), null);
+		assert.equal(pictures.checkPictureList({ at: -1, list: [], inline: [[["messages", { x: 1 }], a.id]] }), null);
+		assert.equal(pictures.checkPictureList({ at: -1, list: [], inline: [[["messages", 0], "not-a-hash"]] }), null);
+	});
+
+	it("a session with big pictures inside its messages: each goes once, in pieces, and every send of the session stays small", async () => {
+		const w = world();
+		const desk = w.desktop("dev_aaaaaaaaaaaaaaaa");
+		const laptop = w.desktop("dev_bbbbbbbbbbbbbbbb");
+		// About 26 MB of pictures as text: more than one request may carry.
+		const big = [block(6_600_000), block(6_600_000), block(6_600_000)];
+		makeInlineSession(desk.dataDir, "chat_big", big);
+		assert.ok(fs.statSync(chatFile(desk.dataDir, "chat_big")).size > 26_000_000);
+		await desk.sync.tick();
+		assert.ok(w.sent.every((r) => r.bytes < 9 * 1024 * 1024), `request sizes: ${w.sent.map((r) => r.bytes).join(", ")}`);
+		assert.equal(w.sent.filter((r) => r.method === "PUT" && r.path.includes("/pictures/")).length, 6, "three pictures, two pieces each");
+		assert.equal(fs.readFileSync(chatFile(w.serverDir, "chat_big"), "utf-8"), fs.readFileSync(chatFile(desk.dataDir, "chat_big"), "utf-8"), "the same file, byte for byte");
+
+		// More turns: the session goes again without its pictures.
+		const from = w.sent.length;
+		for (let i = 0; i < 3; i++) {
+			w.tick();
+			const record = readChat(desk.dataDir, "chat_big");
+			record.messages.push({ id: `t${i}`, role: "user", content: `turn ${i}`, timestamp: 10 + i });
+			writeChat(desk.dataDir, "chat_big", record);
+			await desk.sync.tick();
+		}
+		const sends = w.sent.slice(from).filter((r) => r.method === "PUT");
+		assert.deepEqual(sends.map((r) => r.status), [200, 200, 200]);
+		assert.ok(sends.every((r) => r.bytes < 5000), `sizes: ${sends.map((r) => r.bytes).join(", ")}`);
+
+		// Down to another desktop: the session small, each picture fetched once.
+		const down = w.sent.length;
+		await laptop.sync.tick();
+		const fetched = w.sent.slice(down).filter((r) => r.by === "dev_bbbbbbbbbbbbbbbb" && r.method === "GET");
+		assert.equal(fetched.filter((r) => r.path.includes("/pictures/")).length, 3);
+		assert.ok(fetched.find((r) => r.path === "/api/sync/sessions/chat_big")!.bytes < 5000);
+		assert.equal(fs.readFileSync(chatFile(laptop.dataDir, "chat_big"), "utf-8"), fs.readFileSync(chatFile(desk.dataDir, "chat_big"), "utf-8"));
+	});
+
+	it("a picture already in the record as a snapshot isn't sent again for a message", async () => {
+		const w = world();
+		const desk = w.desktop("dev_aaaaaaaaaaaaaaaa");
+		const raw = randomBytes(30_000);
+		const id = createHash("sha256").update(raw).digest("hex");
+		const shared = { id, image: { type: "image", mimeType: "image/png", data: raw.toString("base64") } };
+		makeInlineSession(desk.dataDir, "chat_shared", [shared], [{ id, snapshot: { mimeType: "image/png", data: raw.toString("base64"), width: 1, height: 1 } }]);
+		await desk.sync.tick();
+		assert.deepEqual(w.since(0), ["POST  200", "PUT /chat_shared 409", "PUT /chat_shared/pictures/<picture> 200", "PUT /chat_shared 200"]);
+		assert.equal(fs.readFileSync(chatFile(w.serverDir, "chat_shared"), "utf-8"), fs.readFileSync(chatFile(desk.dataDir, "chat_shared"), "utf-8"));
 	});
 });
