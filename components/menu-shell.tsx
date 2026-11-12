@@ -1,9 +1,8 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
-import { createPortal, flushSync } from "react-dom";
+import { createPortal } from "react-dom";
 import { isPhoneNow, isTouchPhoneNow } from "@/components/phone/use-phone";
-import { heightEventInFrame, PHONE_HEIGHT_EVENT, phoneLayoutHeight } from "@/components/phone/phone-viewport";
 import { INTERACTION_LAYER_Z_BASE } from "./host-dialog";
 import { InteractionLayerOwner, useInteractionLayer, useInteractionLayers, type CloseOutcome, type CloseReason } from "./interaction-layers";
 
@@ -71,9 +70,7 @@ export interface MenuPlacement {
  *  menu placed from innerHeight ended up behind the keyboard (owner's
  *  iPhone); this is the visible height phone-viewport.tsx keeps in --lh-vvh. */
 function phoneVisibleHeight(): number {
-	// Mid-glide (the app's height follows the keyboard) <html> keeps the
-	// glide's start value; phoneLayoutHeight() is the height of this frame.
-	const vvh = phoneLayoutHeight() ?? parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--lh-vvh"));
+	const vvh = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--lh-vvh"));
 	return Number.isFinite(vvh) && vvh > 0 ? Math.min(vvh, window.visualViewport?.height ?? vvh) : (window.visualViewport?.height ?? window.innerHeight);
 }
 
@@ -310,14 +307,6 @@ export function MenuShell({
 		// top-pinned menu re-places when its content changes (a search
 		// filtering the list), so it stays attached to its anchor.
 		window.visualViewport?.addEventListener("resize", rePlace);
-		// PHONE: the app's height glides with the keyboard (phone-viewport.tsx),
-		// moving the anchor every frame: re-place in the same frame (rendered at
-		// once from a glide's own frame, or it would land after its paint).
-		const onHeight = (e: Event) => {
-			if (heightEventInFrame(e)) flushSync(place);
-			else place();
-		};
-		window.addEventListener(PHONE_HEIGHT_EVENT, onHeight);
 		const contentObserver = isPhoneNow() && menuRef.current ? new ResizeObserver(rePlace) : null;
 		if (contentObserver && menuRef.current) for (const child of Array.from(menuRef.current.children)) contentObserver.observe(child);
 		return () => {
@@ -325,7 +314,6 @@ export function MenuShell({
 			window.removeEventListener("scroll", rePlace, true);
 			window.removeEventListener("resize", rePlace);
 			window.visualViewport?.removeEventListener("resize", rePlace);
-			window.removeEventListener(PHONE_HEIGHT_EVENT, onHeight);
 			contentObserver?.disconnect();
 		};
 	}, [anchorRef, anchorTestid, preferredSide, align]);

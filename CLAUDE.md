@@ -20,7 +20,7 @@ This is a fork of amosblomqvist/learnharness. All fork work lives on the `side-t
 - **Shipped, not yet confirmed by the owner:** a touch batch, all in the fork's phone and touch files. With the owner's word ("ship") the same commit was pushed to `side-tutor` and to the server's branch (both fast-forwards), after both workflow dry runs passed on `7fab160`. It changes no file format and no sync protocol. The owner's iPhone and iPad haven't seen it; the owner has a "what to try" page for it (an Artifact page). What it holds:
   - the Tutor's phone sheet swipes down to minimize and slides away ("On a phone: swipe down to minimize" in `docs/side-tutor.md`);
   - a tap on the folded question ends at the lesson's bottom with the question open ("A tap on the folded question ends at the bottom, open" in `docs/cloud-sync.md`);
-  - the app's height glides in step with the iPhone keyboard ("In step with the keyboard" in `docs/cloud-sync.md`);
+  - the app's height gliding in step with the iPhone keyboard was in that batch too; the owner tried it on the iPhone and asked for it to be reverted completely, which is done ("Gliding in step with the keyboard: tried and taken out" in `docs/cloud-sync.md`);
   - Cite and Ask after a press-and-hold selection on a phone and a tablet, opposite the system's Copy / Look Up box ("Highlight, then Ask" in `docs/side-tutor.md`).
   - Each part lists what only the owner's iPhone or iPad can confirm, and what was read while building for the owner's review. Expect a round of tuning from the owner's devices (the keyboard's timing, where the Cite and Ask buttons sit, the swipe's feel).
 - Keep this file, `docs/side-tutor.md`, `docs/cloud-sync.md` and `docs/upstream-0.6.0.md` technical. The fork is public: no personal information.
