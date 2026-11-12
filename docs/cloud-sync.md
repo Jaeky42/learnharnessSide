@@ -314,6 +314,8 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 - **`Dockerfile`** builds the same standalone server the desktop app runs and starts it in server mode as the `node` user:
   - `/data` is a volume: `/data/data` = `LH_DATA_DIR`, `/data/secrets` = the `auth.json` folder (mode 700), `/data/vault` = `LH_VAULT_DIR` (the Obsidian vault, Phase 4), `/data/home` = `HOME` (Claude Code and `ob`);
   - `reset-password` is on the PATH.
+  - **Chromium** (Debian's package, `/usr/bin/chromium`) and one font are installed in the image. The demo agent runs every demo in a browser before it is shown (`src/agent/subagents/headless.ts`); the desktop app uses its own Electron for that, and the server has none. Without a browser every demo on the server failed with "No render engine available" (found by the owner, on an iPad). Upstream's checker finds Chromium at that path by itself and starts it with `--no-sandbox`, one launch per demo. The image workflow starts it in the built image; `tests/server-image-browser.test.ts` pins the install line.
+    - The demo's page is model-written. It is loaded on a blank page with no access to files, and the app's own API answers it 401 (no login). Chrome's own sandbox is off, as in upstream's fallback on any computer, so a browser bug would be the one way out of the page.
 - **`deploy/`:**
   - `compose.yaml`: LearnHarness and Caddy. `LH_TRUST_PROXY=1`, because Caddy's `X-Forwarded-For` / `X-Forwarded-Proto` are trusted for the lockout and redirects.
   - `Caddyfile`

@@ -137,6 +137,8 @@ Five things the plan had left open, or that came out differently than the plan s
 
 - **The Tutor stays above the Drawing Pad**, window and bubble. Details in `docs/side-tutor.md`.
 
+- **Demos work on the server:** the image now carries Chromium, which the demo agent needs to test-run a demo ("Hosting" in `docs/cloud-sync.md`). Not an 0.6.0 matter: it was so since server mode was built.
+
 ### The Drawing Pad, as tried on a computer (nothing of upstream's changed)
 
 - **Draw** sits in the lesson's top bar right of Notes and the ring. With too little room (the notes drawer open, a narrow window, a long title) it moves into upstream's ⋯ menu.

@@ -23,8 +23,13 @@ RUN npm run plugins:setup && npm run build && node scripts/smoke-provider-runtim
 # ── run ──────────────────────────────────────────────────────────────────
 FROM node:26-bookworm-slim
 # curl + CA certificates: the entrypoint installs Claude Code onto the volume.
+# Chromium: the demo agent runs every demo in a browser before it is shown
+# (src/agent/subagents/headless.ts). The desktop app uses its own Electron
+# for that; the server has none, so without a browser every demo failed with
+# "No render engine available". /usr/bin/chromium is on the checker's own
+# list of places to look. A font, so a demo's text has a size when measured.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends curl ca-certificates \
+ && apt-get install -y --no-install-recommends curl ca-certificates chromium fonts-liberation \
  && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 ENV NODE_ENV=production \

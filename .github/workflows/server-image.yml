@@ -126,6 +126,11 @@ jobs:
           test "$(docker exec lh ob --version 2>/dev/null)" = "$ob_version" || { docker exec lh cat /data/home/ob-install.log || true; echo "::error::Obsidian's sync program was not installed"; exit 1; }
           docker exec lh node -e "new (require('/data/home/.local/lib/node_modules/obsidian-headless/node_modules/better-sqlite3'))(':memory:').close()" || { echo "::error::the sync program's database add-on does not load"; exit 1; }
           test "$(docker exec lh sh -c 'echo $LH_VAULT_DIR')" = "/data/vault" || { echo "::error::LH_VAULT_DIR is not set"; exit 1; }
+          # The demo agent's browser: Chromium is where the checker looks for
+          # it, starts as the app starts it (no display, the container's
+          # user), and runs a page's script.
+          docker exec lh test -x /usr/bin/chromium || { echo "::error::no Chromium in the image; demos can't be checked"; exit 1; }
+          docker exec lh chromium --headless --no-sandbox --disable-gpu --disable-dev-shm-usage --dump-dom 'data:text/html,<p id=o></p><script>document.getElementById("o").textContent=6*7</script>' | grep -q '<p id="o">42</p>' || { echo "::error::Chromium does not run a page in the image"; exit 1; }
           docker rm -f lh
       - name: Publish
         if: github.event_name == 'push'
