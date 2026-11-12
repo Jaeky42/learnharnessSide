@@ -77,7 +77,8 @@ import { AbortTurnDialog, type AbortMode } from "@/components/abort-turn-dialog"
 import { ArrowRightIcon, DumbbellIcon, MessageCircleQuestionIcon, NotebookPenIcon, WaypointsIcon } from "lucide-react";
 import type { PlanBlockData } from "@/src/core";
 import { QuestionDock } from "@/components/question-dock";
-import { PluginQuestionDock } from "./plugin-question-dock";
+// FORK (phone): a plugin question is parked on a phone, upstream's dock everywhere else.
+import { PhonePluginQuestionDock as PluginQuestionDock } from "@/components/phone/parked-plugin-question";
 import { PluginQuestionPart } from "./plugin-question-part";
 import { pluginQuestionKeySuppressed, composingQuestionKey } from "./plugin-question-keys";
 import { capturePluginQuestionDismissal, confirmPluginQuestionDismissal, type PluginQuestionDismissalTarget } from "./plugin-question-dismissal";
@@ -91,7 +92,7 @@ import { createCiteAction, type CitationEditTarget } from "@/components/citation
 import { CitationActionsContext, type CitationActions } from "@/components/citation-chip";
 import { CitationCommentPopover } from "@/components/citation-comment-popover";
 import { revealCitationSource } from "@/components/citation-source";
-import { createSideQuestionActions, SideThreadBody, SideThreadPanel, SideThreadPopover } from "@/components/side-thread";
+import { createSideQuestionActions } from "@/components/side-thread";
 import { useSideThread, type SideThreadOpenArgs } from "@/components/use-side-thread";
 import { useRouter } from "next/navigation";
 import { PracticeDock } from "@/components/practice-dock";
@@ -1011,57 +1012,23 @@ export function Chat({
 		if (activeProblem?.pluginProblem) return pluginProblemDraft(activeProblem.pluginProblem).thinking;
 		return workingRef.current;
 	});
-	const sideNavigation = useRef(0);
-	const closeSideThread = useCallback(() => {
-		const id = sideThread.state?.threadId;
-		if (!id) return;
-		const navigation = ++sideNavigation.current;
-		void recording.finishFor(`side:${id}`).then(() => {
-			if (navigation === sideNavigation.current) sideThread.close(id);
-		});
-	}, [recording.finishFor, sideThread.state?.threadId, sideThread.close]);
+	// FORK: side conversations are shown in the fork's Tutor window
+	// (components/side-tutor.tsx), which keeps this hook's one open conversation
+	// on the step being asked about. Upstream's own card, its pinned column, the
+	// per-step "?" markers and Ctrl+J are not shown (owner's decision at the
+	// 0.6.0 merge); their components stay in upstream's files, unused here.
+	// "Ask" on a highlighted passage hands the passage to the hook and opens
+	// the Tutor window on it.
+	const [tutorOpenRequest, setTutorOpenRequest] = useState(0);
 	const openSideThread = useCallback((args: SideThreadOpenArgs) => {
-		const navigation = ++sideNavigation.current;
-		const current = sideThread.state;
-		const source = args.sourceMessageId ?? args.passage?.sourceMessageId ?? (args.questionCallId ? nativeMessages.find((message) => message.role === "assistant" &&
-			message.content.some((block) => block.type === "toolCall" && block.id === args.questionCallId))?.id : undefined);
-		if (current && current.segmentId !== sideSegmentId(nativeMessages, source) && recording.active && recording.destinationId === `side:${current.threadId}`) {
-			void recording.finishFor(`side:${current.threadId}`).then(() => {
-				if (navigation === sideNavigation.current) sideThread.open(args);
-			});
-		} else sideThread.open(args);
-	}, [nativeMessages, recording.active, recording.destinationId, recording.finishFor, sideThread.open, sideThread.state]);
-	const goToCurrentSideStep = sideThread.state && sideThread.currentSegmentId && sideThread.state.segmentId !== sideThread.currentSegmentId
-		? () => openSideThread({ sourceMessageId: sideThread.currentSegmentId!, anchor: sideThread.state!.anchor }) : undefined;
-	const sideDictationFor = (id: string) => {
-		const destinationId = `side:${id}`;
-		const owns = recording.destinationId === destinationId;
-		return { phase: owns ? recording.phase : "idle" as const, active: owns && recording.active,
-			blocked: !owns && recording.active, error: owns ? recording.error : null, levelRef: recording.levelRef,
-			toggle: () => recording.toggleFor({ id: destinationId, append: (text) => sideThread.saveDraft(id, joinDictation(sideThread.draftFor(id), text), true) }),
-			finish: () => recording.finishFor(destinationId) };
-	};
-	const renderSideEntry = (sourceMessageId?: string) => {
-		if (!sourceMessageId) return null;
-		const hasHistory = sideThread.threads.some((thread) => thread.anchor.messageId === sourceMessageId && thread.messages.length > 0);
-		return <div className="mt-1 flex justify-end">
-			<Button type="button" variant="ghost" size="icon-xs" data-testid="side-conversation-button" data-side-segment-id={sourceMessageId}
-				data-has-history={hasHistory} aria-label={hasHistory ? "Open side conversation" : "Ask a side question"}
-				title={hasHistory ? "Open side conversation" : "Ask a side question"}
-				className={hasHistory ? "border border-border/60 text-muted-foreground" : "text-muted-foreground/40 hover:text-muted-foreground"}
-				onClick={(event) => openSideThread({ sourceMessageId, anchor: { kind: "element", element: event.currentTarget } })}>
-				<MessageCircleQuestionIcon aria-hidden className="size-3.5" fill="currentColor" fillOpacity={hasHistory ? 0.12 : 0} />
-			</Button>
-		</div>;
-	};
+		sideThread.open(args);
+		setTutorOpenRequest((count) => count + 1);
+	}, [sideThread.open]);
+	// FORK: the Tutor window has its own Esc (it minimizes) and keeps its
+	// conversation across a skipped question, so the lesson's Esc chain never
+	// sees an open side thread and never closes one.
 	const sideThreadOpenRef = useRef(false);
-	sideThreadOpenRef.current = sideThread.state !== null;
-	const closeSideThreadRef = useRef(closeSideThread);
-	closeSideThreadRef.current = closeSideThread;
-	// FORK: the "toggle-question-thread" shortcut is not offered (removed
-	// from src/core/keyboard.ts), so nothing listens for it here. The side
-	// thread's other entry points (the per-segment button, the selection
-	// actions) are unchanged.
+	const closeSideThreadRef = useRef(() => {});
 	// Advancing the lesson does not close or disable an old conversation.
 	const sideActions = useMemo(() => createSideQuestionActions({ open: openSideThread }), [openSideThread]);
 	const selectionActions = useMemo(() => [citeAction, ...sideActions], [citeAction, sideActions]);
@@ -1087,7 +1054,7 @@ export function Chat({
 		} else if (dictationWasActiveRef.current) {
 			dictationWasActiveRef.current = false;
 			// Do not steal focus from a helper or a newer interaction owner.
-			if (!document.activeElement?.closest('[data-testid="side-thread"]') && isInteractionScopeEligible(composerInputRef.current, controller)) composerInputRef.current!.focus();
+			if (!document.activeElement?.closest('[data-testid="side-thread"], [data-testid="side-tutor"]') && isInteractionScopeEligible(composerInputRef.current, controller)) composerInputRef.current!.focus();
 		}
 	}, [dictation.active, controller]);
 
@@ -1247,8 +1214,14 @@ export function Chat({
 	// The notes drawer (private notes in the learner's Obsidian vault — never
 	// seen by any agent): the top-bar Notes chip and Ctrl+Shift+N toggle it.
 	const [notesOpen, setNotesOpen] = useNotesDrawerOpen();
+	const [notesByKey, setNotesByKey] = useState(false);
 	useEffect(() => {
-		const toggle = () => setNotesOpen((v) => !v);
+		// Opened with the keyboard, the drawer puts the cursor in the note's
+		// editor (owner's ask; Ctrl+Shift+E, the old second shortcut, is gone).
+		const toggle = () => {
+			setNotesByKey(true);
+			setNotesOpen((v) => !v);
+		};
 		window.addEventListener(kbdEventForChat("toggle-notes"), toggle);
 		return () => window.removeEventListener(kbdEventForChat("toggle-notes"), toggle);
 	}, [setNotesOpen]);
@@ -1658,11 +1631,11 @@ export function Chat({
 		    dock overlays the column bottom (outside the scroller); a spacer in
 		    the transcript reserves its height. */}
 		<div className="flex h-dvh">
-			{/* The side-tutor window (fixed overlay): quick questions answered by a
-			    second agent that reads the lesson but never writes into it. */}
-			{/* It gets the page's shared recorder, not the main-input view: its
-			    Dictate button records to its own destination (toggleFor). */}
-			{kind !== "practice" && <SideTutor chatId={chatId} dictation={recording} held={heldElsewhere} />}
+			{/* The Tutor window (fixed overlay), in teaching and practice sessions:
+			    the fork's window over upstream's side conversations. It gets the
+			    page's shared recorder, not the main-input view: its Dictate button
+			    records to its own destination (toggleFor). */}
+			<SideTutor chatId={chatId} messages={nativeMessages} side={sideThread} dictation={recording} held={heldElsewhere} openRequest={tutorOpenRequest} />
 			<div className="flex min-w-0 flex-1 flex-col">
 				{/* The top bar is its own block (owner, top-fade round 4): in flow
 				    above the scroller on the plain page background — no gradient. Its
@@ -1773,6 +1746,7 @@ export function Chat({
 						aria-pressed={notesOpen}
 						onClick={(e) => {
 							blurAfterPointerClick(e);
+							setNotesByKey(false);
 							setNotesOpen((v) => !v);
 						}}
 						className={`lh-no-drag flex shrink-0 cursor-pointer items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-medium uppercase tracking-wide transition-colors hover:border-border hover:text-foreground ${notesOpen ? "border-border bg-accent text-foreground" : "border-border/80 text-muted-foreground"}`}
@@ -1804,7 +1778,7 @@ export function Chat({
 					) : (
 						<PhaseChip phase={phases.at(-1) ?? "probe"} />
 					)}
-					{renderedActionContext && <PluginTopBarActions context={renderedActionContext} captureContext={captureActionContext} />}
+					{renderedActionContext && <PluginTopBarActions context={renderedActionContext} captureContext={captureActionContext} blocked={heldElsewhere ? HELD_TEXT.blocked : undefined} />}
 				</TopBar>
 				{/* Cloud sync (Phase 6): "Held by …" and Take over, when another
 				    device holds this session. Nothing where sync isn't in use. */}
@@ -1993,7 +1967,6 @@ export function Chat({
 														);
 													case "step-start":
 														return <Fragment key={`step-${pi}`}>
-															{renderSideEntry(sideEntries.get(m.id)?.get(pi))}
 															{teachBoundary ? <PhaseDivider phase="teach" /> : pi > 0 ? <Separator className="my-3" /> : null}
 														</Fragment>;
 													case "data-plan-block":
@@ -2036,7 +2009,6 @@ export function Chat({
 												}
 											})}
 										</MessageContent>
-										{m.role === "assistant" && renderSideEntry(sideEntries.get(m.id)?.get(m.parts.length))}
 									</Message>
 									)}
 								</Fragment>
@@ -2224,44 +2196,6 @@ export function Chat({
 				/>
 				</div>
 				</Conversation>
-				{sideThread.state?.mode === "panel" && (
-					<SideThreadPanel>
-						<SideThreadBody
-							key={sideThread.state.threadId}
-							state={sideThread.state}
-							chatId={chatId}
-							draft={sideThread.draftFor(sideThread.state.threadId)}
-							readDraft={sideThread.draftFor.bind(null, sideThread.state.threadId)}
-							dictation={sideDictationFor(sideThread.state.threadId)}
-							onDraftChange={sideThread.saveDraft.bind(null, sideThread.state.threadId)}
-							onAsk={(text, retry) => sideThread.ask(text, retry, sideThread.state!.threadId)}
-							onStop={sideThread.stop}
-							onExpand={sideThread.expand}
-							onFloat={sideThread.float}
-							onClose={closeSideThread}
-							onCurrentStep={goToCurrentSideStep}
-						/>
-					</SideThreadPanel>
-				)}
-
-				{sideThread.state?.mode === "popover" && (
-					<SideThreadPopover
-						state={sideThread.state}
-						chatId={chatId}
-						draft={sideThread.draftFor(sideThread.state.threadId)}
-						readDraft={sideThread.draftFor.bind(null, sideThread.state.threadId)}
-						dictation={sideDictationFor(sideThread.state.threadId)}
-						onDraftChange={sideThread.saveDraft.bind(null, sideThread.state.threadId)}
-						composer={() => composerInputRef.current}
-						onAsk={(text, retry) => sideThread.ask(text, retry, sideThread.state!.threadId)}
-						onStop={sideThread.stop}
-						onExpand={sideThread.expand}
-						onFloat={sideThread.float}
-						onClose={closeSideThread}
-						onCurrentStep={goToCurrentSideStep}
-					/>
-				)}
-
 				{/* The session-scoped focuses (chrome-melt wave, 2026-09-19): mounted
 				    INSIDE the session area — absolute inset-0 siblings of the scroller,
 				    so they own the area below the drag bar, right of the sidebar, and
@@ -2277,7 +2211,7 @@ export function Chat({
 					/>
 				)}
 				{planOpen && <PlanPopup messages={messages} onClose={() => setPlanOpen(false)} />}
-				<SelectionToolbar viewport={transcriptElement} actions={selectionActions} />
+				<SelectionToolbar viewport={transcriptElement} actions={selectionActions} blocked={heldElsewhere ? HELD_TEXT.blocked : undefined} />
 				{citationEdit && (
 					<CitationCommentPopover
 						key={`${citationEdit.start}:${citationEdit.link}`}
@@ -2298,7 +2232,7 @@ export function Chat({
 			</div>
 			{/* The notes drawer: a full-height sibling of the session column, like
 			    the left sidebar. Teaching AND practice sessions (owner ruling). */}
-			{notesOpen && <NotesDrawer key={chatId} chatId={chatId} onClose={() => setNotesOpen(false)} />}
+			{notesOpen && <NotesDrawer key={chatId} chatId={chatId} onClose={() => setNotesOpen(false)} landInEditor={notesByKey} />}
 		</div>
 		</CitationActionsContext.Provider>
 		</JobsContext.Provider>

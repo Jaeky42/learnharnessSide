@@ -55,7 +55,7 @@ jobs:
           npm pkg set version="$version"
           echo "Side Tutor version $version"
       - name: Side-tutor and notes tests on Windows
-        run: npx tsx --test tests/side-tutor.test.ts tests/side-tutor-install.test.ts tests/notes-core.test.ts tests/notes-store.test.ts tests/notes-privacy.test.ts
+        run: npx tsx --test tests/side-tutor-install.test.ts tests/side-tutor-window.test.ts tests/tutor-view.test.ts tests/side-chat*.test.ts tests/notes-core.test.ts tests/notes-store.test.ts tests/notes-privacy.test.ts
         env:
           NODE_ENV: test
       - name: Cloud sync tests on Windows

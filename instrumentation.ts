@@ -7,8 +7,9 @@
  * Side-tutor fork, cloud sync Phase 1: in server mode with no password set,
  * print a fresh one-time setup code to the log (`docker compose logs lh`).
  * Phase 4: start Obsidian sync again if a vault is connected.
- * Outside server mode the fork's part does nothing. It runs after the
- * plugins, and a plugin failure never stops it.
+ * Everywhere: the old side-tutor conversation files are removed (the Tutor's
+ * conversations live in the chat record since the 0.6.0 merge).
+ * The fork's part runs after the plugins, and a plugin failure never stops it.
  */
 export async function register() {
 	if (process.env.NEXT_RUNTIME !== "nodejs") return;
@@ -18,6 +19,9 @@ export async function register() {
 	} catch (error) {
 		console.error("[plugins] Initialization failed; plugin management will report the error:", error);
 	}
+	// Side-tutor fork: the Tutor's old conversation files went with its engine.
+	const { removeOldSideTutorThreads } = await import("./src/server/side-tutor-cleanup.ts");
+	removeOldSideTutorThreads();
 	if (process.env.LH_SERVER_MODE !== "1") return;
 	const { announceSetupCode } = await import("./src/server/server-auth.ts");
 	announceSetupCode();

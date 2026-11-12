@@ -2,7 +2,9 @@
  * SIDE TUTOR WINDOW PINS (owner's asks): the open window's few words, its
  * Dictate button, and the minimized tutor, a round bubble with no words at
  * the lesson's bottom right just above the question, on a computer as on a
- * phone. fetch is scripted; no server, no microphone.
+ * phone. And its contents since upstream 0.6.0: upstream's side conversations,
+ * read through upstream's real hook (useSideThread), all in one scroll.
+ * fetch and the live channel are scripted; no server, no microphone.
  */
 
 import React, { act } from "react";
@@ -98,25 +100,81 @@ function fakeDictation(over: Partial<FakeDictation> = {}): FakeDictation {
 	};
 }
 
+type LhMessage = import("../src/core/index.ts").LhMessage;
+type SideChatThread = import("../src/core/index.ts").SideChatThread;
+type SideChatMessage = import("../src/core/index.ts").SideChatMessage;
+type TutorSide = import("../components/side-tutor.tsx").TutorSide;
+
+/** A lesson of two steps: each starts at the teacher's first message after a learner turn. */
+const LESSON = [
+	{ id: "u1", role: "user", content: "teach me eigenvalues", timestamp: 1 },
+	{ id: "a1", role: "assistant", content: [{ type: "text", text: "A few **special vectors** only get stretched. For those, $A\\mathbf{v} = \\lambda \\mathbf{v}$." }], timestamp: 2 },
+	{ id: "u2", role: "user", content: "ok", timestamp: 3 },
+	{ id: "a2", role: "assistant", content: [{ type: "text", text: "Exactly. And a negative eigenvalue flips the vector." }], timestamp: 4 },
+] as unknown as LhMessage[];
+const STEP_1 = "A few special vectors only get stretched. For those…";
+const STEP_2 = "Exactly. And a negative eigenvalue flips the vector.";
+
+const said = (id: string, role: "user" | "assistant", text: string, extra: Partial<SideChatMessage> = {}): SideChatMessage => ({ id, role, text, at: "2026-11-10T10:00:00.000Z", ...extra });
+const conversation = (step: string, messages: SideChatMessage[]): SideChatThread => ({
+	id: `side_${step}`, open: false, createdAt: `2026-11-10T10:00:0${step.slice(1)}.000Z`, messages,
+	anchor: { messageId: step, partId: `${step}-t0`, blockIndex: 0, blockText: "This teaching segment and its question." },
+});
+
+/** What the scripted server holds, and what was sent to it. */
+const server: { threads: SideChatThread[]; answering: Record<string, string>; posts: Array<Record<string, unknown>>; stops: string[]; send: ((line: object) => void) | null; end: (() => void) | null } =
+	{ threads: [], answering: {}, posts: [], stops: [], send: null, end: null };
+/** The questions asked, as text (what the older tests read). */
 const posted: string[] = [];
-async function mountTutor(dictation?: FakeDictation) {
+const ndjson = (lines: object[]) => new Response(lines.map((line) => `${JSON.stringify(line)}\n`).join(""), { status: 200 });
+
+let side: TutorSide | null = null;
+async function mountTutor(dictation?: FakeDictation, lesson: LhMessage[] = LESSON) {
 	posted.length = 0;
-	globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
-		if (init?.method === "POST") {
-			posted.push(String((JSON.parse(String(init.body)) as { question?: string }).question));
-			return new Response("", { status: 200 });
+	Object.assign(server, { posts: [], stops: [], send: null, end: null });
+	globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+		const url = String(input);
+		if (url.endsWith("/stop")) {
+			server.stops.push(url);
+			return Response.json({ ok: true });
 		}
-		return new Response(JSON.stringify({ entries: [], running: false }), { status: 200, headers: { "Content-Type": "application/json" } });
+		if (init?.method === "POST") {
+			const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+			server.posts.push(body);
+			posted.push(String(body.text));
+			// The answer is written while the test watches: lines are sent by hand.
+			const encoder = new TextEncoder();
+			const stream = new ReadableStream<Uint8Array>({
+				start(controller) {
+					server.send = (line) => controller.enqueue(encoder.encode(`${JSON.stringify(line)}\n`));
+					server.end = () => controller.close();
+				},
+			});
+			return new Response(stream, { status: 200 });
+		}
+		if (url.endsWith("/side-chats")) return Response.json({ threads: server.threads, answering: server.answering });
+		// One conversation, watched: what is saved, and nothing more to come.
+		const thread = server.threads.find((entry) => url.endsWith(`/side-chats/${entry.id}`));
+		return thread ? ndjson([{ type: "done", thread }]) : Response.json({ error: "Unknown" }, { status: 404 });
 	}) as typeof fetch;
 	const { SideTutor } = await import("../components/side-tutor.tsx");
+	const { useSideThread } = await import("../components/use-side-thread.ts");
+	const { ServerEventsProvider } = await import("../components/server-events.tsx");
+	function Lesson({ dictation, held, openRequest }: { dictation?: FakeDictation; held?: boolean; openRequest?: number }) {
+		side = useSideThread("chat_1", lesson);
+		return <SideTutor chatId="chat_1" messages={lesson} side={side} dictation={dictation} held={held} openRequest={openRequest} />;
+	}
 	const host = document.createElement("div");
 	document.body.appendChild(host);
 	const root = createRoot(host);
 	roots.push({ root, host });
-	const render = (d?: FakeDictation) => act(async () => root.render(<SideTutor chatId="chat_1" dictation={d} />));
+	const settle = () => act(async () => new Promise((r) => setTimeout(r, 20)));
+	const render = async (d?: FakeDictation, more: { held?: boolean; openRequest?: number } = {}) => {
+		await act(async () => root.render(<ServerEventsProvider connect={() => ({ close() {}, onOpen() {}, onEvent() {} })}><Lesson dictation={d} {...more} /></ServerEventsProvider>));
+		await settle();
+	};
 	await render(dictation);
-	await act(async () => new Promise((r) => setTimeout(r, 20)));
-	return Object.assign(host, { rerender: render });
+	return Object.assign(host, { rerender: render, settle });
 }
 /** Minimizes the window and returns the bubble, wherever it is drawn. */
 const minimize = async (host: HTMLElement) => {
@@ -137,7 +195,8 @@ describe("the open window", () => {
 		assert.equal((panel.textContent ?? "").trim(), "TutorStuck on a term or a step? Ask here.");
 		const box = panel.querySelector("textarea") as HTMLElement;
 		assert.equal(box.getAttribute("placeholder"), "Ask a follow-up…");
-		assert.ok(panel.querySelector("[aria-label='Clear side questions']"));
+		// Nothing can be deleted from a side conversation (owner's choice of upstream's rule).
+		assert.equal(panel.querySelector("[aria-label='Clear side questions']"), null);
 		assert.ok(panel.querySelector("[aria-label='Minimize the side tutor']"));
 	});
 
@@ -147,7 +206,10 @@ describe("the open window", () => {
 		const classes = (el: Element) => (el.getAttribute("class") ?? "").split(/\s+/);
 		const [bar, body, row] = [...panel.children];
 		assert.equal(body, panel.querySelector("[data-testid='side-tutor-body']"));
-		assert.ok(classes(body!).includes("bg-black/60"));
+		// On a dark theme: black at 60% (the owner's pick). On a light theme:
+		// the theme's background, see-through, a little darker than the bars.
+		assert.ok(classes(body!).includes("dark:bg-black/60"));
+		assert.ok(classes(body!).some((c) => c.startsWith("bg-[color-mix(") && c.includes("var(--background)") && c.includes("transparent")));
 		// The bars keep the app's background, nearly solid.
 		assert.ok(classes(bar!).includes("bg-background/95"));
 		assert.ok(classes(row!).includes("bg-background/95"));
@@ -175,6 +237,162 @@ describe("the open window", () => {
 		assert.match(styleOf(row), /--lh-tutor-hint:\s*calc\(var\(--lh-tutor-text, var\(--lh-prose-size\)\) \* 0\.875\)/);
 		assert.ok(classes(box).includes("placeholder:text-(length:--lh-tutor-hint)"));
 		assert.ok(classes(box).includes("placeholder:leading-(--lh-tutor-line)"));
+	});
+});
+
+describe("the conversations (upstream's side conversations, in the fork's window)", () => {
+	const panelOf = (host: HTMLElement) => host.querySelector("[data-testid='side-tutor']") as HTMLElement;
+	const steps = (host: HTMLElement) => [...host.querySelectorAll("[data-testid='side-tutor-step']")] as HTMLElement[];
+	const dividers = (host: HTMLElement) => [...host.querySelectorAll("[data-testid='side-tutor-divider']")].map((el) => el.textContent);
+	/** Types into the box through React's own handler (linkedom fires no input events React hears). */
+	const type = async (host: HTMLElement, text: string) => {
+		const box = host.querySelector("textarea") as HTMLTextAreaElement;
+		const props = (box as unknown as Record<string, { onChange: (event: { target: { value: string } }) => void }>)[Object.keys(box).find((key) => key.startsWith("__reactProps$"))!]!;
+		await act(async () => props.onChange({ target: { value: text } }));
+	};
+	type Mounted = Awaited<ReturnType<typeof mountTutor>>;
+	const settle = (host: Mounted) => host.settle();
+	const send = async (host: Mounted) => {
+		await act(async () => (host.querySelector("[aria-label='Ask']") as HTMLElement).click());
+		await host.settle();
+	};
+
+	it("shows every step's conversation in one scroll, in lesson order, each under its step's first words", async () => {
+		server.answering = {};
+		// Saved out of order: the window orders them by the lesson.
+		server.threads = [
+			conversation("a2", [said("q2", "user", "Why flips?"), said("r2", "assistant", "Because it is negative.")]),
+			conversation("a1", [said("q1", "user", "What is det?"), said("r1", "assistant", "The determinant.")]),
+		];
+		const host = await mountTutor();
+		assert.deepEqual(dividers(host), [STEP_1, STEP_2]);
+		assert.deepEqual(steps(host).map((step) => step.getAttribute("data-step")), ["a1", "a2"]);
+		assert.match(steps(host)[0]!.textContent ?? "", /What is det\?.*The determinant\./);
+		assert.match(steps(host)[1]!.textContent ?? "", /Why flips\?.*Because it is negative\./);
+		assert.doesNotMatch(panelOf(host).textContent ?? "", /Stuck on a term/, "the empty sentence is only for an empty window");
+		assert.equal(host.querySelector("[data-testid='side-tutor-retry']"), null);
+	});
+
+	it("a question is about the step the lesson is on: it shows at once, then the answer as it is written", async () => {
+		server.threads = [];
+		server.answering = {};
+		const host = await mountTutor();
+		await type(host, "why negative?");
+		await send(host);
+		assert.equal(server.posts.length, 1);
+		assert.equal(server.posts[0]!.text, "why negative?");
+		assert.equal((server.posts[0]!.anchor as { messageId: string }).messageId, "a2", "the current step");
+		assert.deepEqual(server.posts[0]!.quotes, []);
+		assert.deepEqual(dividers(host), [STEP_2]);
+		assert.match(steps(host)[0]!.textContent ?? "", /why negative\?/, "shown before the server has answered");
+		assert.equal((host.querySelector("textarea") as HTMLTextAreaElement).value, "", "the box is cleared once the question is accepted");
+		assert.ok(host.querySelector("[aria-label='Stop the answer']"), "Send is Stop while it answers");
+		const asked = conversation("a2", [said("q", "user", "why negative?")]);
+		await act(async () => { server.send!({ type: "thread", thread: asked }); server.send!({ type: "text", text: "It points" }); });
+		await settle(host);
+		assert.match(steps(host)[0]!.textContent ?? "", /why negative\?.*It points/);
+		assert.equal(steps(host)[0]!.textContent!.split("why negative?").length, 2, "the question isn't shown twice");
+		const done = conversation("a2", [said("q", "user", "why negative?"), said("r", "assistant", "It points the other way.")]);
+		server.threads = [done];
+		await act(async () => { server.send!({ type: "done", thread: done }); server.end!(); });
+		await settle(host);
+		assert.match(steps(host)[0]!.textContent ?? "", /It points the other way\./);
+		assert.ok(host.querySelector("[aria-label='Ask']"), "Send is back");
+	});
+
+	it("Stop asks upstream to stop the answer; a stopped answer keeps its words and says Stopped.", async () => {
+		server.threads = [conversation("a2", [said("q", "user", "show one"), said("r", "assistant", "Take A = (2 1; 1 2)", { stopped: true })])];
+		server.answering = {};
+		const host = await mountTutor();
+		assert.match(steps(host)[0]!.textContent ?? "", /Take A = \(2 1; 1 2\).*Stopped\./);
+		await type(host, "and then?");
+		await send(host);
+		await act(async () => (host.querySelector("[aria-label='Stop the answer']") as HTMLElement).click());
+		assert.equal(server.stops.length, 1);
+		assert.match(server.stops[0]!, /\/api\/chats\/chat_1\/side-chats\/side_a2\/stop$/);
+	});
+
+	it("a failed answer shows upstream's reason in the error colour, with Retry; Retry asks again in that conversation", async () => {
+		// The failed one is at an EARLIER step than the one the lesson is on.
+		server.threads = [conversation("a1", [said("q", "user", "a 3×3 one?"), said("r", "assistant", "", { error: "The side answer failed." })])];
+		server.answering = {};
+		const host = await mountTutor();
+		const reason = [...steps(host)[0]!.querySelectorAll("div")].filter((el) => el.textContent === "The side answer failed.").at(-1)!;
+		assert.match(reason.getAttribute("class") ?? "", /text-error/);
+		const retry = host.querySelector("[data-testid='side-tutor-retry']") as HTMLElement;
+		assert.equal(retry.textContent, "Retry");
+		await act(async () => retry.click());
+		await settle(host);
+		assert.equal(server.posts.length, 1);
+		assert.equal(server.posts[0]!.retry, true);
+		assert.equal(server.posts[0]!.threadId, "side_a1");
+	});
+
+	it("a highlighted passage waits above the typing box; its question joins that passage's step; ✕ drops it", async () => {
+		server.threads = [];
+		server.answering = {};
+		const host = await mountTutor();
+		const ask = async () => {
+			await act(async () => side!.open({ anchor: { kind: "composer" }, passage: { text: "only get stretched", sourceMessageId: "a1", selector: { start: 22, end: 40, prefix: "", suffix: "" } } }));
+			await host.rerender(undefined, { openRequest: 1 });
+		};
+		await ask();
+		const chip = host.querySelector("[data-testid='side-tutor-passage']") as HTMLElement;
+		assert.match(chip.textContent ?? "", /only get stretched/);
+		await act(async () => (chip.querySelector("[aria-label='Remove the passage']") as HTMLElement).click());
+		await settle(host);
+		assert.equal(host.querySelector("[data-testid='side-tutor-passage']"), null, "dropped");
+		await ask();
+		await type(host, "stretched how?");
+		await send(host);
+		assert.equal((server.posts[0]!.anchor as { messageId: string }).messageId, "a1", "the passage's step, not the current one");
+		assert.deepEqual(server.posts[0]!.quotes, ["only get stretched"]);
+		assert.equal((server.posts[0]!.quoteCitations as string[]).length, 1);
+		assert.equal(host.querySelector("[data-testid='side-tutor-passage']"), null, "the chip goes once the question is accepted");
+		assert.deepEqual(dividers(host), [STEP_1]);
+		assert.match(steps(host)[0]!.textContent ?? "", /only get stretched.*stretched how\?/, "the passage sits above the question");
+		// Answered: the next question is about the current step again.
+		const done = conversation("a1", [said("q", "user", "stretched how?", { quotes: ["only get stretched"] }), said("r", "assistant", "Scaled.")]);
+		server.threads = [done];
+		await act(async () => { server.send!({ type: "done", thread: done }); server.end!(); });
+		await settle(host);
+		await type(host, "and now?");
+		await send(host);
+		assert.equal((server.posts[1]!.anchor as { messageId: string }).messageId, "a2");
+	});
+
+	it("opens from the bubble when the lesson's Ask is used", async () => {
+		server.threads = [];
+		const host = await mountTutor();
+		await minimize(host);
+		assert.equal(host.querySelector("[data-testid='side-tutor']"), null);
+		await host.rerender(undefined, { openRequest: 1 });
+		assert.ok(host.querySelector("[data-testid='side-tutor']"));
+	});
+
+	it("an answer still being written when the page loads: a spinner in its conversation and on the bubble, and no Retry", async () => {
+		server.threads = [conversation("a1", [said("q", "user", "still there?")])];
+		server.answering = { side_a1: "So far" };
+		const host = await mountTutor();
+		assert.ok(steps(host)[0]!.querySelector("[aria-label='Answering'], [role='status']") ?? /Answering/.test(steps(host)[0]!.innerHTML), "the conversation shows it is being answered");
+		assert.equal(host.querySelector("[data-testid='side-tutor-retry']"), null);
+		assert.equal((host.querySelector("[aria-label='Ask']") as HTMLButtonElement).hasAttribute("disabled"), true, "one answer at a time");
+		// It lands: the spinner goes.
+		const done = conversation("a1", [said("q", "user", "still there?"), said("r", "assistant", "Yes.")]);
+		server.threads = [done];
+		server.answering = {};
+		await act(async () => side!.open({ anchor: { kind: "composer" }, sourceMessageId: "a1" }));
+		await settle(host);
+		assert.match(steps(host)[0]!.textContent ?? "", /Yes\./);
+	});
+
+	it("the typing box is off until the teacher has said something", async () => {
+		server.threads = [];
+		server.answering = {};
+		const host = await mountTutor(undefined, [{ id: "u1", role: "user", content: "hello", timestamp: 1 }] as unknown as LhMessage[]);
+		assert.equal((host.querySelector("textarea") as HTMLTextAreaElement).hasAttribute("disabled"), true);
+		assert.equal((host.querySelector("[aria-label='Ask']") as HTMLButtonElement).hasAttribute("disabled"), true);
+		assert.equal(panelOf(host).querySelector("p")?.textContent, "Stuck on a term or a step? Ask here.");
 	});
 });
 
@@ -324,10 +542,7 @@ describe("on a session another device holds (cloud sync)", () => {
 	it("the window closes to a greyed bubble that can't be pressed, and comes back after a take-over", async () => {
 		const host = await mountTutor();
 		assert.ok(host.querySelector("[data-testid='side-tutor']"), "open, as the learner left it");
-		const { SideTutor } = await import("../components/side-tutor.tsx");
-		const root = roots.at(-1)!.root;
-		await act(async () => root.render(<SideTutor chatId="chat_1" held />));
-		await act(async () => new Promise((r) => setTimeout(r, 20)));
+		await host.rerender(undefined, { held: true });
 		assert.equal(document.querySelector("[data-testid='side-tutor']"), null, "no window while it is held elsewhere");
 		const bubble = document.querySelector("[data-testid='side-tutor-toggle']") as HTMLElement;
 		assert.ok(bubble);
@@ -338,8 +553,7 @@ describe("on a session another device holds (cloud sync)", () => {
 		await act(async () => bubble.click());
 		assert.equal(document.querySelector("[data-testid='side-tutor']"), null, "a press does nothing");
 		// Taken over: the tutor is as the learner left it.
-		await act(async () => root.render(<SideTutor chatId="chat_1" />));
-		await act(async () => new Promise((r) => setTimeout(r, 20)));
+		await host.rerender(undefined);
 		assert.ok(document.querySelector("[data-testid='side-tutor']"));
 	});
 });

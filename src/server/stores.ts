@@ -11,14 +11,13 @@ import { graphStore } from "../store/graph.ts";
 import { sourceOrganizationStore } from "../store/source-organization.ts";
 import { jobStore } from "../store/jobs.ts";
 import { settingsStore } from "../store/settings.ts";
-import { sideTutorStore } from "../store/side-tutor.ts";
 import { themeStore } from "../store/themes.ts";
 import { resolveSettings, type EffectiveSettings } from "../core/settings-resolution.ts";
 import { syncCustomProvider } from "./custom-provider.ts";
 import { configureWorkerRequestAdmission } from "../agent/worker-request-admission.ts";
 import { holdsSession } from "./sync/engine.ts";
 import { loggedGraph } from "./sync/graph-engine.ts";
-import { guardChatStore, guardJobStore, guardSideTutorStore } from "./sync/guarded-stores.ts";
+import { guardChatStore, guardJobStore } from "./sync/guarded-stores.ts";
 /** The wired adapters. Satisfies core/graph.ts's GraphDeps structurally.
  *
  * Side-tutor fork (cloud sync Phase 5): the session stores are wrapped so a
@@ -32,7 +31,6 @@ export const stores = {
 	sourceOrganizationStore,
 	jobStore: guardJobStore(jobStore, holdsSession),
 	settingsStore,
-	sideTutorStore: guardSideTutorStore(sideTutorStore, holdsSession),
 	themeStore,
 };
 

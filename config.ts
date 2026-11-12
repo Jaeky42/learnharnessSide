@@ -32,9 +32,9 @@ export const PATHS = {
 	/** Debug artifacts (env-gated): data/debug/provider-events/<chatId>.jsonl
 	 * raw provider stream recordings (src/agent/provider-events.ts). */
 	debug: path.join(/* turbopackIgnore: true */ DATA_ROOT, "debug"),
-	/** Side-tutor threads (one JSON file per chat) — deliberately OUTSIDE
-	 *  the chat record so side questions never reach the main teacher's
-	 *  context (src/core/side-tutor.ts). */
+	/** Where the fork's Tutor kept its conversations before the 0.6.0 merge
+	 *  (they are upstream's side conversations in the chat record now). Named
+	 *  only so the folder can be removed once (server/side-tutor-cleanup.ts). */
 	sideTutor: path.join(/* turbopackIgnore: true */ DATA_ROOT, "side-tutor"),
 	/** The notes drawer's own bookkeeping — vault setting, session home
 	 *  folders, edits waiting for an unavailable vault. The notes themselves

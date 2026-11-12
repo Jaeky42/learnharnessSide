@@ -52,7 +52,6 @@ export * from "./compaction.ts";
 export { sideChats, createSideChatService, type SideChatService, type SideChatDeps, type SideStreamEvent } from "./side-chat.ts";
 export { runPiTurn, piTurnResponse, type PiTurnHandle, type PiTurnSpec } from "./pi/ui-stream.ts";
 export * from "./observability.ts";
-export { sideTutorThreadResponse, sideTutorPostResponse, clearSideTutorResponse } from "./side-tutor.ts";
 export {
 	notesTreeResponse,
 	notesActionResponse,

@@ -98,8 +98,8 @@ export * from "./coverage.ts";
 // ONE session→markdown formatter — the extractor's view and the user-facing
 // export share it. Pure, browser-safe.
 export * from "./session-markdown.ts";
-// The side tutor (side-window Q&A): contracts + the lesson snapshot. Pure.
-export * from "./side-tutor.ts";
+// The Tutor window's view of upstream's side conversations: order and step labels. Pure.
+export * from "./tutor-view.ts";
 // The notes drawer's pure logic (properties, sections, links, split plans).
 export * from "./notes.ts";
 // The Obsidian vault on the cloud server (cloud sync Phase 4): rules and wording.

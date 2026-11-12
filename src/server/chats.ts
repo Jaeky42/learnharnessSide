@@ -1,4 +1,3 @@
-import { discardSideTutor } from "./side-tutor.ts";
 import { discardSessionNotes } from "./notes.ts";
 import { abortExtraction, extractionStatuses } from "../agent/subagents/extraction.ts";
 import { isJobLive } from "../agent/subagents/aborts.ts";
@@ -163,7 +162,6 @@ function finishChatRecordDeletion(chatId: string): number {
 	if (stores.chatStore.deleteChat(chatId)) {
 		discardChatDeliveries(chatId);
 		clearTurnFailure(chatId);
-		discardSideTutor(chatId);
 		discardSessionNotes(chatId);
 		sideChats.stopAll(chatId); // a running side answer has nowhere left to land
 	}
