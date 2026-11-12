@@ -226,6 +226,13 @@
 		/* The box takes the row's free width, so the ✕ leaves room to type. */
 		flex: 1 1 0;
 	}
+	/* While the deck's rename box is open, that row's Review and + step
+	   aside so the box gets their width; the ⚙ stays (and with it the
+	   hold). They come back when the rename ends, saved or cancelled. */
+	html:not(.lh-electron) .fc-root .fc-tree-row-content:has(> .fc-tree-name > .fc-tree-rename) > .fc-button,
+	html:not(.lh-electron) .fc-root .fc-tree-row-content:has(> .fc-tree-name > .fc-tree-rename) > .fc-tree-more > .fc-button:has([data-slot="button"][aria-label="Create card"]) {
+		display: none;
+	}
 	html:not(.lh-electron) .fc-root .fc-tree-rename {
 		height: 40px;
 		padding-right: 40px;
@@ -415,10 +422,12 @@
 	html:not(.lh-electron) [data-plugin-knowledge-picker-pane] [data-chain-nav-row] button[title="Rename"] {
 		min-height: 40px;
 	}
-	/* A node's statement row carries two empty cells that only line it up
-	   with the number columns: without them the statement has the row's
-	   width instead of a third of it. */
-	html:not(.lh-electron) [data-plugin-knowledge-picker-pane] [data-testid^="prop-row-"] > span:is(.w-14, .w-20):empty {
+	/* No number columns on a phone (owner's decision: "Hide both on a
+	   phone"): "Props" and "Created", their headers and every row's cells
+	   (sources, folders, chains, and the empty ones beside a node's
+	   statement), so the names get the full width. Sorting by name stays. */
+	html:not(.lh-electron) [data-plugin-knowledge-picker-pane] :is([data-testid="sort-props"], [data-testid="sort-created"]),
+	html:not(.lh-electron) [data-plugin-knowledge-picker-pane] [data-chain-nav-row] > span:is(.w-14, .w-20) {
 		display: none;
 	}
 	html:not(.lh-electron) [data-plugin-knowledge-picker-pane] [data-chain-nav-row] :is([data-testid^="cluster-toggle-"], [data-testid^="chain-toggle-"], [data-testid^="folder-toggle-"]) {

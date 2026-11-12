@@ -47,6 +47,8 @@ const HOOKS: Record<string, { files: string[]; as?: string }> = {
 	"Deck actions": { files: ["plugins/flashcards/src/library-tree.js"], as: "'Deck'" },
 	"Proposition actions": { files: ["plugins/flashcards/src/library-tree.js"], as: "'Proposition'" },
 	"Cue actions": { files: ["plugins/flashcards/src/library-tree.js"], as: "'Cue'" },
+	// The deck row's + (hidden beside an open rename box).
+	"Create card": { files: ["plugins/flashcards/src/library-tree.js"], as: "'Create card'" },
 	" actions": { files: ["plugins/flashcards/src/library-tree.js"], as: " actions`" },
 	// The host's tree (the deck list).
 	"data-plugin-tree": { files: TREE, as: "data-plugin-tree=" }, "data-plugin-tree-row": { files: TREE },
@@ -76,7 +78,7 @@ const HOOKS: Record<string, { files: string[]; as?: string }> = {
 	"data-plugin-knowledge-picker-pane": { files: ["components/plugin-knowledge-picker.tsx"] },
 	"data-chain-nav-row": { files: PICKER }, "data-source-icon": { files: PICKER },
 	"chain-table-search": { files: PICKER }, "add-source-folder": { files: PICKER }, "chain-table-close": { files: PICKER },
-	"chain-selection-bar": { files: PICKER }, "sort-": { files: PICKER, as: 'data-testid="sort-' },
+	"chain-selection-bar": { files: PICKER }, "sort-": { files: PICKER, as: 'data-testid="sort-' }, "sort-props": { files: PICKER }, "sort-created": { files: PICKER },
 	"cluster-toggle-": { files: PICKER }, "chain-toggle-": { files: PICKER }, "folder-toggle-": { files: PICKER },
 	"cluster-thread-": { files: PICKER }, "chain-thread-": { files: PICKER }, "prop-row-": { files: PICKER },
 	"Rename": { files: PICKER, as: 'title="Rename"' },
