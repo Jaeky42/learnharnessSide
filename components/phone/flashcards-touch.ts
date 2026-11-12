@@ -1,6 +1,6 @@
 /**
  * FLASHCARDS ON A PHONE: the touch behaviour CSS can't give
- * (docs/phone-plugins-plan.md, decisions 5b and 5c and "The keyboard").
+ * (docs/phone-plugins-plan.md, decisions 4b, 5b and 5c and "The keyboard").
  * The look is app/phone-flashcards.css. Nothing here edits the plugin's
  * files: it works on the page the plugin and the host render.
  *
@@ -10,17 +10,35 @@
  *     a contextmenu event on the row, and lifting the finger afterwards sends
  *     no tap (the card doesn't open, a rename doesn't start). The contextmenu
  *     is answered here by pressing the row's ⚙. No dragging.
+ *     A row whose rename box is open is NOT marked: holding a finger in a
+ *     text box is how an iPhone moves the caret, and the ✕ beside it is a
+ *     plain button. The mark comes back when the rename ends.
  *   - THE RENAME ✕: while a deck's rename box is open, a small ✕ sits at its
  *     end (label "Cancel"). A tap sends the box the plugin's own Esc, which
  *     cancels and keeps the old name. The press doesn't take the focus, so
- *     the box isn't blurred first (a blur saves); should a browser blur it
- *     anyway, that blur is held back while the ✕ is pressed. Enter still saves.
+ *     the box isn't blurred first (a blur saves). Should a browser blur it
+ *     anyway, that blur is held back only for the ✕'s own tap: from its
+ *     press to the click that follows. A press that ends any other way (the
+ *     finger slid off, a scroll, a new touch elsewhere, or no click within
+ *     TAP_SETTLE_MS of the lift) gives the plugin its blur back, so the box
+ *     saves as it would have. Enter still saves.
+ *   - LOADING BETWEEN CARDS: while the review waits for the next card the
+ *     plugin hides the card and shows only "Loading next card…". The stage
+ *     is then marked data-phone-review="loading", so the phone layout (the
+ *     buttons' band at the bottom) stays put instead of falling back to the
+ *     centred end-state layout for that moment. The true end states have
+ *     other words and keep upstream's layout.
  *   - THE KEYBOARD: a text box focused in the plugin's screens (the rename
  *     box, the search box, a card's Question and Answer in its boxes, the
  *     fields of Settings → Flashcards) is scrolled into the visible part,
  *     above the keyboard, when it is focused and whenever the visible height
  *     changes while it has focus. The app is already as tall as the visible
  *     part (--lh-vvh, phone-viewport.tsx); this moves the box inside it.
+ *
+ * Cost: on pages without the plugin the only work is a look at each node a
+ * mutation adds, for a plugin root. Each mounted root (.fc-root) gets its
+ * own observer, and the page-wide clean-up runs only after this file has
+ * marked something.
  *
  * Phone layout only (isPhoneNow): off it, nothing is marked, no ✕ is added
  * and no event is answered. Installed once by phone-runtime.tsx.
@@ -45,6 +63,12 @@ export const PRESS_MARK = "flashcards";
 export const RENAME_CANCEL = "flashcards-rename-cancel";
 /** The ✕'s hidden label, for screen readers (plan: for the owner to review). */
 export const RENAME_CANCEL_LABEL = "Cancel";
+/** The review stage, and the plugin's words while it waits for a card
+ *  (plugins/flashcards/src/review.js). */
+export const REVIEW_STAGE = ".fc-review-stage";
+export const LOADING_TEXT = "Loading next card…";
+/** How long after the ✕'s lift its click may still come. */
+export const TAP_SETTLE_MS = 400;
 
 /** The row's own ⚙ (never one of a nested row). */
 export function rowMenuButton(row: Element): HTMLElement | null {
@@ -52,6 +76,22 @@ export function rowMenuButton(row: Element): HTMLElement | null {
 		if (button.closest("[data-plugin-tree-row]") === row) return button;
 	}
 	return null;
+}
+
+/** Pure rule, exported for tests: a row takes the hold when it has its own
+ *  ⚙ and no rename box is open in it. */
+export function rowTakesHold(row: Element): boolean {
+	return !!rowMenuButton(row) && !row.querySelector(RENAME_INPUT);
+}
+
+/** Pure rule, exported for tests: is this stage waiting for the next card
+ *  (card hidden, the footer holding only the plugin's loading line)? */
+export function reviewLoading(stage: Element): boolean {
+	const card = stage.querySelector(":scope > .fc-review-card");
+	const footer = stage.querySelector(":scope > .fc-review-footer");
+	if (!card || !card.hasAttribute("hidden") || !footer || footer.children.length !== 1) return false;
+	const line = footer.firstElementChild!;
+	return line.matches("p.fc-review-meta") && line.textContent?.trim() === LOADING_TEXT;
 }
 
 function cancelButton(doc: Document): HTMLButtonElement {
@@ -64,25 +104,41 @@ function cancelButton(doc: Document): HTMLButtonElement {
 	return button;
 }
 
-/** Brings the page in line with the rule: rows with a ⚙ are marked for the
- *  hold, an open rename box has its ✕, nothing else carries either. With
- *  phone false everything this file added is taken away. Idempotent. */
-export function syncFlashcardsTouch(doc: Document, phone: boolean): void {
-	for (const row of doc.querySelectorAll(`[data-phone-press="${PRESS_MARK}"]`)) {
-		if (!phone || !row.matches(FLASHCARDS_ROW) || !rowMenuButton(row)) row.removeAttribute("data-phone-press");
+/** Brings one plugin root (or a whole document) in line with the rule: rows
+ *  that take the hold are marked, an open rename box has its ✕, a stage
+ *  waiting for a card is marked loading, nothing else carries any of these.
+ *  With phone false everything this file added in the scope is taken away.
+ *  Idempotent. Returns whether anything of this file's is left in scope. */
+export function syncFlashcardsTouch(scope: ParentNode, phone: boolean): boolean {
+	const doc = (scope as Node).ownerDocument ?? (scope as Document);
+	let left = false;
+	for (const row of scope.querySelectorAll(`[data-phone-press="${PRESS_MARK}"]`)) {
+		if (!phone || !row.matches(FLASHCARDS_ROW) || !rowTakesHold(row)) row.removeAttribute("data-phone-press");
 	}
-	for (const button of doc.querySelectorAll(`[data-phone="${RENAME_CANCEL}"]`)) {
+	for (const button of scope.querySelectorAll(`[data-phone="${RENAME_CANCEL}"]`)) {
 		const input = button.previousElementSibling;
 		if (!phone || !input?.matches(RENAME_INPUT) || !input.closest(FLASHCARDS_ROOT)) button.remove();
 	}
-	if (!phone || !doc.querySelector(FLASHCARDS_ROOT)) return;
-	for (const row of doc.querySelectorAll(FLASHCARDS_ROW)) {
-		if (!row.hasAttribute("data-phone-press") && rowMenuButton(row)) row.setAttribute("data-phone-press", PRESS_MARK);
+	for (const stage of scope.querySelectorAll(`${REVIEW_STAGE}[data-phone-review]`)) {
+		if (!phone || !reviewLoading(stage)) stage.removeAttribute("data-phone-review");
 	}
-	for (const input of doc.querySelectorAll(`${FLASHCARDS_ROOT} ${RENAME_INPUT}`)) {
+	if (!phone) return false;
+	for (const row of scope.querySelectorAll(FLASHCARDS_ROW)) {
+		if (row.hasAttribute("data-phone-press") || !rowTakesHold(row)) continue;
+		row.setAttribute("data-phone-press", PRESS_MARK);
+		left = true;
+	}
+	for (const input of scope.querySelectorAll(`${FLASHCARDS_ROOT} ${RENAME_INPUT}`)) {
+		left = true;
 		if (input.nextElementSibling?.matches(`[data-phone="${RENAME_CANCEL}"]`)) continue;
 		input.after(cancelButton(doc));
 	}
+	for (const stage of scope.querySelectorAll(REVIEW_STAGE)) {
+		if (!reviewLoading(stage)) continue;
+		stage.setAttribute("data-phone-review", "loading");
+		left = true;
+	}
+	return left || !!scope.querySelector(`[data-phone-press="${PRESS_MARK}"]`);
 }
 
 /** Pure rule, exported for tests: how far to scroll (positive: down) so a
@@ -124,18 +180,51 @@ export function revealInVisiblePart(el: HTMLElement, doc: Document = el.ownerDoc
 export function installFlashcardsTouch(doc: Document = document): () => void {
 	const view = doc.defaultView;
 	if (!view) return () => {};
-	let observer: MutationObserver | null = null;
-	const sync = () => syncFlashcardsTouch(doc, isPhoneNow());
-	const watch = () => {
-		const phone = isPhoneNow();
-		if (phone && !observer && typeof view.MutationObserver === "function") {
-			observer = new view.MutationObserver(sync);
-			observer.observe(doc.body, { childList: true, subtree: true });
-		} else if (!phone && observer) {
-			observer.disconnect();
-			observer = null;
+
+	// Each mounted plugin root has its own observer; the page's observer
+	// only looks at added nodes for a root.
+	const roots = new Map<Element, MutationObserver | null>();
+	let marked = false;
+	let pageObserver: MutationObserver | null = null;
+	const syncRoot = (root: Element) => { if (syncFlashcardsTouch(root, true)) marked = true; };
+	const attach = (root: Element) => {
+		if (roots.has(root)) return;
+		let observer: MutationObserver | null = null;
+		if (typeof view.MutationObserver === "function") {
+			observer = new view.MutationObserver(() => syncRoot(root));
+			observer.observe(root, { childList: true, subtree: true });
 		}
-		sync();
+		roots.set(root, observer);
+		syncRoot(root);
+	};
+	const detachGone = () => {
+		for (const [root, observer] of roots) if (!root.isConnected) { observer?.disconnect(); roots.delete(root); }
+	};
+	const onPageMutations = (records: MutationRecord[]) => {
+		for (const record of records) {
+			for (const node of record.addedNodes) {
+				if (node.nodeType !== 1) continue;
+				const el = node as Element;
+				if (el.matches(FLASHCARDS_ROOT)) attach(el);
+				else if (el.firstElementChild) for (const root of el.querySelectorAll(FLASHCARDS_ROOT)) attach(root);
+			}
+			if (record.removedNodes.length && roots.size) detachGone();
+		}
+	};
+	const stop = () => {
+		pageObserver?.disconnect();
+		pageObserver = null;
+		for (const observer of roots.values()) observer?.disconnect();
+		roots.clear();
+		if (marked) { syncFlashcardsTouch(doc, false); marked = false; }
+	};
+	const watch = () => {
+		if (!isPhoneNow()) { stop(); return; }
+		if (!pageObserver && typeof view.MutationObserver === "function") {
+			pageObserver = new view.MutationObserver(onPageMutations);
+			pageObserver.observe(doc.body, { childList: true, subtree: true });
+		}
+		for (const root of doc.querySelectorAll(FLASHCARDS_ROOT)) attach(root);
 	};
 	const query = typeof view.matchMedia === "function" ? view.matchMedia(PHONE_QUERY) : null;
 	query?.addEventListener("change", watch);
@@ -146,7 +235,7 @@ export function installFlashcardsTouch(doc: Document = document): () => void {
 	const onContextMenu = (e: Event) => {
 		if (!isPhoneNow()) return;
 		const row = (e.target as Element | null)?.closest?.(`[data-phone-press="${PRESS_MARK}"]`);
-		if (!row) return;
+		if (!row || !rowTakesHold(row)) return;
 		const button = rowMenuButton(row);
 		if (!button) return;
 		e.preventDefault();
@@ -155,44 +244,63 @@ export function installFlashcardsTouch(doc: Document = document): () => void {
 		button.dispatchEvent(new view.MouseEvent("click", { bubbles: true, cancelable: true }));
 	};
 
-	// The rename ✕.
+	// The rename ✕. `pressed` lives from the ✕'s press to its click; any
+	// other end of the press settles it (and returns a held-back blur).
 	let pressed: HTMLInputElement | null = null;
 	let heldBlur = false;
+	let settleTimer = 0;
 	const renameInputOf = (target: EventTarget | null) => {
 		const button = (target as Element | null)?.closest?.(`[data-phone="${RENAME_CANCEL}"]`);
 		const input = button?.previousElementSibling;
 		return input instanceof view.HTMLInputElement && input.matches(RENAME_INPUT) ? input : null;
 	};
-	const onPress = (e: Event) => {
-		const input = renameInputOf(e.target);
-		if (!input) return;
+	const settle = () => {
+		view.clearTimeout(settleTimer);
+		const input = pressed;
+		const blurred = heldBlur;
+		pressed = null;
+		heldBlur = false;
+		// The blur that was held back is the plugin's to see after all, so it
+		// saves as it would have.
+		if (input && blurred && input.isConnected && doc.activeElement !== input) input.dispatchEvent(new view.FocusEvent("blur"));
+	};
+	const onPointerDown = (e: Event) => {
+		const input = isPhoneNow() ? renameInputOf(e.target) : null;
+		if (!input) {
+			// A new touch anywhere else ends a press that never got its click.
+			if (pressed) settle();
+			return;
+		}
 		// Keep the focus in the box: a blur would save the new name.
 		e.preventDefault();
-		if (e.type === "pointerdown" || e.type === "touchstart") { pressed = input; heldBlur = false; }
+		settle();
+		pressed = input;
+	};
+	const onMouseDown = (e: Event) => {
+		if (isPhoneNow() && renameInputOf(e.target)) e.preventDefault();
+	};
+	const onPointerUp = (e: Event) => {
+		if (!pressed) return;
+		view.clearTimeout(settleTimer);
+		// Lifted off the ✕ (slid away): no tap of the ✕ is coming.
+		if (renameInputOf(e.target) !== pressed && renameInputOf(doc.elementFromPoint?.((e as PointerEvent).clientX, (e as PointerEvent).clientY) ?? null) !== pressed) { settle(); return; }
+		settleTimer = view.setTimeout(settle, TAP_SETTLE_MS);
 	};
 	const onBlur = (e: Event) => {
 		if (pressed && e.target === pressed) { heldBlur = true; e.stopImmediatePropagation(); }
 	};
 	const onClick = (e: Event) => {
 		const input = renameInputOf(e.target);
+		view.clearTimeout(settleTimer);
 		pressed = null;
 		heldBlur = false;
-		// A tap the hold swallowed (long-press.ts, on the same document, runs
-		// first): the finger held the row, it didn't tap the ✕.
+		// A tap another handler already took (long-press.ts swallows the tap
+		// after a hold) is not the ✕'s.
 		if (!input || !isPhoneNow() || e.defaultPrevented) return;
 		e.preventDefault();
 		e.stopPropagation();
 		// The plugin's own Esc: cancel, keep the old name.
 		input.dispatchEvent(new view.KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true, cancelable: true }));
-	};
-	const onCancelPress = () => {
-		const input = pressed;
-		const blurred = heldBlur;
-		pressed = null;
-		heldBlur = false;
-		// The finger moved away (a scroll): the blur that was held back is
-		// the plugin's to see after all, so it saves as it would have.
-		if (input && blurred && input.isConnected && doc.activeElement !== input) input.dispatchEvent(new view.FocusEvent("blur"));
 	};
 
 	// The keyboard: a focused box into the visible part.
@@ -213,25 +321,26 @@ export function installFlashcardsTouch(doc: Document = document): () => void {
 
 	const capture = { capture: true } as const;
 	doc.addEventListener("contextmenu", onContextMenu);
-	doc.addEventListener("pointerdown", onPress, capture);
-	doc.addEventListener("mousedown", onPress, capture);
+	doc.addEventListener("pointerdown", onPointerDown, capture);
+	doc.addEventListener("mousedown", onMouseDown, capture);
+	doc.addEventListener("pointerup", onPointerUp, capture);
+	doc.addEventListener("pointercancel", settle, capture);
 	doc.addEventListener("blur", onBlur, capture);
 	doc.addEventListener("click", onClick, capture);
-	doc.addEventListener("pointercancel", onCancelPress, capture);
 	doc.addEventListener("focusin", onFocusIn);
 	view.visualViewport?.addEventListener("resize", onViewport);
 	return () => {
 		query?.removeEventListener("change", watch);
-		observer?.disconnect();
-		observer = null;
-		syncFlashcardsTouch(doc, false);
+		stop();
+		view.clearTimeout(settleTimer);
 		view.cancelAnimationFrame(frame);
 		doc.removeEventListener("contextmenu", onContextMenu);
-		doc.removeEventListener("pointerdown", onPress, capture);
-		doc.removeEventListener("mousedown", onPress, capture);
+		doc.removeEventListener("pointerdown", onPointerDown, capture);
+		doc.removeEventListener("mousedown", onMouseDown, capture);
+		doc.removeEventListener("pointerup", onPointerUp, capture);
+		doc.removeEventListener("pointercancel", settle, capture);
 		doc.removeEventListener("blur", onBlur, capture);
 		doc.removeEventListener("click", onClick, capture);
-		doc.removeEventListener("pointercancel", onCancelPress, capture);
 		doc.removeEventListener("focusin", onFocusIn);
 		view.visualViewport?.removeEventListener("resize", onViewport);
 	};

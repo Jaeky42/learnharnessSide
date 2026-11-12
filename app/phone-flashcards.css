@@ -26,15 +26,20 @@
    middle of the space above the buttons (two flexible spacers), and the
    footer with Reveal answer, Next or the four ratings is pinned to the
    bottom (sticky), clear of the home bar. A longer card scrolls in that
-   space while the buttons stay in view. The end states ("No cards due in
-   this selection.", "Practice complete.", the loading line, an error with
-   Retry) have no card and keep upstream's layout. */
+   space while the buttons stay in view.
+   Between two cards the plugin hides the card while it waits for the next
+   one ("Loading next card…"); flashcards-touch.ts marks that moment
+   data-phone-review="loading", and the layout stays: the loading line sits
+   where the ratings were, in a band of their height. The end states ("No
+   cards due in this selection.", "No cards ready. Next due …", "Practice
+   complete.", an error with Retry) have no card and keep upstream's
+   layout. */
 @media (max-width: 639.98px) {
-	html:not(.lh-electron) .fc-root.fc-review-surface:has(> .fc-review-stage > .fc-review-card:not([hidden])) {
+	html:not(.lh-electron) .fc-root.fc-review-surface:is(:has(> .fc-review-stage > .fc-review-card:not([hidden])), :has(> .fc-review-stage[data-phone-review="loading"])) {
 		overflow: hidden;
 		padding: 44px 0 0;
 	}
-	html:not(.lh-electron) .fc-root .fc-review-stage:has(> .fc-review-card:not([hidden])) {
+	html:not(.lh-electron) .fc-root .fc-review-stage:is(:has(> .fc-review-card:not([hidden])), [data-phone-review="loading"]) {
 		display: flex;
 		flex-direction: column;
 		flex: 1 1 0;
@@ -46,22 +51,22 @@
 		overflow-y: auto;
 		overscroll-behavior-y: contain;
 	}
-	html:not(.lh-electron) .fc-root .fc-review-stage:has(> .fc-review-card:not([hidden]))::before,
-	html:not(.lh-electron) .fc-root .fc-review-stage:has(> .fc-review-card:not([hidden]))::after {
+	html:not(.lh-electron) .fc-root .fc-review-stage:is(:has(> .fc-review-card:not([hidden])), [data-phone-review="loading"])::before,
+	html:not(.lh-electron) .fc-root .fc-review-stage:is(:has(> .fc-review-card:not([hidden])), [data-phone-review="loading"])::after {
 		content: "";
 		flex: 1 0 0;
 	}
-	html:not(.lh-electron) .fc-root .fc-review-stage:has(> .fc-review-card:not([hidden]))::after {
+	html:not(.lh-electron) .fc-root .fc-review-stage:is(:has(> .fc-review-card:not([hidden])), [data-phone-review="loading"])::after {
 		order: 1;
 	}
-	html:not(.lh-electron) .fc-root .fc-review-stage:has(> .fc-review-card:not([hidden])) > .fc-review-card {
+	html:not(.lh-electron) .fc-root .fc-review-stage:is(:has(> .fc-review-card:not([hidden])), [data-phone-review="loading"]) > .fc-review-card {
 		flex: none;
 	}
-	html:not(.lh-electron) .fc-root .fc-review-stage:has(> .fc-review-card:not([hidden])) > .fc-review-bottom {
+	html:not(.lh-electron) .fc-root .fc-review-stage:is(:has(> .fc-review-card:not([hidden])), [data-phone-review="loading"]) > .fc-review-bottom {
 		flex: none;
 		margin-bottom: 8px;
 	}
-	html:not(.lh-electron) .fc-root .fc-review-stage:has(> .fc-review-card:not([hidden])) > .fc-review-footer {
+	html:not(.lh-electron) .fc-root .fc-review-stage:is(:has(> .fc-review-card:not([hidden])), [data-phone-review="loading"]) > .fc-review-footer {
 		order: 2;
 		flex: none;
 		position: sticky;
@@ -73,6 +78,11 @@
 		padding: 12px 12px max(20px, calc(env(safe-area-inset-bottom, 0px) + 8px));
 		border-top: 1px solid var(--border);
 		background: var(--background);
+	}
+	/* The loading line, in a band as tall as the four ratings. */
+	html:not(.lh-electron) .fc-root .fc-review-stage[data-phone-review="loading"] > .fc-review-footer {
+		justify-content: center;
+		min-height: calc(4 * 44px + 3 * 8px + 12px + max(20px, calc(env(safe-area-inset-bottom, 0px) + 8px)) + 1px);
 	}
 	/* Practice: the note under the stage takes the home bar's clearance. */
 	html:not(.lh-electron) .fc-root.fc-practice-surface:has(> .fc-review-stage > .fc-review-card:not([hidden])) > .fc-review-stage > .fc-review-footer {
@@ -236,6 +246,11 @@
 	html:not(.lh-electron) .fc-root .fc-tree-rename {
 		height: 40px;
 		padding-right: 40px;
+		/* A text box selects text and places the caret, whatever the row
+		   around it says (a held row is unselectable). */
+		-webkit-user-select: text;
+		user-select: text;
+		-webkit-touch-callout: default;
 	}
 	html:not(.lh-electron) .fc-root [data-phone="flashcards-rename-cancel"] {
 		position: absolute;

@@ -97,7 +97,7 @@ const HOOKS: Record<string, { files: string[]; as?: string }> = {
 };
 /** Hooks that are KaTeX's (math in the cards), the fork's own, or a
  *  plain element or ARIA role, not upstream's markup. */
-const NOT_UPSTREAM = new Set(["lh-electron", "katex", "katex-display", "flashcards-rename-cancel", "aria-label", "data-testid", "role", "menu", "menuitem", "title", "type", "checkbox", "hidden"]);
+const NOT_UPSTREAM = new Set(["lh-electron", "katex", "katex-display", "flashcards-rename-cancel", "data-phone-review", "loading", "aria-label", "data-testid", "role", "menu", "menuitem", "title", "type", "checkbox", "hidden"]);
 
 /** The class names, attribute names and quoted attribute values in the stylesheet. */
 function cssHooks(css: string): Set<string> {
@@ -151,6 +151,8 @@ describe("the guard: what the phone rules hang on still exists upstream", () => 
 		assert.match(tree, /addEventListener\('blur'/);
 		// The ⚙ opens the row's menu with ctx.ui.openMenu on click.
 		assert.match(tree, /ctx\.ui\.openMenu\(more/);
+		// The loading line the helper tells apart from the end states.
+		assert.ok(read("plugins/flashcards/src/review.js").includes(`"${touch.LOADING_TEXT}"`));
 	});
 
 	it("the stylesheet is loaded by the root layout", () => {
@@ -208,7 +210,7 @@ Object.assign(win, {
 Object.assign(globalThis, { window: dom.window, document, CustomEvent: dom.window.CustomEvent, MouseEvent: FakeMouseEvent });
 
 const { HOLD_MS, installLongPress } = await import("../components/phone/long-press.ts");
-const { installFlashcardsTouch, PRESS_MARK, RENAME_CANCEL, RENAME_CANCEL_LABEL, rowMenuButton, scrollDelta, syncFlashcardsTouch } = await import("../components/phone/flashcards-touch.ts");
+const { installFlashcardsTouch, PRESS_MARK, RENAME_CANCEL, RENAME_CANCEL_LABEL, rowMenuButton, rowTakesHold, scrollDelta, syncFlashcardsTouch, TAP_SETTLE_MS } = await import("../components/phone/flashcards-touch.ts");
 
 const el = (id: string) => document.getElementById(id)!;
 function pointer(type: string, target: Element, over: Record<string, unknown> = {}) {
@@ -233,6 +235,7 @@ beforeEach(() => {
 	phone = true;
 	clicks.length = 0;
 	mock.timers.enable({ apis: ["setTimeout"] });
+	Object.assign(win, { setTimeout: globalThis.setTimeout, clearTimeout: globalThis.clearTimeout });
 	const offHold = installLongPress(document as unknown as Document);
 	const offTouch = installFlashcardsTouch(document as unknown as Document);
 	uninstall = () => { offTouch(); offHold(); };
@@ -344,13 +347,36 @@ describe("the rename ✕ (decision 5c)", () => {
 		assert.equal(plugin.blurs, 0, "no save");
 	});
 
-	it("a hold on the ✕ is the row's hold, not a cancel", () => {
-		pointer("pointerdown", cancel());
-		mock.timers.tick(HOLD_MS);
-		assert.deepEqual(clicks, ["deck-gear"]);
-		pointer("pointerup", cancel());
-		plain("click", cancel());
+	it("while the box is open the row takes no hold: not on the ✕, not in the box (an iPhone moves the caret that way)", () => {
+		assert.equal(el("deck").hasAttribute("data-phone-press"), false, "unmarked while renaming");
+		assert.equal(rowTakesHold(el("deck")), false);
+		for (const target of [cancel(), input as unknown as Element]) {
+			pointer("pointerdown", target);
+			mock.timers.tick(HOLD_MS * 2);
+			pointer("pointerup", target);
+		}
+		assert.deepEqual(clicks, [], "no menu");
+		assert.equal(plugin.blurs, 0);
 		assert.equal(plugin.escapes, 0);
+		input.remove();
+		syncFlashcardsTouch(document as unknown as Document, true);
+		assert.equal(el("deck").getAttribute("data-phone-press"), PRESS_MARK, "the mark comes back when the rename ends");
+		el("deck-name").prepend(input);
+		syncFlashcardsTouch(document as unknown as Document, true);
+	});
+
+	it("a press of the ✕ that gets no click settles: on a touch elsewhere, and after the lift", () => {
+		// Touch elsewhere: the next pointerdown ends the press.
+		pointer("pointerdown", cancel());
+		pointer("pointerdown", el("deck-check"));
+		plain("click", el("deck-check"));
+		assert.equal(plugin.escapes, 0);
+		// After the lift: TAP_SETTLE_MS later the press is over.
+		pointer("pointerdown", cancel());
+		pointer("pointerup", cancel());
+		mock.timers.tick(TAP_SETTLE_MS);
+		assert.equal(plugin.escapes, 0);
+		assert.equal(plugin.blurs, 0, "nothing was held back, nothing given back");
 	});
 
 	it("isn't there off the phone layout", () => {
