@@ -1,6 +1,6 @@
 # Plan: Flashcards and Rich code blocks on a phone, and Flashcards sync
 
-**Status: approved by the owner ("Approved, build it"). Built on `claude/upstream-0.6.0` (packages A–E; "Where they stand" under "Work packages"); not shipped:** not pushed to `side-tutor` or to the server's branch (the branch contains `side-tutor`'s `a5d3284`, so shipping is a fast-forward of both), both workflow dry runs started and not yet in, the owner's iPhone hasn't seen it, and a second pass of the sync review, over its fixes, is under way. Per `AGENTS.md`, building is mechanical: anything this plan leaves open goes back to the owner. Change a decision here only with the owner's approval. What was built is recorded in `docs/cloud-sync.md`; see "What happened after approval" at the end.
+**Status: approved by the owner ("Approved, build it"). Built on `claude/upstream-0.6.0` (packages A–E; "Where they stand" under "Work packages"); shipped:** the same commit is on `side-tutor` and on the server's branch (both fast-forwards), after both workflow dry runs passed and three passes of the sync review. The owner hasn't updated the server or the PC yet, and the owner's iPhone hasn't seen it. Per `AGENTS.md`, building is mechanical: anything this plan leaves open goes back to the owner. Change a decision here only with the owner's approval. What was built is recorded in `docs/cloud-sync.md`; see "What happened after approval" at the end.
 
 ## What the owner asked
 
@@ -101,7 +101,7 @@ One worker per package, each owning its files, each in its own worktree. Workers
 **Where they stand:**
 
 - **A–E: done**, built on `claude/upstream-0.6.0`.
-- **F: done**: a fresh reviewer read the phone diff, and its findings are fixed. The sync part was reviewed too: six serious findings and lower ones, all fixed. A second pass by the same reviewer, over the fixes, is under way.
+- **F: done**: a fresh reviewer read the phone diff, and its findings are fixed. The sync part was reviewed too, in three passes: six serious findings and lower ones, then six more, then one narrow gap, all fixed.
 - **G:** done: the tests, typecheck and lint, the browser run at iPhone size with every screen shot again, Flashcards with the stand-in provider, the computer comparison, the run between two built copies, and the docs (`docs/cloud-sync.md`, `docs/upstream-0.6.0.md`, `CLAUDE.md`). Both workflow dry runs are started and not yet in. Still to come: the "what to try on your iPhone" page.
 
 | # | Package | Owns | After |
@@ -159,7 +159,7 @@ Three answers given after the plan was approved:
 ### Reviews, and what the runs found
 
 - **Package F, the phone part:** a fresh reviewer read the phone diff and found two real bugs (the rename box stuck open after a hold on, or a slide off, its ✕; a hold inside the rename box opening the menu and saving) and smaller items. All are fixed.
-- **The sync part:** the reviewer found six serious issues, each reproduced by a script, and all were fixed before anything shipped: a first-sync backup put back deleted cards everywhere; a fact deleted and generated again before a device's first sync was rebuilt from its old reviews; a library that can't be read made the PC download everything and the server back up every round; seconds-long stalls of the server with a 25 MB library; the server timed its own changes when a PC next asked; two PCs whose first exchanges overlapped were both "first". Lower ones were fixed too. The fixes and three rulings made with them (for the owner's review) are in "Flashcards sync" in `docs/cloud-sync.md`. A second pass by the same reviewer, over the fixes, is under way.
+- **The sync part:** the reviewer found six serious issues, each reproduced by a script, and all were fixed before anything shipped: a first-sync backup put back deleted cards everywhere; a fact deleted and generated again before a device's first sync was rebuilt from its old reviews; a library that can't be read made the PC download everything and the server back up every round; seconds-long stalls of the server with a 25 MB library; the server timed its own changes when a PC next asked; two PCs whose first exchanges overlapped were both "first". Lower ones were fixed too. The fixes and three rulings made with them (for the owner's review) are in "Flashcards sync" in `docs/cloud-sync.md`. A second pass found six more and a third one narrow gap; all are fixed, and the reviewer's last word was to ship.
 - **Found in the run between two built copies:** a review the server made while it still ran in the zone it was started with kept that zone's due date there, while the PC worked it out in its own zone. Now each side works every schedule out again when the zone changes (a ruling for the owner's review; "Flashcards sync" in `docs/cloud-sync.md`).
 
 ### Where the built facts live

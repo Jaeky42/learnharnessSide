@@ -55,7 +55,7 @@ Graph extraction, research, compaction and visuals run on **whichever device hol
 | `notes/sessions/<chatId>.json` | Small JSON | Follows the chat's lease |
 | `graph/*.jsonl` | Mostly appends, with some rewrites (see below) | Appends as lines; rewrites as replayed operations |
 | `sources.json`, positions, `settings.json` | Read-modify-write maps | Last writer wins per key; device-specific keys excluded |
-| `core-plugin-data/flashcards/flashcards.json` (Flashcards' library; since Flashcards sync, built and not shipped) | Whole-file rewrite by the plugin | Item by item, latest change wins per item; schedules never travel and are worked out again from the combined reviews (see "Flashcards sync") |
+| `core-plugin-data/flashcards/flashcards.json` (Flashcards' library; since Flashcards sync) | Whole-file rewrite by the plugin | Item by item, latest change wins per item; schedules never travel and are worked out again from the combined reviews (see "Flashcards sync") |
 | The other plugins' data, which plugins are on, Flashcards' model choice and its uploaded files' text | Per device | Never synced |
 | `notes/settings.json` (vault path), `notes/pending/` | Per device | Never synced |
 | `obsidian-sync.json` (the server's Obsidian sync record) | Per device | Never synced |
@@ -343,7 +343,7 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 
 #### Plugins on a phone: Flashcards and Rich code blocks (built after the upstream 0.6.0 merge)
 
-- **State:** built on `claude/upstream-0.6.0`, together with Flashcards sync ("Flashcards sync" under "Handoff"). **Not shipped;** where it stands is "After the merge (read this first)" under "Handoff".
+- **State:** built on `claude/upstream-0.6.0`, together with Flashcards sync ("Flashcards sync" under "Handoff"), and **shipped** to both branches; where it stands is "After the merge (read this first)" under "Handoff".
 - **The plan** is `docs/phone-plugins-plan.md`: the owner's decisions (numbered 1–11 there) and the smaller rules, approved by the owner ("Approved, build it"). This part records what was built for each. Change a decision only with the owner's approval.
 - It replaces the 0.6.0 merge's "under 640 px no plugin is offered" (decision 10 in `docs/upstream-0.6.0.md`) for these two plugins only.
 
@@ -507,9 +507,11 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 ### After the merge (read this first)
 
 - **Upstream 0.6.0 is merged and shipped** to both branches, at the same commit. It raises the sync protocol to 2, so the server and the desktop app must both be updated or sync pauses (nothing is discarded while paused). What changed in sync, the gate, the phone layout and the screens is in `docs/upstream-0.6.0.md`. Where this file and that one differ, that one is newer.
-- **The phone plugins round is built, not shipped** (on `claude/upstream-0.6.0`): Flashcards and Rich code blocks on a phone ("Plugins on a phone" under "Phone layouts") and Flashcards sync ("Flashcards sync" below). It raises the sync protocol to 3, so the same rule applies again: the server and the desktop app must both be updated, the server first.
-  - **Where it stands:** not pushed to `side-tutor` or to the server's branch. The branch contains `side-tutor`'s `a5d3284` (the three iPad fixes, merged in), so shipping is a fast-forward of both branches. Both workflows were started by hand as dry runs on this branch (they publish nothing); their results aren't in yet. The owner's iPhone hasn't seen it, and the "what to try on your iPhone" page is still to come.
-  - **Reviews:** the sync part was reviewed; its six serious findings and the lower ones are fixed ("The review of the wiring, and its fixes" under "Flashcards sync"). A second pass by the same reviewer, over the fixes, is under way.
+- **The phone plugins round is shipped** (built on `claude/upstream-0.6.0`): Flashcards and Rich code blocks on a phone ("Plugins on a phone" under "Phone layouts") and Flashcards sync ("Flashcards sync" below). It raises the sync protocol to 3, so the same rule applies again: the server and the desktop app must both be updated, the server first.
+  - **Where it stands:** With the owner's word ("if the run works and the review comes back ok, you can just ship"), the same commit was pushed to `claude/pensive-goldberg-7dty2m` (the server's image `:dev`) and to `side-tutor` (the Windows release), both plain fast-forwards. Both dry runs had passed on `7ad11e3`, the last code commit; the shipped commit adds only these lines. The owner hasn't updated the server or the PC yet, and the owner's iPhone hasn't seen it. The owner has the "what to try" page (an Artifact page): a copy of the PC's data folder and of the server's data by hand, the server's update, then the PC's, then tick-lists for the iPhone. If they report a problem, ask what the screen shows and what Settings → Cloud reads on the PC.
+  - **Way back:** the server's image before this update is the per-commit tag of `a5d3284`; the owner's two copies by hand are the data's way back (protocol 3 changes no file format, so an older build reads the files, but it speaks protocol 2).
+  - **For the owner's review, not yet answered item by item:** "Built beyond the plan's letter" under "Plugins on a phone", and "Rulings made while building" under "Flashcards sync".
+  - **Reviews:** the sync part was reviewed in three passes; every finding is fixed, and the reviewer's last word was to ship ("The review of the wiring, and its fixes" under "Flashcards sync").
 
 - **Merged:** `side-tutor` was fast-forwarded to the cloud sync branch at `a2d2b7e` with the owner's word ("merge"), and the Windows workflow published **release 0.5.6** from it. The desktop app now has everything in this file and in `docs/side-tutor.md`.
 - **Checked on Windows before it went out:** the Windows workflow was started by hand on the cloud sync branch (a dry run: no release) and passed, with the sync and cloud tests added to it. Before that the sync code had only run on Linux.
@@ -518,7 +520,7 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
   - a push to `side-tutor` publishes a desktop release (and builds the server image `:latest`). It still needs the owner's approval every time;
   - the owner's server follows `LH_CHANNEL=dev`, which is built from `claude/pensive-goldberg-7dty2m`. A change the server should get must be pushed there; a change both should get goes to both branches, kept at the same commit.
   - Moving the server to `latest`, so one branch feeds both, is the owner's call and hasn't been asked.
-- **The two sides must speak the same sync protocol version** (1 in release 0.5.6; **2 from the upstream 0.6.0 merge on**, see `docs/upstream-0.6.0.md`; **3 with Flashcards sync**, built and not shipped, see "Flashcards sync"). A change that raises it has to reach the server and the desktop together, or sync pauses until both are updated.
+- **The two sides must speak the same sync protocol version** (1 in release 0.5.6; **2 from the upstream 0.6.0 merge on**, see `docs/upstream-0.6.0.md`; **3 with Flashcards sync**, see "Flashcards sync"). A change that raises it has to reach the server and the desktop together, or sync pauses until both are updated.
 - **Restoring a first-sync backup** (`%APPDATA%\LearnHarness\backups` on the PC, `/data/backups` on the server) has no written guide. Putting old files back while paired would sync the old state everywhere: unpair first, and write the steps for the situation at hand. (With Flashcards sync, Flashcards' library put back deletes nothing anywhere; "Restoring a backup" under "Flashcards sync".)
 - **Not done:** Phase 7 (one automated test with two desktops and a server syncing everything together; a tidy of this file). The owner chose to merge without it.
 
@@ -916,7 +918,7 @@ Kept in one place: `src/core/sync/screens.ts`. Change them only with the owner's
 6. **Since when the server can't be reached** (slice 3). `sync.offlineSince` in `GET /api/cloud` on a desktop: the time of the first failed attempt of the current offline spell, null otherwise (`wentOffline` in `client.ts`). The 30-second quiet rule counts from it. `sync.lastContactAt` is null until the app has reached the server once since it started, which is how "started with no connection" is told.
 7. **A signal when the sync state changes** (slice 3). `announceCloudState()` in `round.ts` sends `cloud-changed` on the live channel after a round, a check or a dismissed notice, when the state, the start of the offline spell or the number of notices differs from what was last said. Nothing is sent by an app that isn't paired.
 
-The sync protocol version stayed at 1 for these changes: nothing had been paired anywhere yet. (It is 2 from the upstream 0.6.0 merge on, and 3 with Flashcards sync, built and not shipped.)
+The sync protocol version stayed at 1 for these changes: nothing had been paired anywhere yet. (It is 2 from the upstream 0.6.0 merge on, and 3 with Flashcards sync.)
 
 #### Slice 1: what is built
 
@@ -996,9 +998,9 @@ One run between two built copies with the loop on, through the real screens, nob
 - Nothing for Phase 6: the owner's real PC is paired with the real server and they reported that everything works.
 - Phase 7 (not started; the owner starts it).
 
-### Flashcards sync (built, not shipped)
+### Flashcards sync (built and shipped)
 
-- **State:** built on `claude/upstream-0.6.0`, together with the phone plugins round ("Plugins on a phone" under "Phone layouts"), and fixed after a review ("The review of the wiring, and its fixes" below). **Not shipped;** where it stands is "After the merge (read this first)" under "Handoff".
+- **State:** built on `claude/upstream-0.6.0`, together with the phone plugins round ("Plugins on a phone" under "Phone layouts"), and fixed after a review in three passes ("The review of the wiring, and its fixes" below). **Shipped** to both branches; where it stands is "After the merge (read this first)" under "Handoff".
 - **Why:** the owner added it while answering the phone plan's questions: decks made in the Windows app should be on the phone, so **sync Flashcards between the Windows app and the server in this round**.
 - **The plan** is `docs/phone-plugins-plan.md` ("Flashcards sync": decisions S1–S6 and the smaller rules), approved by the owner. Change a decision only with the owner's approval.
 - It replaces decision 17 of the 0.6.0 merge ("plugin data is per device") for Flashcards' library only. Every other plugin's data, and which plugins are on, stay per device.
