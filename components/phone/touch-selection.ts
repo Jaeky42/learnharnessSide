@@ -83,6 +83,44 @@ export function isTouchPointer(event: { pointerType?: string }): boolean {
 	return event.pointerType === "touch" || event.pointerType === "pen";
 }
 
+/** The touch path is for a browser only, never the desktop app (also on a
+ *  PC with a touch screen: there every gesture keeps upstream's behaviour,
+ *  docs/cloud-sync.md "Still as on a computer"). The same rule as
+ *  isBrowserNow (use-phone.ts), asked of the page's own window. */
+export function touchSelectionHere(view: { navigator?: { userAgent?: string } }): boolean {
+	return !(view.navigator?.userAgent ?? "").includes("Electron");
+}
+
+/** Pure rule: the part of the lesson's box that is really visible. The
+ *  lesson's box runs under the dock (the message box, an open question),
+ *  and could run under the top bar: the dock, where it overlaps the lesson,
+ *  cuts the lesson's bottom at its top; the top bar cuts the lesson's top at
+ *  its bottom. A box with no size (not shown) cuts nothing. */
+export function visibleLessonBounds(lesson: RectLike, covers: { topBar?: RectLike | null; dock?: RectLike | null }): RectLike {
+	const shows = (box: RectLike | null | undefined): box is RectLike =>
+		!!box && box.bottom > box.top && box.right > box.left && box.top < lesson.bottom && box.bottom > lesson.top;
+	let { top, bottom } = lesson;
+	if (shows(covers.topBar) && covers.topBar.bottom < lesson.bottom) top = Math.max(top, covers.topBar.bottom);
+	if (shows(covers.dock) && covers.dock.top > lesson.top) bottom = Math.min(bottom, covers.dock.top);
+	return { left: lesson.left, right: lesson.right, top, bottom: Math.max(top, bottom) };
+}
+
+/** How far the frame of a fixed element is shifted from the screen: while
+ *  the iPhone keyboard is up the body moves down by Safari's pan and becomes
+ *  that frame (phone-viewport.tsx, app/phone.css), so a position worked out
+ *  from client rects is measured from the body's top (the rule
+ *  use-dock-anchor.ts and menu-shell.tsx follow). 0 otherwise. */
+export function fixedFrameTop(doc: { body: { dataset: Record<string, string | undefined>; getBoundingClientRect(): { top: number } } }): number {
+	return doc.body.dataset.lhKeyboard !== undefined ? doc.body.getBoundingClientRect().top : 0;
+}
+
+/** Pure rule: the toolbar's `top` style on the touch path. Clamped inside the
+ *  window as upstream's toolbar is, in screen coordinates, then moved into
+ *  the fixed frame. With no shift it is exactly upstream's number. */
+export function touchToolbarTop({ y, height, innerHeight, shift }: { y: number; height: number; innerHeight: number; shift: number }): number {
+	return Math.max(8, Math.min(y, innerHeight - height - 8)) - shift;
+}
+
 /** Pure rule: is the system's box predicted below the selection? */
 export function systemBoxBelow(firstLine: RectLike, lastLine: RectLike, visible: { top: number; height: number }): boolean {
 	const centre = (firstLine.top + lastLine.bottom) / 2;

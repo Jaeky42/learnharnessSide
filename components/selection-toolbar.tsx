@@ -11,7 +11,9 @@ import {
 	isSelectionRectVisible, observeSelectionActions, resolveSelectionActionPosition,
 	type RectLike, type SelectionActionPoint,
 } from "./selection-actions";
-import { resolveTouchSelectionPosition, TOUCH_BUTTON_CLASS, visibleScreen } from "./phone/touch-selection";
+import {
+	fixedFrameTop, resolveTouchSelectionPosition, TOUCH_BUTTON_CLASS, touchToolbarTop, visibleLessonBounds, visibleScreen,
+} from "./phone/touch-selection";
 
 /** One button on the toolbar. Cite is the first; side questions adds more. */
 export interface SelectionAction {
@@ -118,7 +120,7 @@ function selectionVisible(range: Range, viewport: HTMLElement): boolean {
  *  SelectionToolbarButtons). */
 export function SelectionToolbar({ viewport, actions, blocked }: { viewport: HTMLElement | null; actions: readonly SelectionAction[]; blocked?: string }) {
 	const controller = useOptionalInteractionLayers();
-	const [state, setState] = useState<{ capture: CapturedSelection; position: SelectionActionPoint; touch?: boolean } | null>(null);
+	const [state, setState] = useState<{ capture: CapturedSelection; position: SelectionActionPoint; touch?: boolean; shift?: number } | null>(null);
 	const toolbarRef = useRef<HTMLDivElement>(null);
 	const observerRef = useRef<ReturnType<typeof observeSelectionActions> | null>(null);
 	const actionsRef = useRef(actions);
@@ -130,7 +132,11 @@ export function SelectionToolbar({ viewport, actions, blocked }: { viewport: HTM
 		if (!toolbar || !state) return;
 		const rect = toolbar.getBoundingClientRect();
 		toolbar.style.left = `${Math.max(8, Math.min(state.position.x, window.innerWidth - rect.width - 8))}px`;
-		toolbar.style.top = `${Math.max(8, Math.min(state.position.y, window.innerHeight - rect.height - 8))}px`;
+		// Side-tutor fork (touch): measured from the fixed frame (the shifted
+		// body while the iPhone keyboard is up); exactly upstream's otherwise.
+		toolbar.style.top = state.touch
+			? `${touchToolbarTop({ y: state.position.y, height: rect.height, innerHeight: window.innerHeight, shift: state.shift ?? 0 })}px`
+			: `${Math.max(8, Math.min(state.position.y, window.innerHeight - rect.height - 8))}px`;
 	}, [state]);
 
 	useEffect(() => {
@@ -146,15 +152,18 @@ export function SelectionToolbar({ viewport, actions, blocked }: { viewport: HTM
 			if (!isSelectionRectVisible(capture.range.getBoundingClientRect(), [viewportRect]) || !selectionVisible(capture.range, viewport)) { clear(); return; }
 			const lines = Array.from(capture.range.getClientRects());
 			// Side-tutor fork (touch): opposite the system's Copy / Look Up box,
-			// clear of the selection handles (components/phone/touch-selection.ts).
+			// clear of the selection handles, inside the part of the lesson the
+			// top bar and the dock leave visible (components/phone/touch-selection.ts).
 			if (touch) {
 				const drawn = lines.filter((line) => line.width > 0 || line.height > 0);
 				const whole = capture.range.getBoundingClientRect();
+				const box = (selector: string) => document.querySelector(selector)?.getBoundingClientRect() ?? null;
 				setState({
 					capture,
 					touch: true,
+					shift: fixedFrameTop(document),
 					position: resolveTouchSelectionPosition({
-						bounds: viewportRect,
+						bounds: visibleLessonBounds(viewportRect, { topBar: box('[data-phone="topbar"]'), dock: box('[data-phone="dock"]') }),
 						firstLine: drawn[0] ?? whole,
 						lastLine: drawn.at(-1) ?? whole,
 						visible: visibleScreen(window),
@@ -219,7 +228,7 @@ export function SelectionToolbar({ viewport, actions, blocked }: { viewport: HTM
 			aria-label="Selection actions"
 			data-testid="selection-toolbar"
 			className="fixed z-50 flex max-w-[calc(100vw-1rem)] gap-1"
-			style={{ left: state.position.x, top: state.position.y }}
+			style={{ left: state.position.x, top: state.position.y - (state.shift ?? 0) }}
 			onKeyDown={(event) => {
 				event.stopPropagation();
 				if (event.key === "Escape" && !event.nativeEvent.isComposing) {

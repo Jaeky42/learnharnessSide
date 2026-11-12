@@ -16,6 +16,7 @@ import { observeSelectionActions, resolveSelectionActionPosition, type Selection
 import {
 	resolveTouchSelectionPosition, systemBoxBelow, SYSTEM_BOX_CLEARANCE, SYSTEM_BOX_SWITCH, TOUCH_ACTION_RELEASE_MS,
 	TOUCH_FINGER_WAIT_MS, TOUCH_HANDLE_GAP, TOUCH_SETTLE_MS, TOUCH_TOOLBAR_HEIGHT,
+	fixedFrameTop, touchSelectionHere, touchToolbarTop, visibleLessonBounds,
 } from "../components/phone/touch-selection.ts";
 
 /** The owner's iPhone, home-screen app: 440 × 956 points; the lesson runs
@@ -110,13 +111,14 @@ class FakeNode extends EventTarget {
 	contains(other: unknown): boolean { return other === this || this.kids.some((kid) => kid.contains(other)); }
 	closest() { return null; }
 }
-function page() {
+function page(userAgent?: string) {
 	let now = 0;
 	let nextId = 1;
 	const timers = new Map<number, { at: number; fn: () => void }>();
 	const add = (fn: () => void, ms: number) => { const id = nextId++; timers.set(id, { at: now + ms, fn }); return id; };
 	const view = Object.assign(new EventTarget(), {
 		Node: FakeNode,
+		navigator: userAgent === undefined ? undefined : { userAgent },
 		setTimeout: (fn: () => void, ms = 0) => add(fn, ms),
 		clearTimeout: (id: number) => void timers.delete(id),
 		requestAnimationFrame: (fn: () => void) => add(fn, 16),
@@ -359,6 +361,90 @@ describe("observeSelectionActions with a mouse (unchanged)", () => {
 		p.scroll();
 		p.advance(150 + 16);
 		assert.deepEqual(p.log, ["show", "dismiss cancel", "show", "dismiss cancel", "show"]);
+		p.done();
+	});
+});
+
+// Review fixes: the dock, the desktop app, the shifted body.
+
+/** An iPhone 13 in a Safari tab: lesson 60 to 664, top bar 0 to 60, dock 562 to 664. */
+const phone13 = { lesson: { left: 0, top: 60, right: 390, bottom: 664 }, topBar: { left: 0, top: 0, right: 390, bottom: 60 }, dock: { left: 0, top: 562, right: 390, bottom: 664 } };
+const lessonAt = (bounds: { left: number; top: number; right: number; bottom: number }, firstLine: { left: number; right: number; top: number; bottom: number }, lastLine = firstLine) =>
+	resolveTouchSelectionPosition({ bounds, firstLine, lastLine, visible: { top: 0, height: 664 }, viewportWidth: 390 });
+
+describe("visibleLessonBounds: the dock and the top bar cut the lesson's box", () => {
+	it("the message box cuts the bottom at its top", () => {
+		assert.deepEqual(visibleLessonBounds(phone13.lesson, phone13), { left: 0, right: 390, top: 60, bottom: 562 });
+	});
+	it("a tall dock (an open question) cuts higher", () => {
+		assert.equal(visibleLessonBounds(phone13.lesson, { ...phone13, dock: { left: 0, top: 300, right: 390, bottom: 664 } }).bottom, 300);
+	});
+	it("no dock, or one not shown (no size), cuts nothing", () => {
+		assert.deepEqual(visibleLessonBounds(phone13.lesson, {}), phone13.lesson);
+		assert.deepEqual(visibleLessonBounds(phone13.lesson, { dock: { left: 0, top: 0, right: 0, bottom: 0 }, topBar: null }), phone13.lesson);
+	});
+	it("a top bar over the lesson's top cuts it at the bar's bottom", () => {
+		assert.equal(visibleLessonBounds({ ...phone13.lesson, top: 0 }, phone13).top, 60);
+	});
+	it("a selection ending just above the message box: the buttons go above the start (the box's side), not over the message box", () => {
+		const line = { left: 24, right: 120, top: 530, bottom: 552 };
+		// Before: judged against the lesson's whole box, they sat on the message box.
+		const before = lessonAt(phone13.lesson, line);
+		assert.equal(before.side, "below-end");
+		assert.ok(before.y + TOUCH_TOOLBAR_HEIGHT > phone13.dock.top);
+		const after = lessonAt(visibleLessonBounds(phone13.lesson, phone13), line);
+		assert.deepEqual(after, { x: 24, y: 530 - SYSTEM_BOX_CLEARANCE - TOUCH_TOOLBAR_HEIGHT, side: "above-start" });
+	});
+	it("with an open question the same rule holds above the question", () => {
+		const bounds = visibleLessonBounds(phone13.lesson, { ...phone13, dock: { left: 0, top: 400, right: 390, bottom: 664 } });
+		const at = lessonAt(bounds, { left: 24, right: 120, top: 350, bottom: 372 });
+		assert.equal(at.side, "above-start");
+		assert.ok(at.y + TOUCH_TOOLBAR_HEIGHT <= 400);
+	});
+	it("with no dock the lower half still goes below the end", () => {
+		assert.equal(lessonAt(visibleLessonBounds(phone13.lesson, { topBar: phone13.topBar }), { left: 24, right: 120, top: 530, bottom: 552 }).side, "below-end");
+	});
+});
+
+describe("the shifted body (iPhone keyboard up, Safari panned)", () => {
+	const doc = (keyboard: boolean, top: number) => ({ body: { dataset: (keyboard ? { lhKeyboard: "" } : {}) as Record<string, string | undefined>, getBoundingClientRect: () => ({ top }) } });
+	it("the fixed frame is the body's top while the keyboard is up, the screen otherwise", () => {
+		assert.equal(fixedFrameTop(doc(true, 120)), 120);
+		assert.equal(fixedFrameTop(doc(false, 120)), 0);
+	});
+	it("the toolbar's top is moved into the frame; with no shift it is upstream's clamp exactly", () => {
+		for (const y of [-20, 5, 300, 900]) {
+			assert.equal(touchToolbarTop({ y, height: 32, innerHeight: 664, shift: 0 }), Math.max(8, Math.min(y, 664 - 32 - 8)));
+		}
+		assert.equal(touchToolbarTop({ y: 300, height: 32, innerHeight: 664, shift: 120 }), 180);
+	});
+});
+
+describe("the desktop app keeps upstream's behaviour for every gesture (a touch-screen PC too)", () => {
+	const electron = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Electron/37.0.0 Safari/537.36";
+	it("only a browser gets the touch path", () => {
+		assert.equal(touchSelectionHere({ navigator: { userAgent: electron } }), false);
+		assert.equal(touchSelectionHere({ navigator: { userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile/15E148 Safari/604.1" } }), true);
+	});
+	it("a finger selection waits for its mouseup and shows at the pointer, at once, as upstream's", () => {
+		const p = page(electron);
+		p.down("touch");
+		p.observer.selectionChanged();
+		p.advance(2000);
+		assert.equal(p.shown.length, 0);
+		p.mouseup(1, 70, 80);
+		p.advance(16);
+		assert.deepEqual(p.shown, [{ pointer: { x: 70, y: 80 }, touch: undefined, at: 2016 }]);
+		p.done();
+	});
+	it("a pen there is upstream's too, and a touch pointercancel dismisses as before", () => {
+		const p = page(electron);
+		p.down("pen");
+		p.mouseup();
+		p.advance(16);
+		assert.deepEqual(p.log, ["show"]);
+		p.cancel("touch");
+		assert.deepEqual(p.log, ["show", "dismiss cancel"]);
 		p.done();
 	});
 });

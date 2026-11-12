@@ -16,7 +16,7 @@
  * components/phone/touch-selection.ts.
  */
 
-import { isTouchPointer, TOUCH_ACTION_RELEASE_MS, TOUCH_FINGER_WAIT_MS, TOUCH_SETTLE_MS } from "./phone/touch-selection";
+import { isTouchPointer as isTouchType, TOUCH_ACTION_RELEASE_MS, TOUCH_FINGER_WAIT_MS, TOUCH_SETTLE_MS, touchSelectionHere } from "./phone/touch-selection";
 
 export type SelectionActionPoint = { x: number; y: number };
 export type RectLike = { left: number; top: number; right: number; bottom: number };
@@ -81,6 +81,10 @@ export function observeSelectionActions({ element, getActionElement, restoreAfte
 	let actionPress: number | null = null;
 	let actionTimer: number | undefined;
 	let changedInPress = false;
+	// In a browser only: in the desktop app (a touch-screen PC too) every
+	// gesture keeps upstream's behaviour.
+	const touchHere = touchSelectionHere(view);
+	const isTouchPointer = (event: { pointerType?: string }) => touchHere && isTouchType(event);
 
 	const clearPending = () => {
 		if (timer !== undefined) view.clearTimeout(timer);
