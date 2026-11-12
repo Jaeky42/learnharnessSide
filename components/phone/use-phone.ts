@@ -37,6 +37,14 @@ function matches(query: string): boolean {
 	return typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia(query).matches;
 }
 
+/** A browser, at any width: the phone layout, and a tablet that gets the
+ *  computer layout. Never the desktop app. The few touch rules that hold on
+ *  every touch screen (the page never moves under a finger) ask this; a touch
+ *  event itself is the proof that there is a touch screen. */
+export function isBrowserNow(): boolean {
+	return typeof window !== "undefined" && !inElectron();
+}
+
 /** Is the phone layout active right now? Safe outside React. */
 export function isPhoneNow(): boolean {
 	return !inElectron() && matches(PHONE_QUERY);

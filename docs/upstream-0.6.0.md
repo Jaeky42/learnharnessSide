@@ -137,6 +137,7 @@ Five things the plan had left open, or that came out differently than the plan s
 
 - **The Tutor stays above the Drawing Pad**, window and bubble. Details in `docs/side-tutor.md`.
 
+- **A tablet in the browser no longer has its page pulled down by a finger**, with the computer layout kept ("Phone layouts", under "When it applies", in `docs/cloud-sync.md`).
 - **Demos work on the server:** the image now carries Chromium, which the demo agent needs to test-run a demo ("Hosting" in `docs/cloud-sync.md`). Not an 0.6.0 matter: it was so since server mode was built.
 
 ### The Drawing Pad, as tried on a computer (nothing of upstream's changed)

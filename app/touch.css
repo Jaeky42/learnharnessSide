@@ -1,0 +1,20 @@
+/* TOUCH SCREENS IN A BROWSER, AT ANY WIDTH (fork-owned, like phone.css).
+ *
+ * A tablet gets the computer layout (the phone layout is for screens under
+ * 640 px), but it is still used with a finger. The few rules here hold on
+ * every touch screen in a browser and change nothing about the layout.
+ * Every rule sits inside @media (any-pointer: coarse) and under
+ * html:not(.lh-electron): the desktop app never gets them, also on a PC with
+ * a touch screen. tests/touch-tablet.test.ts checks both.
+ */
+
+@media (any-pointer: coarse) {
+	/* The page itself never bounces or pulls down to refresh (owner's iPad:
+	   a drag pulled the whole page down, as it once did on the phone). The
+	   app's pages never scroll the window; only their panels scroll. A drag
+	   that would still reach the page is stopped by
+	   components/phone/window-lock.ts. */
+	html:not(.lh-electron) {
+		overscroll-behavior-y: none;
+	}
+}

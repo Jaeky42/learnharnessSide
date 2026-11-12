@@ -2,8 +2,9 @@
 
 /**
  * The phone layout's page-wide pieces (cloud sync Phase 3), mounted once in
- * the root layout: the keyboard-aware height, press-and-hold menus and the window lock. All
- * do nothing outside the phone layout.
+ * the root layout: the keyboard-aware height, press-and-hold menus and the window lock. The
+ * first two do nothing outside the phone layout; the window lock holds on
+ * every touch screen in a browser (a tablet with the computer layout too).
  */
 
 import { useEffect } from "react";

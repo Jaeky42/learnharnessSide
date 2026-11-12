@@ -14,12 +14,17 @@
  *    a Safari tab the page has room to move (the bleed in
  *    phone-viewport.tsx), so that drag would move the whole app.
  *
- * Drags on the dock are forwarded to the lesson first
+ * Drags on the dock are forwarded to the lesson first on a phone
  * (use-dock-touch-scroll.ts). Pinches (two fingers) and sideways drags are
- * left alone. Phone layout only.
+ * left alone.
+ *
+ * On every touch screen in a browser, whatever the width (owner's ask: an
+ * iPad gets the computer layout, and a drag there pulled the whole page down
+ * to refresh as it once did on the phone). app/touch.css turns the page's
+ * bounce off for those. Never in the desktop app.
  */
 
-import { isPhoneNow } from "@/components/phone/use-phone";
+import { isBrowserNow } from "@/components/phone/use-phone";
 import { dragDecision, innerCanTake, type ScrollBox } from "@/components/phone/use-dock-touch-scroll";
 
 function scrollersFrom(target: EventTarget | null, doc: Document): ScrollBox[] {
@@ -37,7 +42,7 @@ export function installWindowLock(doc: Document = document): () => void {
 	let mode: "idle" | "pending" | "free" | "lock" = "idle";
 	const onStart = (e: TouchEvent) => {
 		const t = e.touches[0];
-		if (e.touches.length !== 1 || !t || !isPhoneNow()) {
+		if (e.touches.length !== 1 || !t || !isBrowserNow()) {
 			mode = "idle";
 			return;
 		}
