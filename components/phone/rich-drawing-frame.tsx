@@ -20,6 +20,16 @@
  * at all: it renders its children as they are, so the computer, a tablet
  * and the desktop app are untouched.
  *
+ * WAITING FOR THE PLUGIN (owner's decision, after decision 8): while Rich
+ * code blocks is switched on but its front end hasn't started, a fence shows
+ * the same spinner box instead of the host's code fallback, from the first
+ * paint of a page load. The frame says which state its fence is in
+ * (`data-lh-rich-state`, see richFenceState) and app/phone-rich-code-blocks.css
+ * draws the box. Before the frame runs (the server-rendered page, before
+ * hydration) the box comes from the server's own mark that the plugin is on
+ * (`data-lh-rich-code-blocks="on"` on <body>, app/layout.tsx) and the
+ * fallback's `data-lh-rich-fence` (md-blocks.tsx).
+ *
  * The copy is wrapped in the plugin's own `rich-code-blocks` class, so the
  * plugin's stylesheet still gives its ink the theme's colours (the
  * `--rich-code-blocks-*` variables) and its fonts apply. Its ids are renamed,
@@ -30,6 +40,8 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { MaximizeIcon } from "lucide-react";
 import { useIsPhone } from "@/components/phone/use-phone";
 import { useSessionMermaid } from "@/components/session-overlay";
+import { usePlugins } from "@/components/plugins";
+import type { PluginSnapshot } from "@/components/plugin-manager";
 import { blurAfterPointerClick } from "@/components/focus-hygiene";
 import { Hint } from "@/components/ui/hint";
 
@@ -42,6 +54,41 @@ export const RICH_BLOCK_CLASS = "rich-code-blocks";
 export const RICH_RENDERED_CLASS = "rich-code-blocks--rendered";
 /** The drawn picture inside a block. */
 export const RICH_DRAWING_SELECTOR = `.${RICH_RENDERED_CLASS} > svg`;
+
+/** The plugin's id, and the server's mark on <body> that it is switched on
+ *  and installed (app/layout.tsx, richCodeBlocksBoot in src/server). */
+export const RICH_PLUGIN_ID = "rich-code-blocks";
+export const RICH_BOOT_ATTRIBUTE = "data-lh-rich-code-blocks";
+/** The longest a fence waits for the plugin's front end to start before it
+ *  shows its code: the spinner is never endless, even if the plugin's files
+ *  never arrive. */
+export const RICH_WAIT_CEILING_MS = 15_000;
+
+export function isRichDrawingLanguage(language: string): boolean {
+	return RICH_DRAWING_LANGUAGES.includes(language);
+}
+
+/** What one rich fence shows on a phone:
+ *  - "plugin": the plugin has a renderer for this language, so the block is
+ *    the plugin's own (drawing, drawn, or, if it failed, the host's error and
+ *    code);
+ *  - "waiting": the plugin is switched on and its front end hasn't started:
+ *    the spinner box;
+ *  - "code": anything else, the host's code fallback (the plugin is off, it
+ *    started without this kind, it failed to load, the list of plugins
+ *    couldn't be read, or the wait ran past its ceiling).
+ *  Before the page's plugin list has arrived, the server's mark decides. */
+export function richFenceState(snapshot: Pick<PluginSnapshot, "codeBlocks" | "plugins" | "loading" | "error">, language: string, serverOn: boolean, timedOut: boolean): "plugin" | "waiting" | "code" {
+	if (snapshot.codeBlocks.some((entry) => entry.renderer.language === language)) return "plugin";
+	if (timedOut) return "code";
+	const plugin = snapshot.plugins.find((entry) => entry.info.id === RICH_PLUGIN_ID);
+	if (plugin) return plugin.info.enabled && plugin.phase === "loading" ? "waiting" : "code";
+	return snapshot.loading && !snapshot.error && serverOn ? "waiting" : "code";
+}
+
+function serverSaysOn(): boolean {
+	return typeof document !== "undefined" && document.body?.getAttribute(RICH_BOOT_ATTRIBUTE) === "on";
+}
 
 let serial = 0;
 
@@ -77,12 +124,20 @@ export function drawingCopy(svg: Element): string {
 /** Wraps one fence's plugin block (md-blocks' MarkdownCode). */
 export function PhoneRichDrawingFrame({ language, children }: { language: string; children: ReactNode }) {
 	const phone = useIsPhone();
-	if (!phone || !RICH_DRAWING_LANGUAGES.includes(language)) return <>{children}</>;
-	return <PhoneFrame>{children}</PhoneFrame>;
+	if (!phone || !isRichDrawingLanguage(language)) return <>{children}</>;
+	return <PhoneFrame language={language}>{children}</PhoneFrame>;
 }
 
-function PhoneFrame({ children }: { children: ReactNode }) {
+function PhoneFrame({ language, children }: { language: string; children: ReactNode }) {
 	const overlay = useSessionMermaid();
+	const { snapshot } = usePlugins();
+	const [timedOut, setTimedOut] = useState(false);
+	const state = richFenceState(snapshot, language, serverSaysOn(), timedOut);
+	useEffect(() => {
+		if (state !== "waiting") return;
+		const timer = window.setTimeout(() => setTimedOut(true), RICH_WAIT_CEILING_MS);
+		return () => window.clearTimeout(timer);
+	}, [state]);
 	const frameRef = useRef<HTMLDivElement>(null);
 	const [drawn, setDrawn] = useState(false);
 	useEffect(() => {
@@ -97,7 +152,7 @@ function PhoneFrame({ children }: { children: ReactNode }) {
 	}, []);
 	const open = overlay?.openDrawing;
 	return (
-		<div ref={frameRef} data-testid="rich-drawing-frame" className="group/md relative">
+		<div ref={frameRef} data-testid="rich-drawing-frame" data-lh-rich-state={state} className="group/md relative">
 			{children}
 			{drawn && open && (
 				<div className="absolute top-0 right-0 flex items-start">

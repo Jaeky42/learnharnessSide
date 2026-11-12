@@ -34,9 +34,20 @@
    fails is removed by the plugin, and the host shows its error and the
    source as today, so no spinner is left behind. Only blocks the host
    mounted ([data-plugin-renderer]); the viewer's copy is not one. The box's
-   height is modest: the lesson may shift once when the picture arrives. */
+   height is modest: the lesson may shift once when the picture arrives.
+
+   WAITING FOR THE PLUGIN (owner's decision): the same box in place of the
+   host's code fallback of a smiles, abc or tikz fence ([data-lh-rich-fence],
+   md-blocks.tsx) while Rich code blocks is on but hasn't started:
+   - before the page runs, by the server's mark on <body> (app/layout.tsx),
+     for every fence no frame has decided yet;
+   - once it runs, where the frame says "waiting"
+     (components/phone/rich-drawing-frame.tsx, richFenceState). A frame that
+     says "code" or "plugin" shows the fallback as it is. */
 @media (max-width: 639.98px) {
-	html:not(.lh-electron) [data-plugin-renderer] .rich-code-blocks:not(.rich-code-blocks--rendered) {
+	html:not(.lh-electron) [data-plugin-renderer] .rich-code-blocks:not(.rich-code-blocks--rendered),
+	html:not(.lh-electron) body[data-lh-rich-code-blocks="on"] [data-lh-rich-fence]:not([data-lh-rich-state] > *),
+	html:not(.lh-electron) [data-lh-rich-state="waiting"] > [data-lh-rich-fence] {
 		display: flex;
 		align-items: center;
 		justify-content: center;
@@ -44,10 +55,14 @@
 		border: 1px dashed var(--border);
 		border-radius: 0.75rem;
 	}
-	html:not(.lh-electron) [data-plugin-renderer] .rich-code-blocks:not(.rich-code-blocks--rendered) > pre {
+	html:not(.lh-electron) [data-plugin-renderer] .rich-code-blocks:not(.rich-code-blocks--rendered) > pre,
+	html:not(.lh-electron) body[data-lh-rich-code-blocks="on"] [data-lh-rich-fence]:not([data-lh-rich-state] > *) > *,
+	html:not(.lh-electron) [data-lh-rich-state="waiting"] > [data-lh-rich-fence] > * {
 		display: none;
 	}
-	html:not(.lh-electron) [data-plugin-renderer] .rich-code-blocks:not(.rich-code-blocks--rendered)::after {
+	html:not(.lh-electron) [data-plugin-renderer] .rich-code-blocks:not(.rich-code-blocks--rendered)::after,
+	html:not(.lh-electron) body[data-lh-rich-code-blocks="on"] [data-lh-rich-fence]:not([data-lh-rich-state] > *)::after,
+	html:not(.lh-electron) [data-lh-rich-state="waiting"] > [data-lh-rich-fence]::after {
 		content: "";
 		width: 1.5rem;
 		height: 1.5rem;
@@ -63,7 +78,26 @@
 
 /* With reduced motion the spinner stands still. */
 @media (max-width: 639.98px) and (prefers-reduced-motion: reduce) {
-	html:not(.lh-electron) [data-plugin-renderer] .rich-code-blocks:not(.rich-code-blocks--rendered)::after {
+	html:not(.lh-electron) [data-plugin-renderer] .rich-code-blocks:not(.rich-code-blocks--rendered)::after,
+	html:not(.lh-electron) body[data-lh-rich-code-blocks="on"] [data-lh-rich-fence]:not([data-lh-rich-state] > *)::after,
+	html:not(.lh-electron) [data-lh-rich-state="waiting"] > [data-lh-rich-fence]::after {
 		animation: none;
+	}
+}
+
+/* THE ENLARGE BUTTON'S TOUCH AREA (owner's decision): at least 40 x 40 px,
+   its look unchanged: an invisible layer around the 24 px button, 8 px
+   above and below and 16 px to its left. Nothing to its right: the button
+   sits at the lesson column's right edge, and the lesson clips what lies
+   beyond it (rich-drawing-frame.tsx only; the lesson's mermaid button is
+   left alone). */
+@media (max-width: 639.98px) {
+	html:not(.lh-electron) [data-testid="rich-drawing-expand"] {
+		position: relative;
+	}
+	html:not(.lh-electron) [data-testid="rich-drawing-expand"]::after {
+		content: "";
+		position: absolute;
+		inset: -0.5rem 0 -0.5rem -1rem;
 	}
 }

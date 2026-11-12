@@ -44,7 +44,7 @@ import { blurAfterPointerClick } from "@/components/focus-hygiene";
 import { chartSize, useSessionMermaid } from "@/components/session-overlay";
 import { Hint } from "@/components/ui/hint";
 import { BUILTIN_MERMAID_LANGUAGE, PluginCodeBlock } from "@/components/plugin-renderers";
-import { PhoneRichDrawingFrame } from "@/components/phone/rich-drawing-frame";
+import { isRichDrawingLanguage, PhoneRichDrawingFrame } from "@/components/phone/rich-drawing-frame";
 
 /** Local rendering profile for host-mounted, display-only Markdown. Ordinary
  * transcript rendering (including SSR/static Streamdown) stays interactive. */
@@ -266,7 +266,7 @@ export function MarkdownCode(props: ComponentProps<"code"> & ExtraProps) {
 	const startLine = startMatch ? Number.parseInt(startMatch[1]!, 10) : undefined;
 	const lineNumbers = !/\bnoLineNumbers\b/.test(meta);
 	const fallback = (
-		<div className="group/md relative" data-testid="md-code">
+		<div className="group/md relative" data-testid="md-code" data-lh-rich-fence={!displayOnly && isRichDrawingLanguage(language) ? "" : undefined}>
 			{!displayOnly && <CopyCorner className="absolute top-1.5 right-2 z-10" getText={() => source} label="Copy code" />}
 			<CodeBlock
 				code={source}

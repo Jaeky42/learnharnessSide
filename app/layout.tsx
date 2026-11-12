@@ -17,7 +17,7 @@ import { AppearanceProvider } from "@/components/settings/appearance";
 import UpdateBanner from "@/components/update-banner";
 import { PhoneRuntime } from "@/components/phone/phone-runtime";
 import { PluginsProvider } from "@/components/plugins";
-import { readThemeBoot } from "@/src/server";
+import { readThemeBoot, richCodeBlocksBoot } from "@/src/server";
 
 // Chrome = JetBrains Mono, teaching prose = Source Sans 3, titles = CMU
 // Serif (the bundled lh-cmu @font-face in globals.css — no CDN).
@@ -67,6 +67,10 @@ export default async function RootLayout({ children }: { children: React.ReactNo
 	// prerendered route (settings) would bake the BUILD machine's record.
 	await connection();
 	const { appearance, theme, vars } = readThemeBoot();
+	// Side-tutor fork (phone): whether Rich code blocks is on, marked on <body>,
+	// so a phone shows its spinner box from the first paint
+	// (components/phone/rich-drawing-frame.tsx). No effect on a computer.
+	const richCodeBlocks = await richCodeBlocksBoot();
 	return (
 		// suppressHydrationWarning: the script below adds a class to <html>
 		// before React hydrates (one level only; children are still checked).
@@ -83,7 +87,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
 				    could flash the phone layout until the sidebar adds the class. */}
 				<script dangerouslySetInnerHTML={{ __html: ELECTRON_MARK }} />
 			</head>
-			<body className="min-h-dvh antialiased">
+			<body className="min-h-dvh antialiased" data-lh-rich-code-blocks={richCodeBlocks ? "on" : undefined}>
 			{/* The notification channel rides OUTSIDE everything: sidebar, dock,
 				 and pages all subscribe as the polls retire (push S3, 2026-10-02). */}
 			<ServerEventsProvider>

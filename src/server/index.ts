@@ -30,6 +30,7 @@ export {
 export { promptOverrides } from "../store/prompt-overrides.ts";
 export { themeStore } from "../store/themes.ts";
 export { readThemeBoot, type ThemeBoot } from "./theme-boot.ts";
+export { richCodeBlocksBoot } from "./rich-code-blocks-boot.ts";
 export { isValidSegmentPath } from "../core/prompt-segments.ts";
 // The canonical segment discovery/resolution lives in the agent layer
 // (composition is an agent concern); the barrel re-exports it for the
