@@ -52,6 +52,9 @@ const defaults = () => ({ retention: 0.9, learningSteps: [1, 10], relearningStep
 function openStore(directory) {
   fs.mkdirSync(directory, { recursive: true });
   const file = path.join(directory, 'flashcards.json');
+  // Side-tutor fork (Flashcards sync): read the file again whenever it changed on disk.
+  const stamp = () => { try { const s = fs.statSync(file); return `${s.ino}:${s.size}:${s.mtimeMs}:${s.ctimeMs}`; } catch { return null; } };
+  const load = () => {
   let state;
   try { state = JSON.parse(fs.readFileSync(file, 'utf8')); }
   catch (error) {
@@ -65,21 +68,26 @@ function openStore(directory) {
     atomicWrite(file, JSON.stringify(migrated));
     state = migrated;
   }
+  return state;
+  };
+  let seen = stamp(), state = load();
+  // A file that went missing keeps what is in memory; the next change writes it back whole.
+  const current = () => { const now = stamp(); if (now !== null && now !== seen) { state = load(); seen = now; } return state; };
   const sourceFile = id => {
     if (typeof id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) throw new Error('Invalid file source ID.');
     return path.join(directory, 'sources', `${id}.md`);
   };
   return {
-    get: () => state,
+    get: current,
     writeSource(id, markdown) { const file = sourceFile(id); fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 }); atomicWrite(file, markdown); },
     readSource(id) { return fs.readFileSync(sourceFile(id), 'utf8'); },
     removeSource(id) { try { fs.unlinkSync(sourceFile(id)); } catch (error) { if (error.code !== 'ENOENT') throw error; } },
     change(update) {
-      const next = structuredClone(state);
+      const next = structuredClone(current());
       const result = update(next);
       next.revision++;
       atomicWrite(file, JSON.stringify(next));
-      state = next;
+      state = next; seen = stamp();
       return result;
     },
   };
