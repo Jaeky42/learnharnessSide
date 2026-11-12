@@ -240,7 +240,7 @@ export function kindOf(key: string): MapKind | null {
 /** A change received from the other side, or null when it can't be trusted. */
 export function checkMapChange(raw: unknown): MapChange | null {
 	if (!isObject(raw) || typeof raw.key !== "string" || raw.key.length > MAX_KEY) return null;
-	if (typeof raw.t !== "number" || !Number.isFinite(raw.t) || raw.t < 0) return null;
+	if (typeof raw.t !== "number" || !Number.isFinite(raw.t)) return null;
 	const kind = kindOf(raw.key);
 	if (!kind) return null;
 	const value = raw.value === undefined ? null : raw.value;
@@ -257,7 +257,8 @@ export function checkMapChange(raw: unknown): MapChange | null {
 			: isPosition(value);
 		if (!fine) return null;
 	} else if ((kind === "s" && settingPath(raw.key) === null) || (kind === "t" && !isCustomThemeKey(raw.key))) return null;
-	return { key: raw.key, value, t: raw.t };
+	// A time before 1970 (a PC whose clock is ahead, adding its offset to an item timed 0) is the oldest time there is, not a broken page.
+	return { key: raw.key, value, t: Math.max(0, raw.t) };
 }
 
 /** A vault's top-level folder name that the server may leave out of Obsidian sync. */

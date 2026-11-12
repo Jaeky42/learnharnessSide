@@ -69,6 +69,8 @@ export interface ExchangeRules {
 	resetUnsentSettings: boolean;
 	/** The refusal for a request that didn't arrive whole. */
 	malformed: string;
+	/** Items whose time can't matter (an item that never changes): `detect` leaves them to the next exchange. */
+	untimed?: (key: string) => boolean;
 }
 
 /** The settings and the other small files (maps.ts). */
@@ -138,9 +140,13 @@ export interface MapsAuthority {
 	 * Note what changed in the server's own files, with the time it changed,
 	 * without a desktop asking (Flashcards: shortly after the plugin says its
 	 * library changed, so a change made on the phone keeps its own time while
-	 * every PC is away). Does nothing before the first exchange ever.
+	 * every PC is away). Does nothing before the first exchange ever, nor
+	 * when an exchange since `since` (ms) has already looked. Items whose time
+	 * can't matter (`ExchangeRules.untimed`: Flashcards' reviews, which never
+	 * change) are left to the next exchange, so a review session rewrites no
+	 * table.
 	 */
-	detect(): void;
+	detect(since?: number): void;
 }
 
 /** Copied on write: the saved table stays as it was until the exchange has done its work. */
@@ -176,10 +182,14 @@ export function createMapsAuthority(deps: {
 	 */
 	const underway = new Map<string, Map<string, string>>();
 
+	/** When an exchange last looked at the server's own files (this process; for `detect`). */
+	let lastLook = -Infinity;
+
 	/** The items of the server's own files that differ from the table (looked at without changing anything). */
-	function ownChanges(items: AuthorityMapsState["items"], snapshot: MapSnapshot): string[] {
+	function ownChanges(items: AuthorityMapsState["items"], snapshot: MapSnapshot, skip?: (key: string) => boolean): string[] {
 		const out: string[] = [];
 		const look = (key: string): void => {
+			if (skip?.(key)) return;
 			if (usable(rules, snapshot, key) && (items[key]?.h ?? ABSENT) !== hashOf(snapshot, key)) out.push(key);
 		};
 		for (const key of snapshot.items.keys()) look(key);
@@ -198,12 +208,14 @@ export function createMapsAuthority(deps: {
 	}
 
 	return {
-		detect() {
-			if (deps.busy?.() || deps.locked?.()) return;
+		detect(since) {
+			if (deps.locked?.()) return;
+			// An exchange since then has noted it all, with the same times.
+			if (since !== undefined && lastLook >= since) return;
 			const stored = deps.state.read();
 			if (!stored) return;
 			const snapshot = deps.files.read();
-			const keys = ownChanges(stored.items, snapshot);
+			const keys = ownChanges(stored.items, snapshot, rules.untimed);
 			if (keys.length === 0) return;
 			const state = copyOf(stored);
 			noteOwnChanges(state, snapshot, deps.now(), keys);
@@ -239,6 +251,7 @@ export function createMapsAuthority(deps: {
 			if (typeof raw.timeZone === "string") deps.onTimeZone?.(deviceId, raw.timeZone);
 			const now = deps.now();
 			let snapshot = deps.files.read();
+			lastLook = now;
 			const own = ownChanges(state.items, snapshot);
 			if (own.length > 0) noteOwnChanges(edit(), snapshot, now, own);
 
@@ -256,8 +269,18 @@ export function createMapsAuthority(deps: {
 			const cursor = raw.cursor > state.seq ? 0 : raw.cursor;
 			/** More of the desktop's changes follow, in further requests of this exchange. */
 			const more = raw.more === true;
-			/** Has this desktop already had the server's value of an item (it has seen up to `cursor`)? */
-			const desktopHad = (key: string): boolean => { const known = state.items[key]; return !!known && known.h !== ABSENT && known.seq <= cursor; };
+			/**
+			 * Has this desktop got an item the server holds? It has seen it (its place in the
+			 * list is past it), or it is sending the item now or did earlier in this exchange
+			 * (a card it made, taken before an answer that was lost: its place didn't move, but it
+			 * holds the card).
+			 */
+			const desktopHad = (key: string): boolean => {
+				const known = state.items[key];
+				if (!known || known.h === ABSENT) return false;
+				return known.seq <= cursor || sentHere.has(key) || (underway.get(deviceId)?.has(key) ?? false);
+			};
+			const sentHere = new Set(incoming.map((change) => change.key));
 
 			const sent = new Map<string, string>();
 			const taken = new Map<string, { value: unknown; t: number }>();
@@ -451,7 +474,8 @@ export function createMapsDesktop(deps: {
 			if ((state.known[key] ?? ABSENT) === h) {
 				if (state.pending[key]) { delete state.pending[key]; changed = true; }
 			} else if (state.pending[key]?.h !== h) {
-				state.pending[key] = { h, t: changedAt(rules, snapshot, key, now) + state.offset };
+				// Never before 1970: an item timed 0 on a PC whose clock is ahead of the server's.
+				state.pending[key] = { h, t: Math.max(0, changedAt(rules, snapshot, key, now) + state.offset) };
 				changed = true;
 			}
 		};
@@ -500,7 +524,7 @@ export function createMapsDesktop(deps: {
 				if (!usable(rules, snapshot, key)) continue;
 				const value = valueOf(snapshot, key);
 				sent.set(key, hashOf(snapshot, key));
-				changes.push({ key, value, t: state.pending[key]?.t ?? changedAt(rules, snapshot, key, now) + state.offset });
+				changes.push({ key, value, t: Math.max(0, state.pending[key]?.t ?? changedAt(rules, snapshot, key, now) + state.offset) });
 			}
 			const folders = deps.vaultFolders?.() ?? null;
 			const sendFolders = folders !== null && JSON.stringify(folders) !== JSON.stringify(state.folders);

@@ -215,9 +215,13 @@ export function createFlashcardsFiles(deps: {
 
 	const unreadable = (): MapSnapshot => ({ items: new Map(), unreadable: new Set(FLASHCARDS_KINDS), unreadableKeys: new Set(), fileTimes: new Map() });
 
-	/** The snapshot of a read; every item timed by the file's time (0 for a file put back: what it holds is old). */
-	function snapshotOf(read: FlashcardsRead, next: Map<string, Known>, mtime: number | null): MapSnapshot {
-		const time = read.stale ? 0 : mtime;
+	/**
+	 * The snapshot of a read; every item timed by the file's time, or 0 when this side's records
+	 * are lost (a file put back, or no memory): what the other side has then stands where both
+	 * have an item, and only what is here alone is added.
+	 */
+	function snapshotOf(read: FlashcardsRead, next: Map<string, Known>, mtime: number | null, lost = false): MapSnapshot {
+		const time = read.stale || lost ? 0 : mtime;
 		const items = new Map<string, MapItem>();
 		for (const [key, value] of read.items) items.set(key, { value, mtime: time, h: next.get(key)?.h ?? itemHash(value) });
 		return { items, unreadable: new Set(), unreadableKeys: read.missing, fileTimes: new Map(FLASHCARDS_KINDS.map((kind) => [kind, time])) };
@@ -230,14 +234,15 @@ export function createFlashcardsFiles(deps: {
 		// Never sent, never taken, never written: the format lock, and a damaged file.
 		if (lib.state === "unreadable") return unreadable();
 		const next = new Map<string, Known>();
-		const result = readFlashcards(lib.state === "ok" ? lib.file : null, readMemory(), deps.now(), (itemKey, value) => knownOf(next, itemKey, value).ok);
+		const before = readMemory();
+		const result = readFlashcards(lib.state === "ok" ? lib.file : null, before, deps.now(), (itemKey, value) => knownOf(next, itemKey, value).ok);
 		if (result.stale) log("[LearnHarness] Flashcards sync: the library doesn't follow what sync last saw here (it was put back or replaced); nothing missing from it counts as deleted, and it is combined again.");
 		// Stamps and deletions are decided here, once: saved before the items go anywhere.
 		saveMemory(result.memory);
 		known = next;
-		const value = snapshotOf(result, next, lib.state === "ok" ? mtimeOf(libraryFile) : null);
+		const value = snapshotOf(result, next, lib.state === "ok" ? mtimeOf(libraryFile) : null, before === null);
 		snapshot = { key: `${parsed?.stamp ?? "-"}|${memoryStamps()}`, value };
-		lastRead = result.stale ? null : { key: snapshot.key, read: result };
+		lastRead = result.stale || before === null ? null : { key: snapshot.key, read: result };
 		return value;
 	}
 

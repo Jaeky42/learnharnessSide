@@ -49,7 +49,13 @@ export const FLASHCARDS_RULES: ExchangeRules = {
 	checkChange: checkFlashcardsChange,
 	resetUnsentSettings: false,
 	malformed: "The Flashcards changes didn't arrive whole.",
+	// A review never changes: its time can't decide anything.
+	untimed: (key) => key[0] === "r" && key[1] === "|",
 };
+
+/** The watcher notes changes this long after the last one, and no later than this after the first it hasn't noted. */
+export const WATCH_QUIET_MS = 20_000;
+export const WATCH_CEILING_MS = 50_000;
 
 export const FLASHCARDS_SYNC_PATH = "/api/sync/flashcards";
 
@@ -100,26 +106,38 @@ export function desktopState(inner: StateFile<DesktopMapsState>, files: Pick<Fla
 
 /**
  * This side's own Flashcards changes are noted with the time they were made
- * (a little after the plugin says so), not only when the next exchange
- * comes: the server's, while every PC is away, would otherwise all get the
- * time of the last one found. Only where Flashcards sync has run (`active`);
- * nothing happens, and no timer is set, anywhere else.
+ * (within a minute: WATCH_QUIET_MS after the last change, at most
+ * WATCH_CEILING_MS after the first), not only when the next exchange comes:
+ * the server's, while every PC is away, would otherwise all get the time of
+ * the last one found. Also while a generation holds the exchange (noting
+ * isn't exchanging). Only where Flashcards sync has run (`active`); nothing
+ * happens, and no timer is set, anywhere else.
  */
 export function watchFlashcardsChanges(deps: {
 	subscribe: (listener: (event: ServerEvent) => void) => () => void;
 	setTimer: (run: () => void, ms: number) => unknown;
+	clearTimer: (handle: unknown) => void;
+	now: () => number;
 	active: () => boolean;
-	detect: () => void;
-	delayMs?: number;
+	/** `since`: when the first change it is noting was announced. */
+	detect: (since: number) => void;
 }): () => void {
-	let waiting = false;
+	// Quiet for a while after the last change (a review session is many changes), and never
+	// later than the ceiling after the first: a change keeps a time within a minute of when it was made.
+	let first: number | null = null;
+	let timer: unknown = null;
+	const run = (): void => {
+		const since = first!;
+		first = null;
+		timer = null;
+		try { deps.detect(since); } catch (error) { console.error(`[LearnHarness] Flashcards sync: ${error instanceof Error ? error.message : String(error)}`); }
+	};
 	return deps.subscribe((event) => {
-		if (waiting || !isFlashcardsChange(event) || !deps.active()) return;
-		waiting = true;
-		deps.setTimer(() => {
-			waiting = false;
-			try { deps.detect(); } catch (error) { console.error(`[LearnHarness] Flashcards sync: ${error instanceof Error ? error.message : String(error)}`); }
-		}, deps.delayMs ?? 2_000);
+		if (!isFlashcardsChange(event) || !deps.active()) return;
+		const now = deps.now();
+		first ??= now;
+		if (timer !== null) deps.clearTimer(timer);
+		timer = deps.setTimer(run, Math.max(0, Math.min(WATCH_QUIET_MS, first + WATCH_CEILING_MS - now)));
 	});
 }
 
@@ -129,13 +147,14 @@ export function isFlashcardsChange(event: ServerEvent): boolean {
 }
 
 const engineTimer = (run: () => void, ms: number): unknown => { const handle = setTimeout(run, ms); handle.unref?.(); return handle; };
+const engineClear = (handle: unknown): void => clearTimeout(handle as ReturnType<typeof setTimeout>);
 
 /** The server's watcher (autostart.ts): active once a PC has exchanged Flashcards with it. */
 export function startServerFlashcardsWatcher(): void {
 	if (engine().watching) return;
 	engine().watching = true;
 	const stateOf = path.join(/* turbopackIgnore: true */ syncStateDir(), "flashcards.json");
-	watchFlashcardsChanges({ subscribe, setTimer: engineTimer, active: () => fs.existsSync(/* turbopackIgnore: true */ stateOf), detect: () => flashcardsAuthority().detect() });
+	watchFlashcardsChanges({ subscribe, setTimer: engineTimer, clearTimer: engineClear, now: Date.now, active: () => fs.existsSync(/* turbopackIgnore: true */ stateOf), detect: (since) => flashcardsAuthority().detect(since) });
 }
 
 /** A paired desktop's watcher (loop.ts): notes its changes while the server can't be reached too. */
@@ -143,7 +162,7 @@ export function startDesktopFlashcardsWatcher(): void {
 	if (engine().watching) return;
 	engine().watching = true;
 	const stateOf = path.join(/* turbopackIgnore: true */ syncStateDir(), "flashcards-desktop.json");
-	watchFlashcardsChanges({ subscribe, setTimer: engineTimer, active: () => activePairing() !== null && fs.existsSync(/* turbopackIgnore: true */ stateOf), detect: () => flashcardsDesktop().detect() });
+	watchFlashcardsChanges({ subscribe, setTimer: engineTimer, clearTimer: engineClear, now: Date.now, active: () => activePairing() !== null && fs.existsSync(/* turbopackIgnore: true */ stateOf), detect: () => flashcardsDesktop().detect() });
 }
 
 function backup(): string | null {

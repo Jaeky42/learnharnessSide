@@ -249,10 +249,11 @@ export function isFlashcardsItem(key: string, value: unknown): boolean {
 /** A Flashcards change received from the other side, or null when it can't be trusted. */
 export function checkFlashcardsChange(raw: unknown): { key: string; value: unknown; t: number } | null {
 	if (!isObject(raw) || typeof raw.key !== "string" || !isKey(raw.key)) return null;
-	if (typeof raw.t !== "number" || !Number.isFinite(raw.t) || raw.t < 0) return null;
+	if (typeof raw.t !== "number" || !Number.isFinite(raw.t)) return null;
 	const value = raw.value === undefined ? null : raw.value;
 	if (value !== null && !isFlashcardsItem(raw.key, value)) return null;
-	return { key: raw.key, value, t: raw.t };
+	// A time before 1970 is the oldest time there is (see checkMapChange), not a broken page.
+	return { key: raw.key, value, t: Math.max(0, raw.t) };
 }
 
 // ─── Combining ───────────────────────────────────────────────────────────────
@@ -322,7 +323,24 @@ export function combine(input: Items): { items: Items; placement: Placement } {
 	// Decks that may be in the file: not deleted, or deleted but still holding a fact.
 	const deckIds = [...items.keys()].filter((key) => key[0] === "d" && key[1] === "|").map(idOf).sort();
 	const holders = new Map<string, number>();
-	for (const p of alive) for (const [deck, entry] of entriesOf(p)) if (entry.in) holders.set(deck, (holders.get(deck) ?? 0) + 1);
+	const hold = (deck: string): void => { holders.set(deck, (holders.get(deck) ?? 0) + 1); };
+	/**
+	 * A fact taken out of every deck it was in stays in one of them (it is never left in no
+	 * deck): the one it was put in last that isn't deleted; if every one is deleted, the one
+	 * it was put in last, which then stays as a deck (a deck that holds a fact stays).
+	 */
+	const fallback = new Map<string, string>();
+	const byLatest = ([a, x]: [string, MembershipItem], [b, y]: [string, MembershipItem]): number => y.s - x.s || (a < b ? -1 : a > b ? 1 : 0);
+	for (const p of alive) {
+		const entries = [...entriesOf(p)].filter(([deck]) => items.has(`d|${deck}`));
+		const ins = entries.filter(([, entry]) => entry.in);
+		if (ins.length > 0) { for (const [deck] of ins) hold(deck); continue; }
+		if (entries.length === 0) continue;
+		const standing = entries.filter(([deck]) => !items.has(`x|${deck}`));
+		const deck = (standing.length > 0 ? standing : entries).sort(byLatest)[0]![0];
+		fallback.set(p, deck);
+		hold(deck);
+	}
 	const candidates = deckIds.filter((id) => !items.has(`x|${id}`) || (holders.get(id) ?? 0) > 0);
 
 	// Twin decks: the same session or source, or the same uploaded file.
@@ -381,9 +399,8 @@ export function combine(input: Items): { items: Items; placement: Placement } {
 	const placedIn = new Map<string, string[]>();
 	const exists = (deck: string): boolean => items.has(`d|${deck}`) && !joined.has(deck);
 	for (const p of [...alive].sort()) {
-		const entries = [...entriesOf(p)].filter(([deck]) => exists(deck));
-		let decks = entries.filter(([, entry]) => entry.in).map(([deck]) => deck).sort();
-		if (decks.length === 0 && entries.length > 0) decks = [entries.sort(([a, x], [b, y]) => y.s - x.s || (a < b ? -1 : a > b ? 1 : 0))[0]![0]];
+		let decks = [...entriesOf(p)].filter(([deck, entry]) => entry.in && exists(deck)).map(([deck]) => deck).sort();
+		if (decks.length === 0 && fallback.has(p) && exists(target(fallback.get(p)!))) decks = [target(fallback.get(p)!)];
 		placedIn.set(p, decks);
 		for (const deck of decks) deckOf.set(deck, [...(deckOf.get(deck) ?? []), p]);
 	}

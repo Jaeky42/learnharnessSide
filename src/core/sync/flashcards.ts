@@ -263,9 +263,16 @@ function readAll(file: FlashcardsFile | null, memory: FlashcardsMemory | null, n
 		// Made again here after its deletion was noted: its own reviews count, however soon they came.
 		const epoch = items.get(`e|${p.id}`);
 		if (!was && typeof epoch === "number" && epoch >= created) items.set(`e|${p.id}`, created - 1);
-		// Deleted and made again before sync ever saw it: reviews from before it was made are of
-		// the fact that went, and don't count (the plugin started this one afresh).
-		if (epoch === undefined && (byFact.get(p.id) ?? []).some((r) => r.at < created)) items.set(`e|${p.id}`, created - 1);
+		// A fact sync has never seen here (no memory of it), deleted and made again before that:
+		// the reviews this file didn't count (the plugin started the fact afresh, so they come
+		// before its first counted review, or there is none) are of the fact that went. Read
+		// from what the file itself counted, never from `created`: a fact made on two devices
+		// keeps one `created`, and the other device's earlier reviews counted.
+		if (epoch === undefined && !known.has(`p|${p.id}`)) {
+			const list = byFact.get(p.id) ?? [];
+			const cut = p.firstReviewedAt == null ? Math.max(-Infinity, ...list.map((r) => r.at)) : p.firstReviewedAt - 1;
+			if (Number.isFinite(cut) && list.some((r) => r.at <= cut)) items.set(`e|${p.id}`, cut);
+		}
 		if (!same(old, fact)) items.set(`p|${p.id}`, fact);
 		const ids = new Set<string>();
 		for (const c of cues) {

@@ -218,7 +218,8 @@ describe("the settings split", () => {
 		assert.equal(maps.checkMapChange({ key: "p|teacher/20-teaching.md", value: 5, t }), null);
 		assert.equal(maps.checkMapChange({ key: "f|fold_1", value: { id: "fold_2", name: "x", parentId: null, createdAt: "2026" }, t }), null, "a folder under another folder's key");
 		assert.equal(maps.checkMapChange({ key: "x|n_1", value: { x: 1, y: Number.NaN }, t }), null);
-		assert.equal(maps.checkMapChange({ key: "x|n_1", value: { x: 1, y: 2 }, t: -1 }), null);
+		assert.equal(maps.checkMapChange({ key: "x|n_1", value: { x: 1, y: 2 }, t: -1 })!.t, 0, "a time before 1970 is the oldest time, not a refusal");
+		assert.equal(maps.checkMapChange({ key: "x|n_1", value: { x: 1, y: 2 }, t: Number.NaN }), null);
 	});
 
 	it("a value's fingerprint doesn't depend on the order of its fields", () => {

@@ -90,11 +90,13 @@ function world(opts: { page?: { items: number; bytes: number }; serverPlugin?: b
 		page: opts.page,
 	});
 
-	function desktop(name: string, deviceId: string, o: { plugin?: boolean; zone?: () => string | null; hold?: (body: Body) => Promise<void> } = {}) {
+	function desktop(name: string, deviceId: string, o: { plugin?: boolean; zone?: () => string | null; hold?: (body: Body) => Promise<void>; offset?: number } = {}) {
 		const s = side(root, name, o);
 		const requests: Body[] = [];
 		let online = true;
 		let zoneChanges = 0;
+		/** The next answer is lost on the way back (the server did its part). */
+		let dropNext = false;
 		const sync = createMapsDesktop({
 			files: s.files,
 			state: desktopState(stateFile(path.join(s.syncDir, "flashcards-desktop.json"), isDesktopMapsState), s.files),
@@ -106,9 +108,10 @@ function world(opts: { page?: { items: number; bytes: number }; serverPlugin?: b
 				await o.hold?.(body);
 				requests.push(body);
 				const result = JSON.parse(JSON.stringify(authority.exchange(deviceId, body))) as { status: number; body: Record<string, unknown> };
+				if (dropNext) { dropNext = false; return { ok: false, reason: "offline" } as SyncReply<T>; }
 				return (result.status === 200 ? { ok: true, body: result.body } : { ok: false, reason: "refused", status: result.status, code: result.body.code ?? null, error: String(result.body.error), body: result.body }) as SyncReply<T>;
 			},
-			now: () => clock.now, clockOffset: () => 0, timeZone: o.zone ?? (() => "Europe/Stockholm"), onTimeZoneChange: () => {
+			now: () => clock.now, clockOffset: () => o.offset ?? 0, timeZone: o.zone ?? (() => "Europe/Stockholm"), onTimeZoneChange: () => {
 				// One process plays both sides: the PC works its schedules out in its own zone.
 				if (opts.realZone) process.env.TZ = (o.zone ?? (() => "Europe/Stockholm"))()!;
 				zoneChanges++;
@@ -116,7 +119,7 @@ function world(opts: { page?: { items: number; bytes: number }; serverPlugin?: b
 			},
 			rules: FLASHCARDS_RULES, path: FLASHCARDS_SYNC_PATH, busy: () => s.files.busy(), locked: () => s.files.locked(), makeBackup: backup(s.dataDir), page: opts.page,
 		});
-		return { ...s, sync, requests, setOnline: (value: boolean) => { online = value; }, zoneChanges: () => zoneChanges };
+		return { ...s, sync, requests, setOnline: (value: boolean) => { online = value; }, zoneChanges: () => zoneChanges, dropNextReply: () => { dropNext = true; } };
 	}
 	return { root, server, authority, zones, desktop, failBackups: (value: boolean) => { backupFails = value; } };
 }
@@ -575,21 +578,62 @@ describe("Flashcards sync: what a review of the wiring found", () => {
 		assert.equal(pc.library()!.decks[0]!.name, "Renamed on the PC (day 2)");
 	});
 
-	it("the watcher notes a change a little after the plugin says so, only where Flashcards sync has run, and never twice at once", () => {
+	it("the watcher notes changes 20 s after the last one, at most 50 s after the first, only where Flashcards sync has run", () => {
 		let listener: ((event: ServerEvent) => void) | null = null;
-		const timers: Array<{ run: () => void; ms: number }> = [];
-		let active = false, detected = 0;
-		watchFlashcardsChanges({ subscribe: (fn) => { listener = fn; return () => {}; }, setTimer: (run, ms) => { timers.push({ run, ms }); return 0; }, active: () => active, detect: () => { detected++; } });
+		let now = 1_000_000;
+		let pending: { run: () => void; at: number; id: number } | null = null;
+		let ids = 0;
+		let active = false;
+		const detected: number[] = [];
+		watchFlashcardsChanges({
+			subscribe: (fn) => { listener = fn; return () => {}; },
+			setTimer: (run, ms) => { pending = { run, at: now + ms, id: ++ids }; return ids; },
+			clearTimer: (handle) => { if (pending?.id === handle) pending = null; },
+			now: () => now, active: () => active, detect: (since) => { detected.push(since); },
+		});
 		const say = (topic: string, data?: unknown) => listener!({ type: "plugin-message", pluginId: "flashcards", topic, data } as never);
+		const pass = (ms: number) => { now += ms; if (pending && pending.at <= now) { const p = pending; pending = null; p.run(); } };
 		say("changed");
-		assert.equal(timers.length, 0, "no timer where Flashcards sync never ran");
+		assert.equal(pending, null, "no timer where Flashcards sync never ran");
 		active = true;
 		say("changed", { by: "sync" });
-		assert.equal(timers.length, 0, "what sync wrote isn't a change made here");
-		say("batch-changed"); say("changed");
-		assert.deepEqual(timers.map((t) => t.ms), [2000]);
-		timers.shift()!.run();
-		assert.equal(detected, 1);
+		assert.equal(pending, null, "what sync wrote isn't a change made here");
+		// A review session: a rating every 10 s.
+		const start = now;
+		for (let i = 0; i < 10; i++) { say("changed"); pass(10_000); }
+		assert.deepEqual(detected, [start, start + 50_000], "noted at the ceiling, then again 50 s after the next first change");
+		pass(60_000);
+		assert.equal(detected.length, 2, "nothing while nothing changes");
+		// One change: noted 20 s later.
+		say("changed");
+		pass(19_000);
+		assert.equal(detected.length, 2);
+		pass(1_000);
+		assert.equal(detected.length, 3);
+	});
+
+	it("the server's own noting: skipped when an exchange has looked since, and a review alone rewrites no table", async () => {
+		clock.now = new Date(2026, 4, 4, 9).getTime();
+		const w = world();
+		const pc = w.desktop("pc", "dev_aaaaaaaaaaaaaaaa");
+		await w.server.device!.generate([{ id: "s1", questions: ["S?"] }]);
+		await settle(pc);
+		const table = path.join(w.server.syncDir, "flashcards.json");
+		const stamp = () => fs.statSync(table).mtimeMs + ":" + fs.statSync(table).size;
+		const before = stamp();
+		assert.ok(await w.server.device!.grade(3));
+		clock.now += 1000;
+		w.authority.detect(clock.now - 1000);
+		assert.equal(stamp(), before, "a new review alone: no table written");
+		// A rename is noted, unless an exchange has looked since it was announced.
+		await w.server.device!.call("save-deck", { id: w.server.library()!.decks[0]!.id, name: "Renamed" });
+		const announced = clock.now;
+		clock.now += 1000;
+		await pc.sync.round();
+		const after = stamp();
+		clock.now += 1000;
+		w.authority.detect(announced);
+		assert.equal(stamp(), after, "the exchange noted it already");
 	});
 
 	it("two PCs whose first exchanges overlap in pages: only the first brings its settings", async () => {
@@ -682,5 +726,95 @@ describe("Flashcards sync: what a review of the wiring found", () => {
 		t.mock.restoreAll();
 		assert.deepEqual(reads, [], "the library the apply wrote isn't parsed again");
 		w.server.assertCacheSound(); pc.assertCacheSound();
+	});
+
+	for (const offset of [-5_000, -300_000, 300_000]) {
+		it(`a library put back on a PC whose clock is ${offset < 0 ? "ahead of" : "behind"} the server's by ${Math.abs(offset) / 1000} s still syncs, and deletes nothing`, async () => {
+			clock.now = new Date(2026, 4, 4, 9).getTime();
+			const w = world();
+			await w.server.device!.generate([{ id: "s1", questions: ["Phone card?"] }]);
+			const pc = w.desktop("pc", "dev_aaaaaaaaaaaaaaaa", { offset });
+			await pc.device!.generate([{ id: "p1", questions: ["PC card?"], session: "session-2" }]);
+			await settle(pc);
+			const backup = fs.readdirSync(path.join(path.dirname(pc.dataDir), "backups")).find((b) => b.startsWith("before-first-flashcards-sync"))!;
+			fs.copyFileSync(path.join(path.dirname(pc.dataDir), "backups", backup, "core-plugin-data", "flashcards", "flashcards.json"), path.join(flashcardsDataDir(pc.dataDir), "flashcards.json"));
+			await settle(pc);
+			assert.ok(pc.requests.every((r) => r.changes.every((c) => (c as { t?: number }).t! >= 0)), "no time before 1970 ever leaves the PC");
+			assert.deepEqual(facts(pc.library()), ["p1", "s1"]);
+			assert.deepEqual(facts(w.server.library()), ["p1", "s1"]);
+		});
+	}
+
+	it("the server takes a time before 1970 as the oldest time, not as a broken page", () => {
+		clock.now = new Date(2026, 4, 4, 9).getTime();
+		const w = world();
+		const reply = w.authority.exchange("dev_aaaaaaaaaaaaaaaa", { cursor: 0, all: true, changes: [{ key: "s|retention", value: 0.85, t: -4000 }] });
+		assert.equal(reply.status, 200);
+	});
+
+	it("the same fact made on both sides, reviewed on both: after a card is deleted every review still counts on both", async () => {
+		clock.now = new Date(2026, 0, 5, 9).getTime();
+		const w = world();
+		const phone = w.server.device!;
+		await phone.generate([{ id: "n1", questions: ["Phone question?"] }]);
+		for (let i = 0; i < 3; i++) { assert.ok(await phone.grade(3)); clock.now += 2 * DAY; }
+		const pc = w.desktop("pc", "dev_aaaaaaaaaaaaaaaa");
+		await pc.device!.generate([{ id: "n1", questions: ["PC question?"] }]);
+		assert.ok(await pc.device!.grade(3));
+		clock.now += 10 * MINUTE;
+		await settle(pc);
+		// Writes by the plugin on both sides: the files are read for real again.
+		await phone.call("save-settings", { chunkBudget: 4001 });
+		await pc.device!.call("save-settings", { chunkBudget: 4002 });
+		await settle(pc);
+		const st = await phone.state();
+		const p = st.propositions.find((x) => x.id === "n1")!;
+		await phone.call("delete-cue", { propositionId: "n1", cueId: p.cues.find((c) => c.question === "Phone question?")!.id, version: p.version });
+		await settle(pc);
+		for (const s of [pc, w.server]) {
+			const fact = s.library()!.propositions.n1!;
+			assert.equal(fact.schedule.reps, 4, `${s.name}: all four reviews count`);
+		}
+		assert.deepEqual(view(pc.library()), view(w.server.library()));
+	});
+
+	it("a PC whose memory is lost sends everything again, and the phone's newer changes stand", async () => {
+		clock.now = new Date(2026, 4, 4, 9).getTime();
+		const w = world();
+		await w.server.device!.generate([{ id: "s1", questions: ["S?"] }]);
+		const pc = w.desktop("pc", "dev_aaaaaaaaaaaaaaaa");
+		await settle(pc);
+		const deck = w.server.library()!.decks[0]!;
+		clock.now += MINUTE;
+		await w.server.device!.call("save-deck", { id: deck.id, name: "Renamed on the phone" });
+		w.authority.detect();
+		for (const name of ["flashcards-memory.json", "flashcards-memory-reviews.json"]) fs.rmSync(path.join(pc.syncDir, name));
+		clock.now += MINUTE;
+		await settle(pc);
+		for (const s of [pc, w.server]) assert.equal(s.library()!.decks[0]!.name, "Renamed on the phone", s.name);
+		// A first save of the memory cut between its two files is the same case (a lost memory).
+		fs.rmSync(path.join(pc.syncDir, "flashcards-memory-reviews.json"));
+		clock.now += MINUTE;
+		await w.server.device!.call("save-deck", { id: deck.id, name: "Renamed again" });
+		w.authority.detect();
+		clock.now += MINUTE;
+		await settle(pc);
+		for (const s of [pc, w.server]) assert.equal(s.library()!.decks[0]!.name, "Renamed again", s.name);
+	});
+
+	it("a card the PC made, taken by the server before its answer was lost, is never paired with the PC's next same-question card", async () => {
+		clock.now = new Date(2026, 4, 4, 9).getTime();
+		const w = world();
+		const pc = w.desktop("pc", "dev_aaaaaaaaaaaaaaaa");
+		await pc.device!.generate([{ id: "n1", questions: ["First?"] }]);
+		await settle(pc);
+		await pc.device!.call("create-cue", { requestId: "x", propositionId: "n1", question: "Twice?", answer: "One." });
+		pc.dropNextReply();
+		clock.now += 1000;
+		assert.deepEqual(await pc.sync.round(), { ok: false, reason: "offline" });
+		assert.ok(w.server.library()!.propositions.n1!.cues.some((c) => c.question === "Twice?"), "the server took it");
+		await pc.device!.call("create-cue", { requestId: "y", propositionId: "n1", question: "Twice?", answer: "Two." });
+		await settle(pc);
+		for (const s of [pc, w.server]) assert.equal(s.library()!.propositions.n1!.cues.filter((c) => c.question === "Twice?").length, 2, s.name);
 	});
 });

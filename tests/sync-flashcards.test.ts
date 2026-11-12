@@ -347,6 +347,20 @@ describe("Flashcards sync: the rules on their own", () => {
 	const deck = (name: string, s: number, at: number, sourceId?: string) => ({ name, newLimit: 20, ...(sourceId ? { sourceId } : {}), s, at });
 	const fact = (created: number) => ({ origin: "graph", name: "F", statement: "S", created });
 
+	it("a fact taken out of every deck stays in one that isn't deleted, or, if all are, keeps that deck", () => {
+		const base: Array<[string, unknown]> = [
+			["d|deck-a", deck("A", 1, 10)], ["d|deck-b", deck("B", 2, 20)],
+			["p|n_1", fact(1)], ["c|c1", { p: "n_1", q: "Q1", a: "A", s: 1 }],
+			["m|deck-a|n_1", { in: false, s: 5 }], ["m|deck-b|n_1", { in: false, s: 9 }],
+		];
+		const placed = (items: Items) => combine(items).placement.decks.filter((d) => d.members.includes("n_1")).map((d) => d.id);
+		assert.deepEqual(placed(new Map(base)), ["deck-b"], "the one it was put in last");
+		assert.deepEqual(placed(new Map([...base, ["x|deck-b", 1]])), ["deck-a"], "never a deleted deck while another is there");
+		const all = combine(new Map([...base, ["x|deck-a", 1], ["x|deck-b", 1]]));
+		assert.deepEqual(all.placement.decks.map((d) => [d.id, d.members]), [["deck-b", ["n_1"]]], "all deleted: the last one stays, with the fact");
+		assert.equal(all.items.has("x|deck-b"), false);
+	});
+
 	it("joins two decks made from the same uploaded file: the earliest stays, the newest name wins", () => {
 		const items: Items = new Map<string, unknown>([
 			["d|deck-b", deck("Old name", 2, 50)], ["d|deck-a", deck("Newest name", 3, 90)], ["d|deck-c", deck("Other", 1, 10)],
