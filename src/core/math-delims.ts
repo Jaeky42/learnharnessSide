@@ -5,6 +5,35 @@ import {
 	readContentSpans, recoverDocumentLayout, texRanges,
 } from "./content-reader.ts";
 
+/** Side-tutor fork (performance): a bounded string-keyed memo for the two
+ * pure text functions below, so an unchanged string isn't parsed again on a
+ * remount or re-render. Oldest entries go first, by entry count and by the
+ * characters held. A string that only extends the previous input is a
+ * streaming prefix and is computed without being stored, so a reply being
+ * written never fills the cache with its own prefixes. */
+export const MATH_CACHE_MAX_ENTRIES = 1000;
+export const MATH_CACHE_MAX_CHARS = 2_000_000;
+function boundedMemo(compute: (text: string) => string) {
+	const entries = new Map<string, string>();
+	let chars = 0, previous = "";
+	const fn = (text: string): string => {
+		const hit = entries.get(text);
+		if (hit !== undefined) return hit;
+		const result = compute(text);
+		const growing = previous !== "" && text.length > previous.length && text.startsWith(previous);
+		previous = text;
+		if (growing || text === "" || text.length + result.length > MATH_CACHE_MAX_CHARS / 4) return result;
+		entries.set(text, result);
+		chars += text.length + result.length;
+		for (const [key, value] of entries) {
+			if (entries.size <= MATH_CACHE_MAX_ENTRIES && chars <= MATH_CACHE_MAX_CHARS) break;
+			entries.delete(key); chars -= key.length + value.length;
+		}
+		return result;
+	};
+	return { fn, stats: () => ({ entries: entries.size, chars }), clear: () => { entries.clear(); chars = 0; previous = ""; } };
+}
+
 const escaped = (text: string, i: number) => {
 	let n = 0; while (i > 0 && text[--i] === "\\") n++;
 	return n % 2 === 1;
@@ -36,7 +65,9 @@ function replaceEscapedDollars(content: string): string {
 
 /** Read old \(...\)/\[...\] syntax without touching literal content or
  * reparsing native math as Markdown. Dollar authoring remains native. */
-export function transformMathDelimiters(markdown: string): string {
+const transformMemo = boundedMemo(transformMathDelimitersUncached);
+export const transformMathDelimiters: (markdown: string) => string = transformMemo.fn;
+function transformMathDelimitersUncached(markdown: string): string {
 	let offset = 0;
 	return readContentSpans(markdown).map(span => {
 		const start = offset; offset += span.raw.length;
@@ -116,6 +147,13 @@ export function healOverescapedCommands(text: string): string {
 
 /** Presentation-only, language-independent recovery. Shape parsing, saved
  * identities, grading and model history must use the unprojected source. */
-export function repairMathForDisplay(text: string): string {
+const repairMemo = boundedMemo(repairMathForDisplayUncached);
+export const repairMathForDisplay: (text: string) => string = repairMemo.fn;
+/** For tests: how much each cache holds, and emptying both. */
+export const mathCacheForTests = {
+	stats: () => ({ transform: transformMemo.stats(), repair: repairMemo.stats() }),
+	clear: () => { transformMemo.clear(); repairMemo.clear(); },
+};
+function repairMathForDisplayUncached(text: string): string {
 	return healOverescapedCommands(restoreMathEscapes(recoverDocumentLayout(text)));
 }

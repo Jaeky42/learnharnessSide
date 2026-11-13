@@ -38,7 +38,7 @@ import type { AssistantMessage, ImageContent, Message, TextContent, ToolResultMe
 import type { PluginSubmissionImages, PluginSubmissionOccurrence } from "./plugin-submissions.ts";
 import { ImmutableReadCache } from "./immutable-data.ts";
 import { QUESTION_TOOLS, type PendingQuestion } from "./pending.ts";
-import { pluginProblemForCall, readPluginProblemSubmission, type PluginProblemSnapshot } from "./plugin-problems.ts";
+import { pluginProblemForCall, readPluginProblemSnapshot, readPluginProblemSubmission, type PluginProblemSnapshot } from "./plugin-problems.ts";
 import { CLAUDE_CODE_PROVIDER } from "./contracts/claude-code.ts";
 import {
 	CONCLUDE_ACK_TEXT,
@@ -460,26 +460,91 @@ export function concludedByDismissalPair(
  *  conclude call or a dismissal marker deactivates. The ack result at pose
  *  time does NOT (the problem stays on screen through nudges; the dock's
  *  subject is the call, not a dangling result). */
-/** The ids of tool calls whose results are CLEAN (not errored) — the only
- *  calls that ever happened, per the honest-activation ruling. */
-function cleanToolCallIds(messages: readonly LhMessage[]): Set<string> {
-	const ids = new Set<string>();
-	for (const m of messages) {
-		if ((m as { role?: string }).role !== "toolResult") continue;
-		const result = m as ToolResultMessage;
-		if (!result.isError) ids.add(result.toolCallId);
+/** Lookups the problem folds repeat once per tool call (clean results, the
+ *  owner of an occurrence, the result batch after it), built once per
+ *  history instead of by a scan per call. Side-tutor fork (performance):
+ *  results are identical to the per-call scans this replaced. */
+class ProblemIndex {
+	private cleanIds?: Set<string>;
+	private owners?: Map<unknown, number>;
+	private batches?: Map<number, ToolResultMessage[]>;
+	private activeAnswer?: { value: ActiveProblemCall | null };
+	constructor(private readonly messages: readonly LhMessage[]) {}
+
+	/** The ids of tool calls whose results are CLEAN (not errored) — the only
+	 *  calls that ever happened, per the honest-activation ruling. */
+	get clean(): Set<string> {
+		if (!this.cleanIds) {
+			const ids = new Set<string>();
+			for (const m of this.messages) {
+				if ((m as { role?: string }).role !== "toolResult") continue;
+				const result = m as ToolResultMessage;
+				if (!result.isError) ids.add(result.toolCallId);
+			}
+			this.cleanIds = ids;
+		}
+		return this.cleanIds;
 	}
-	return ids;
+
+	/** Index of the FIRST assistant message with this id (what `find` picked). */
+	private ownerIndex(messageId: unknown): number {
+		if (!this.owners) {
+			const owners = new Map<unknown, number>();
+			this.messages.forEach((message, i) => { if (message.role === "assistant" && !owners.has(message.id)) owners.set(message.id, i); });
+			this.owners = owners;
+		}
+		return this.owners.get(messageId) ?? -1;
+	}
+
+	/** The tool results between an assistant message and the next assistant. */
+	private batchAfter(owner: number): ToolResultMessage[] {
+		if (!this.batches) {
+			const batches = new Map<number, ToolResultMessage[]>();
+			let current: ToolResultMessage[] | null = null;
+			this.messages.forEach((message, i) => {
+				if (message.role === "assistant") { current = []; batches.set(i, current); }
+				else if (message.role === "toolResult") current?.push(message as ToolResultMessage);
+			});
+			this.batches = batches;
+		}
+		return this.batches.get(owner) ?? [];
+	}
+
+	/** Common practice pose recognition, independent of the currently enabled plugins. */
+	problemForCall(occurrence: PluginSubmissionOccurrence): { input: unknown; pluginProblem?: PluginProblemSnapshot } | null {
+		const mi = this.ownerIndex(occurrence.messageId);
+		const owner = mi < 0 ? undefined : this.messages[mi] as (AssistantMessage & { id: string }) | undefined;
+		const call = owner?.content[occurrence.contentIndex];
+		if (call?.type !== "toolCall" || call.id !== occurrence.toolCallId || call.name !== occurrence.toolName) return null;
+		if (call.name === PRACTICE_PROBLEM_TOOL) return { input: call.arguments };
+		// Same rule as pluginProblemForCall: the first matching result of the
+		// owner's own batch; an errored one means no problem.
+		const result = this.batchAfter(mi).find(r => r.toolCallId === call.id && r.toolName === call.name) as
+			(ToolResultMessage & { details?: { pluginProblem?: unknown } }) | undefined;
+		const pluginProblem = result && !result.isError ? readPluginProblemSnapshot(result.details?.pluginProblem) : null;
+		return pluginProblem ? { input: pluginProblem.input, pluginProblem } : null;
+	}
+
+	active(): ActiveProblemCall | null {
+		return (this.activeAnswer ??= { value: scanActiveProblem(this) }).value;
+	}
+	/** @internal for scanActiveProblem */
+	get history(): readonly LhMessage[] { return this.messages; }
+}
+
+type ActiveProblemCall = { occurrence: PluginSubmissionOccurrence; input: unknown; pluginProblem?: PluginProblemSnapshot };
+
+// A history is cached only when it is a deep-immutable copy made by
+// copyImmutableData (the browser's records); a mutable array (the server's
+// working history) gets a fresh index per call, so nothing can go stale.
+const problemIndexes = new ImmutableReadCache<ProblemIndex>();
+function problemIndexOf(messages: readonly LhMessage[]): ProblemIndex {
+	return problemIndexes.read(messages, undefined, () => new ProblemIndex(messages));
 }
 
 /** Common practice pose recognition, independent of the currently enabled plugins. */
 export function practiceProblemForCall(messages: readonly LhMessage[], occurrence: PluginSubmissionOccurrence): { input: unknown; pluginProblem?: PluginProblemSnapshot } | null {
-	const owner = messages.find(message => message.id === occurrence.messageId && message.role === "assistant") as (AssistantMessage & { id: string }) | undefined;
-	const call = owner?.content[occurrence.contentIndex];
-	if (call?.type !== "toolCall" || call.id !== occurrence.toolCallId || call.name !== occurrence.toolName) return null;
-	if (call.name === PRACTICE_PROBLEM_TOOL) return { input: call.arguments };
-	const pluginProblem = pluginProblemForCall(messages, occurrence);
-	return pluginProblem ? { input: pluginProblem.input, pluginProblem } : null;
+	return problemIndexOf(messages).problemForCall(occurrence);
 }
 
 /** The conclusion reveals the solution committed by the newest clean pose
@@ -512,7 +577,8 @@ export function problemInputForConclude(
 	);
 	if (mi < 0) return undefined;
 	const concludeMessageIndex = mi;
-	const clean = cleanToolCallIds(messages);
+	const index = problemIndexOf(messages);
+	const clean = index.clean;
 	for (; mi >= 0; mi--) {
 		const m = messages[mi]!;
 		if ((m as { role?: string }).role !== "assistant") continue;
@@ -523,7 +589,7 @@ export function problemInputForConclude(
 		for (let bi = lastIndex; bi >= 0; bi--) {
 			const block = assistant.content[bi]!;
 			if (block.type !== "toolCall" || !clean.has(block.id)) continue;
-			const problem = practiceProblemForCall(messages, { messageId: m.id, contentIndex: bi, toolCallId: block.id, toolName: block.name });
+			const problem = index.problemForCall({ messageId: m.id, contentIndex: bi, toolCallId: block.id, toolName: block.name });
 			if (!problem) continue;
 			return (problem.input ?? undefined) as
 				| { statement?: unknown; mode?: unknown; target?: unknown; modelSolution?: unknown }
@@ -536,21 +602,24 @@ export function problemInputForConclude(
 export function activeProblemOf(
 	messages: readonly LhMessage[],
 ): { toolCallId: string; input: unknown; pluginProblem?: PluginProblemSnapshot } | null {
-	const active = activeProblemCallOf(messages);
+	const active = problemIndexOf(messages).active();
 	return active ? { toolCallId: active.occurrence.toolCallId, input: active.input, ...(active.pluginProblem ? { pluginProblem: active.pluginProblem } : {}) } : null;
 }
 
 /** Exact source of the same clean activation selected by activeProblemOf. */
 export function activeProblemOccurrenceOf(messages: readonly LhMessage[]): PluginSubmissionOccurrence | null {
-	return activeProblemCallOf(messages)?.occurrence ?? null;
+	const occurrence = problemIndexOf(messages).active()?.occurrence;
+	// A copy, as every call returned a fresh object before the index cached the answer.
+	return occurrence ? { ...occurrence } : null;
 }
 
-function activeProblemCallOf(messages: readonly LhMessage[]): { occurrence: PluginSubmissionOccurrence; input: unknown; pluginProblem?: PluginProblemSnapshot } | null {
+function scanActiveProblem(index: ProblemIndex): ActiveProblemCall | null {
+	const messages = index.history;
 	// HONEST ACTIVATION (owner ruling, 2026-10-05 — the BKT incident):
 	// calls count only through their RESULTS — a problem activates on its
 	// clean ack, a conclude frees on its clean ack; errored and dangling
 	// calls are skipped ("either it goes through or it doesn't").
-	const cleanCallIds = cleanToolCallIds(messages);
+	const cleanCallIds = index.clean;
 	for (let mi = messages.length - 1; mi >= 0; mi--) {
 		const m = messages[mi]!;
 		const role = (m as { role?: string }).role;
@@ -569,8 +638,10 @@ function activeProblemCallOf(messages: readonly LhMessage[]): { occurrence: Plug
 					continue; // errored/dangling conclude: the free never happened
 				}
 				const occurrence = { messageId: m.id, contentIndex: bi, toolCallId: block.id, toolName: block.name };
-				const problem = practiceProblemForCall(messages, occurrence);
-				if (problem && cleanCallIds.has(block.id)) return { occurrence, ...problem };
+				// Clean first: the lookup has no side effects, and an unclean call never wins.
+				if (!cleanCallIds.has(block.id)) continue;
+				const problem = index.problemForCall(occurrence);
+				if (problem) return { occurrence, ...problem };
 				// errored/dangling pose — it did not go through; keep scanning
 			}
 			continue;
@@ -584,7 +655,8 @@ function activeProblemCallOf(messages: readonly LhMessage[]): { occurrence: Plug
  *  (input-events). Newest-marker-wins scan: the first dismissal marker or
  *  conclude call from the end decides. */
 export function pendingProblemDismissalOf(messages: readonly LhMessage[]): string | null {
-	const cleanCallIds = cleanToolCallIds(messages);
+	const index = problemIndexOf(messages);
+	const cleanCallIds = index.clean;
 	for (let mi = messages.length - 1; mi >= 0; mi--) {
 		const m = messages[mi]!;
 		const role = (m as { role?: string }).role;
@@ -604,7 +676,7 @@ export function pendingProblemDismissalOf(messages: readonly LhMessage[]): strin
 					if (cleanCallIds.has(block.id)) return null; // a CLEAN conclude settles it
 					continue; // errored/dangling: it never happened
 				}
-				if (block.type === "toolCall" && cleanCallIds.has(block.id) && practiceProblemForCall(messages, {
+				if (block.type === "toolCall" && cleanCallIds.has(block.id) && index.problemForCall({
 					messageId: m.id, contentIndex: bi, toolCallId: block.id, toolName: block.name,
 				})) return null; // any CLEAN native/plugin pose supersedes it
 			}
