@@ -294,24 +294,15 @@ describe("drag on the dock scrolls the lesson", async () => {
 		assert.equal(flingStep(0.5), 0);
 		assert.ok(Math.abs(flingStep(flingStep(10, 0.5), 0.5) - 9.5) < 1e-9, "two 120 fps frames = one 60 fps frame");
 	});
-	it("a reveal is over at the bottom or once let go; short of the bottom it slides again (owner's iPhone)", async () => {
-		const { revealOver, holdReveal, REVEAL_BOTTOM_PX, REVEAL_HOLD_MS } = await import("../components/phone/use-dock-touch-scroll.ts");
-		assert.equal(REVEAL_HOLD_MS, 4000);
-		assert.equal(revealOver(1, true), true, "the slide stops 1 px short: that is the bottom");
-		assert.equal(revealOver(REVEAL_BOTTOM_PX + 1, true), false, "stopped short by motion that wasn't the learner's");
-		assert.equal(revealOver(5000, false), true, "a new touch, a wheel or the time limit let go of it");
-		// A slide that a stray scroll stops short twice, then reaches the bottom.
-		const ends = [5000, 4200, 1];
-		let slides = 0;
-		let frames = 0;
-		await holdReveal({ slide: async () => { slides++; }, distance: () => ends[slides - 1]!, held: () => true, frame: async () => { frames++; } });
-		assert.equal(slides, 3);
-		assert.equal(frames, 2, "a frame between tries");
-		// Let go while it waits for the next try: no more slides.
-		slides = 0;
-		let held = true;
-		await holdReveal({ slide: async () => { slides++; }, distance: () => 5000, held: () => held, frame: async () => { held = false; } });
-		assert.equal(slides, 1);
+	it("a glide to the bottom: arrived within the fold machine's reach, once more when it ends short, then gives up (owner's choice)", async () => {
+		const { glideStep, GLIDE_ARRIVED_PX, GLIDE_QUIET_MS, GLIDE_RETRIES } = await import("../components/phone/use-dock-touch-scroll.ts");
+		assert.equal(GLIDE_ARRIVED_PX, 16, "chat.tsx's EXPAND_DIST: where the question opens");
+		assert.equal(GLIDE_RETRIES, 2);
+		assert.equal(glideStep(10, 0, 0), "arrived");
+		assert.equal(glideStep(GLIDE_ARRIVED_PX + 1, GLIDE_QUIET_MS - 1, 0), "wait", "still moving");
+		assert.equal(glideStep(4000, GLIDE_QUIET_MS, 0), "again", "ended short with nobody touching");
+		assert.equal(glideStep(4000, GLIDE_QUIET_MS, GLIDE_RETRIES - 1), "again");
+		assert.equal(glideStep(4000, GLIDE_QUIET_MS, GLIDE_RETRIES), "give-up");
 	});
 	it("takes the throw from the last moments of the drag, not the last twitch", async () => {
 		const { releaseVelocity, FLING_MAX } = await import("../components/phone/use-dock-touch-scroll.ts");

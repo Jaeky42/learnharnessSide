@@ -2730,8 +2730,9 @@ export function DockOverlay({
 	// starts, before the slide's first frame.
 	// TOUCH (fork): a touch on the dock itself keeps the question held until
 	// it is known (`hold`): a tap takes the reveal up again, anything else lets
-	// go and folds as the fold machine would have.
-	const dockReveal = useDockTouchScroll(blockRef, scrollRef, {
+	// go and folds as the fold machine would have. And the glide to the bottom
+	// (openDock below): its end opens the question if it arrived.
+	const dockTouch = useDockTouchScroll(blockRef, scrollRef, {
 		onTouchStart: (hold) => {
 			if (!stickState.animation && !expandIntentRef.current) return;
 			stopScroll();
@@ -2747,6 +2748,10 @@ export function DockOverlay({
 			expandIntentRef.current = false;
 			const el = scrollRef.current;
 			if (el && expandedRef.current && !atBottomRef.current && el.scrollHeight - el.clientHeight - el.scrollTop > COLLAPSE_DIST) setExpanded(false);
+		},
+		onGlideEnd: (arrived) => {
+			if (arrived && !expandedRef.current) arriveAtBottomRef.current();
+			openOnArrivalRef.current = false;
 		},
 	});
 
@@ -2764,24 +2769,36 @@ export function DockOverlay({
 	const suppressFoldDuringReveal = () => {
 		expandIntentRef.current = true;
 		clearTimeout(intentTimerRef.current);
-		const settle = () => {
+		intentTimerRef.current = setTimeout(() => {
+			expandIntentRef.current = false;
+		}, 2000);
+		return Promise.resolve(scrollToBottom()).finally(() => {
 			clearTimeout(intentTimerRef.current);
 			expandIntentRef.current = false;
-		};
-		intentTimerRef.current = setTimeout(settle, dockReveal.revealHoldMs ?? 2000);
-		// TOUCH (fork, owner's iPhone): on a touch screen the reveal holds the
-		// question open until the lesson is really at its bottom, sliding again
-		// if motion that wasn't the learner's stops the slide short, until a
-		// new touch, or the time limit (revealToBottom in
-		// components/phone/use-dock-touch-scroll.ts). Elsewhere it is the one
-		// slide it always was.
-		return dockReveal.revealToBottom(scrollToBottom, () => expandIntentRef.current, settle);
+		});
 	};
-	const expandAndReveal = () => {
-		setRevealed(true); // the teach-check invitation was accepted (W5)
+	// TOUCH (fork, owner's iPhone and choice): on a touch screen, away from
+	// the bottom, a tap on the folded question (or the teach check's Open)
+	// doesn't open it: the lesson glides to its bottom (glideToBottom in
+	// components/phone/use-dock-touch-scroll.ts) and the question opens as it
+	// arrives, by the fold machine's own "reached the bottom again"
+	// (arriveAtBottom). A teach check counts as revealed only on arrival
+	// (openOnArrivalRef), so a glide the learner stops leaves its invitation
+	// as it was. At the bottom, and on a computer, it opens at once as before.
+	const openOnArrivalRef = useRef(false);
+	const openDock = (reveal: boolean) => {
+		if (!atBottomRef.current) {
+			if (stickState.animation) stopScroll();
+			if (dockTouch.glideToBottom()) {
+				openOnArrivalRef.current = reveal;
+				return;
+			}
+		}
+		if (reveal) setRevealed(true); // the teach-check invitation was accepted (W5)
 		setExpanded(true);
 		void suppressFoldDuringReveal();
 	};
+	const expandAndReveal = () => openDock(true);
 	const expandAndRevealRef = useRef(expandAndReveal);
 	expandAndRevealRef.current = expandAndReveal;
 	// ENTER OPENS THE WAITING CHECK (owner, keyboard round 2026-10-06):
@@ -2816,6 +2833,21 @@ export function DockOverlay({
 		return () => document.removeEventListener("keydown", onKeyDown);
 	}, [pending, pluginQuestion, unreadablePlugin, expanded, controller]);
 
+	// Reaching the bottom again re-opens the dock (the fold machine below; and
+	// the end of a touch screen's glide, should a mute have hidden the arrival).
+	const arriveAtBottomRef = useRef(() => {});
+	arriveAtBottomRef.current = () => {
+		// Teach checks stay collapsed until the learner opens them (W5): the
+		// at-bottom auto-expand would pop the form over the teaching. A glide
+		// started by their Open is that opening (TOUCH, fork).
+		if (requiresRevealRef.current && !revealedRef.current) {
+			if (!openOnArrivalRef.current) return;
+			setRevealed(true);
+		}
+		openOnArrivalRef.current = false;
+		setExpanded(true);
+		void scrollToBottom();
+	};
 	useEffect(() => {
 		const el = scrollRef.current;
 		if (!el) return;
@@ -2837,11 +2869,7 @@ export function DockOverlay({
 				// left the bottom.
 				if (d > COLLAPSE_DIST && !expandIntentRef.current && !atBottomRef.current) setExpanded(false);
 			} else if (d < EXPAND_DIST) {
-				// Teach checks stay collapsed until the learner opens them (W5): the
-				// at-bottom auto-expand would pop the form over the teaching.
-				if (requiresRevealRef.current && !revealedRef.current) return;
-				setExpanded(true);
-				void scrollToBottom();
+				arriveAtBottomRef.current();
 			}
 		};
 		el.addEventListener("scroll", onScroll, { passive: true });
@@ -2963,17 +2991,14 @@ export function DockOverlay({
 									compactionRunning={compactionRunning}
 								/>
 							) : pluginPractice ? (
-								<PluginProblemDock {...pluginPractice} viewReader={customViewReader} expanded={expanded} onExpand={() => { setExpanded(true); void suppressFoldDuringReveal(); }} />
+								<PluginProblemDock {...pluginPractice} viewReader={customViewReader} expanded={expanded} onExpand={() => openDock(false)} />
 							) : practice ? (
 								<PracticeDock
 									viewReader={practiceViewReader}
 									problemCallId={practice.toolCallId}
 									input={practice.input as { statement: string }}
 									expanded={expanded}
-									onExpand={() => {
-										setExpanded(true);
-										void suppressFoldDuringReveal();
-									}}
+									onExpand={() => openDock(false)}
 									onSubmit={onSubmitThinking}
 									onPrepareSubmission={onPrepareThinking}
 									hasPendingInput={pendingThinkingInput}

@@ -32,30 +32,34 @@
  * cancelled so it can't land twice. (Calling stopScroll on every move instead made scrolling jump up
  * and down on the owner's iPhone and was reverted.)
  *
- * A TAP ON THE FOLDED QUESTION ENDS AT THE BOTTOM, OPEN (owner's iPhone: it
- * opened for an instant and folded again, with the lesson left far up). The
- * tap opens the question and slides the lesson down (use-stick-to-bottom's
- * scrollToBottom). That library takes ANY upward scroll during its slide for
- * the learner leaving: it ends the slide at once, chat.tsx then lets go of
- * the question, and the next scroll event folds it. On an iPhone such scrolls
- * come without a new touch: Safari's own deceleration of a lesson still
- * moving, or its late reports of where the lesson was. A tap whose wobble
- * became a short drag here could also leave this file's own throw running
- * against the slide. So on a touch screen a reveal (revealToBottom): stops
- * that throw first, and holds the question open, sliding again whenever a
- * slide ends short of the bottom, until the lesson is at its bottom, or the
- * learner touches or wheels again (a new touch still stops the slide), or
- * scrolls by mouse on the lesson or by key (a touch laptop), or
- * REVEAL_HOLD_MS has passed. Elsewhere it is one slide, as before.
+ * A TAP ON THE FOLDED QUESTION GLIDES DOWN INTO IT (owner's iPhone, then the
+ * owner's choice on a test page: "stop the glide and immediately pull me
+ * down", and "pull down into the question, like how you can already scroll
+ * down into the question"). On a touch screen, away from the bottom:
+ *   - a touch on the dock while the lesson still moves by itself (Safari's
+ *     momentum) stops that motion first (stopMomentum, at the touchstart);
+ *   - the tap starts ONE glide, the browser's own smooth scroll to the
+ *     bottom (glideToBottom); the question stays folded and opens as the
+ *     lesson arrives, by the fold machine's own "reached the bottom again"
+ *     in chat.tsx;
+ *   - a touch on the lesson or the dock, a wheel, a mouse press or a
+ *     scrolling key during the glide ends it where it is, and nothing pulls
+ *     the lesson back; ending short with nobody touching (the lesson grew
+ *     under it) glides once more, at most GLIDE_RETRIES times.
+ * At the bottom the tap opens the question at once, as on a computer. (The
+ * first version opened the question at the tap and slid the lesson with
+ * use-stick-to-bottom's spring, sliding again each time a scroll report ended
+ * it; on the iPhone it fought Safari's momentum and jittered.)
  *
- * A TAP ON THE QUESTION DURING THE SLIDE (for the owner to review): a touch
- * on the dock while the lesson slides to the bottom still stops the slide at
- * once, but holds the question open until the touch is known. Ends as a tap
- * (it never moved, by dragDecision): the reveal is taken up again, so the box
- * that was tapped stays and the lesson ends at the bottom. Moves, lasts past
- * TAP_MS or gets a second finger: let go, and the question folds as before.
- * A touch on the lesson itself is unchanged: it stops the slide, and that is
- * that.
+ * A TAP ON THE QUESTION DURING A SLIDE (owner: "this change is fine"): an
+ * open question can still be under a slide to the bottom (a question that
+ * opens at the bottom, the lesson following a reply). A touch on the dock
+ * then still stops the slide at once, but holds the question open until the
+ * touch is known. Ends as a tap (it never moved, by dragDecision): the reveal
+ * is taken up again, so the box that was tapped stays and the lesson ends at
+ * the bottom. Moves, lasts past TAP_MS or gets a second finger: let go, and
+ * the question folds as before. A touch on the lesson itself is unchanged: it
+ * stops the slide, and that is that.
  *
  * NO BOUNCE AT THE ENDS (found with the scroll readout on the owner's
  * iPhone). When the lesson overshot its bottom, Safari's rubber-band spring
@@ -190,15 +194,19 @@ export type DockTouchHooks = {
 	/** A held dock touch is known: a tap (take the reveal up again) or not
 	 *  (a drag, a long press, a second finger: let go, as a touch did before). */
 	onTouchSettled?: (tap: boolean) => void;
+	/** A glide to the bottom (glideToBottom) is over: it arrived, or the
+	 *  learner stopped it (a touch, a wheel, a mouse press, a scrolling key),
+	 *  or it gave up short of the bottom. */
+	onGlideEnd?: (arrived: boolean) => void;
 };
 
 /** The keys that scroll the lesson when it or the page has the focus. */
 export const SCROLL_KEYS = new Set(["PageUp", "PageDown", "ArrowUp", "ArrowDown", "Home", "End", " "]);
 
 /** Pure rule, exported for tests: does this key press scroll the lesson (and
- *  so let go of a reveal, as a touch does)? Only a scrolling key, and only
- *  while the focus is on the page itself or inside the lesson; a text box,
- *  the question's own controls and menus keep their keys. */
+ *  so stop a glide to the bottom, as a touch does)? Only a scrolling key, and
+ *  only while the focus is on the page itself or inside the lesson; a text
+ *  box, the question's own controls and menus keep their keys. */
 export function keyScrollsLesson(key: string, target: EventTarget | null, lesson: Element, doc: Document): boolean {
 	if (!SCROLL_KEYS.has(key)) return false;
 	if (target === doc || target === doc.body || target === doc.documentElement) return true;
@@ -207,35 +215,29 @@ export function keyScrollsLesson(key: string, target: EventTarget | null, lesson
 	return key !== " " || !target.closest('button, a[href], [role="button"], summary');
 }
 
-/** The longest a reveal holds the question open on a touch screen, in ms. A
- *  slide from far up takes about 2 s; this leaves room for a lesson that was
- *  still moving when the tap landed. */
-export const REVEAL_HOLD_MS = 4000;
-/** Close enough to the bottom: the slide stops 1 px short of it. */
-export const REVEAL_BOTTOM_PX = 2;
+/** The glide has arrived: as close as the fold machine's own "reached the
+ *  bottom again" (EXPAND_DIST in chat.tsx), which opens the question. */
+export const GLIDE_ARRIVED_PX = 16;
+/** A glide counts as ended once the lesson hasn't moved for this long. */
+export const GLIDE_QUIET_MS = 150;
+/** At most this many more glides when one ends short with nobody touching
+ *  (the lesson grew under it, or the browser gave up). */
+export const GLIDE_RETRIES = 2;
 
-/** Pure rule, exported for tests: a slide to the bottom has ended; is the
- *  reveal over? Yes at the bottom, or once the hold was let go (a new touch
- *  or wheel, the time limit). Otherwise motion that wasn't the learner's
- *  stopped the slide short: slide again. */
-export function revealOver(distance: number, held: boolean): boolean {
-	return !held || distance <= REVEAL_BOTTOM_PX;
+/** Pure rule, exported for tests: one look at a glide to the bottom.
+ *    "arrived" close enough to the bottom;
+ *    "wait"    still moving (or not started yet);
+ *    "again"   ended short with nobody touching: glide once more;
+ *    "give-up" ended short GLIDE_RETRIES times already. */
+export function glideStep(distance: number, quietMs: number, retries: number): "arrived" | "wait" | "again" | "give-up" {
+	if (distance <= GLIDE_ARRIVED_PX) return "arrived";
+	if (quietMs < GLIDE_QUIET_MS) return "wait";
+	return retries < GLIDE_RETRIES ? "again" : "give-up";
 }
 
-/** A touch screen's reveal, exported for tests: slide, and slide again (a
- *  frame later) while the slide ends short of the bottom and the hold lasts. */
-export async function holdReveal(o: { slide: () => unknown; distance: () => number; held: () => boolean; frame: () => Promise<unknown> }): Promise<void> {
-	for (;;) {
-		await o.slide();
-		if (revealOver(o.distance(), o.held())) return;
-		await o.frame();
-		if (!o.held()) return;
-	}
+function prefersReducedMotion(): boolean {
+	return typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
-
-/** Open the question's way to the bottom: `slide` is scrollToBottom, `held`
- *  says chat.tsx still holds the question open, `settle` lets go of it. */
-export type RevealToBottom = (slide: () => unknown, held: () => boolean, settle: () => void) => Promise<unknown>;
 
 export function useDockTouchScroll(rootRef: RefObject<HTMLElement | null>, transcriptRef: RefObject<HTMLElement | null>, hooks: DockTouchHooks = {}) {
 	// A phone, and a tablet with the computer layout (owner's choice): the
@@ -243,29 +245,12 @@ export function useDockTouchScroll(rootRef: RefObject<HTMLElement | null>, trans
 	const touch = useIsTouchScreen();
 	const hooksRef = useRef(hooks);
 	hooksRef.current = hooks;
-	const touchRef = useRef(touch);
-	touchRef.current = touch;
-	// Set by the effect below: stop this file's throw; when the learner last
-	// touched the dock or the lesson, or turned a wheel over them.
-	const motionRef = useRef({ stop: () => {}, inputAt: -Infinity });
-	const revealIdRef = useRef(0);
-	const revealToBottom = useCallback<RevealToBottom>((slide, held, settle) => {
-		const transcript = transcriptRef.current;
-		if (!touchRef.current || !transcript) return Promise.resolve(slide()).finally(settle);
-		motionRef.current.stop();
-		const id = ++revealIdRef.current;
-		const startedAt = performance.now();
-		const holds = () => id === revealIdRef.current && motionRef.current.inputAt < startedAt && held();
-		return holdReveal({
-			slide,
-			distance: () => transcript.scrollHeight - transcript.clientHeight - transcript.scrollTop,
-			held: holds,
-			frame: () => new Promise(requestAnimationFrame),
-		}).finally(() => {
-			// A newer reveal owns the hold now.
-			if (id === revealIdRef.current) settle();
-		});
-	}, [transcriptRef]);
+	// Set by the effect below, only on a touch screen.
+	const glideRef = useRef<(() => boolean) | null>(null);
+	/** On a touch screen: stop the lesson's own motion and glide it to its
+	 *  bottom, once (onGlideEnd says how that ended). False elsewhere, and when
+	 *  the lesson is already at its bottom: the caller opens at once. */
+	const glideToBottom = useCallback(() => glideRef.current?.() ?? false, []);
 	useEffect(() => {
 		const root = rootRef.current;
 		const transcript = transcriptRef.current;
@@ -290,11 +275,105 @@ export function useDockTouchScroll(rootRef: RefObject<HTMLElement | null>, trans
 			cancelAnimationFrame(frame);
 			frame = 0;
 		};
-		const motion = motionRef.current;
-		motion.stop = stopFling;
-		const onInput = () => {
-			motion.inputAt = performance.now();
+		const distance = () => transcript.scrollHeight - transcript.clientHeight - transcript.scrollTop;
+
+		// STOP SAFARI'S OWN GLIDE (owner's choice B on the test page): the
+		// lesson still moving under its own momentum when the dock is touched.
+		// Safari ignores a page's scroll while it decelerates, so the scrolling
+		// is hidden for one frame, keeping the place (the place as it is when
+		// the scrolling comes back, so a drag begun meanwhile isn't undone).
+		let restore = 0;
+		let glideAfterRestore = false;
+		// The inline value to put back: use-stick-to-bottom sets the scroller's
+		// own `overflow: auto` inline.
+		let overflowBefore = "";
+		const scrollBack = () => {
+			const y = transcript.scrollTop;
+			transcript.style.overflowY = overflowBefore;
+			transcript.scrollTop = y;
 		};
+		const endStop = () => {
+			if (!restore) return;
+			cancelAnimationFrame(restore);
+			restore = 0;
+			scrollBack();
+		};
+		const stopMomentum = () => {
+			endStop();
+			const y = transcript.scrollTop;
+			overflowBefore = transcript.style.overflowY;
+			transcript.style.overflowY = "hidden";
+			transcript.scrollTop = y;
+			restore = requestAnimationFrame(() => {
+				restore = 0;
+				scrollBack();
+				// A glide asked for meanwhile starts now: on a box whose scrolling
+				// is hidden it would be cut off when the scrolling comes back, and
+				// restoring at once could undo the stop before a frame showed it
+				// (a tap whose touchstart and touchend land in one frame).
+				if (glideAfterRestore) {
+					glideAfterRestore = false;
+					smoothToBottom();
+				}
+			});
+		};
+
+		// THE GLIDE TO THE BOTTOM (glideToBottom): one motion, the browser's own
+		// smooth scroll, watched each frame only to know how it ends. Input from
+		// the learner ends it for good (stopGlide); ending short with nobody
+		// touching starts it once more, at most GLIDE_RETRIES times.
+		let glide: { frame: number; retries: number; top: number; movedAt: number } | null = null;
+		const smoothToBottom = () => {
+			transcript.scrollTo({ top: transcript.scrollHeight - transcript.clientHeight, behavior: prefersReducedMotion() ? "auto" : "smooth" });
+		};
+		const glideOnce = () => {
+			if (restore) glideAfterRestore = true;
+			else smoothToBottom();
+		};
+		const endGlide = (arrived: boolean) => {
+			glideAfterRestore = false;
+			if (!glide) return;
+			cancelAnimationFrame(glide.frame);
+			glide = null;
+			hooksRef.current.onGlideEnd?.(arrived);
+		};
+		/** The learner took the lesson: end the glide where it is. `halt` also
+		 *  stops the browser's smooth scroll, for an input that doesn't scroll
+		 *  by itself; a wheel or a key moves the lesson anyway. */
+		const stopGlide = (halt: boolean) => {
+			if (!glide) return;
+			endGlide(false);
+			if (halt) transcript.scrollTo({ top: transcript.scrollTop, behavior: "instant" });
+		};
+		glideRef.current = () => {
+			if (distance() <= GLIDE_ARRIVED_PX) return false;
+			stopFling();
+			endGlide(false);
+			glide = { frame: 0, retries: 0, top: transcript.scrollTop, movedAt: performance.now() };
+			glideOnce();
+			const watch = () => {
+				if (!glide) return;
+				const t = performance.now();
+				if (transcript.scrollTop !== glide.top) {
+					glide.top = transcript.scrollTop;
+					glide.movedAt = t;
+				}
+				const step = glideStep(distance(), t - glide.movedAt, glide.retries);
+				if (step === "arrived" || step === "give-up") {
+					endGlide(step === "arrived");
+					return;
+				}
+				if (step === "again") {
+					glide.retries++;
+					glide.movedAt = t;
+					glideOnce();
+				}
+				glide.frame = requestAnimationFrame(watch);
+			};
+			glide.frame = requestAnimationFrame(watch);
+			return true;
+		};
+
 		// A dock touch that stopped a slide and holds the question (onTouchSettled).
 		let held = false;
 		let heldX = 0;
@@ -306,29 +385,34 @@ export function useDockTouchScroll(rootRef: RefObject<HTMLElement | null>, trans
 			hooksRef.current.onTouchSettled?.(tap);
 		};
 		const onTranscriptStart = () => {
-			onInput();
 			stopFling();
+			stopGlide(true);
 			settleHeld(false);
 			hooksRef.current.onTouchStart?.(false);
 		};
 		const onStart = (e: TouchEvent) => {
-			onInput();
 			const sliding = !!hooksRef.current.isSliding?.();
-			movingAtStart = frame !== 0 || performance.now() - lastScrollAt < 100 || sliding;
+			const scrolledRecently = performance.now() - lastScrollAt < 100;
+			// The lesson moving by itself (not this file's throw, not a slide):
+			// Safari's momentum, or a glide. A touch on the dock stops it, as a
+			// touch on the lesson does natively.
+			const nativeMotion = scrolledRecently && frame === 0 && !sliding;
+			movingAtStart = frame !== 0 || scrolledRecently || sliding;
 			startT = e.timeStamp;
 			stopFling();
+			endGlide(false);
+			if (nativeMotion) stopMomentum();
 			settleHeld(false);
 			const first = e.touches[0];
 			if (sliding && e.touches.length === 1 && first) {
 				// A tap on the question while the lesson slides to the bottom
-				// (a reveal, or the slide after reaching it) mustn't fold the
-				// question out from under the finger: hold it, and end the
-				// running reveal without letting go of the question.
+				// (the slide after a question opens at the bottom, or the lesson
+				// following a reply) mustn't fold the question out from under the
+				// finger: hold it until the touch is known.
 				held = true;
 				heldX = first.clientX;
 				heldY = first.clientY;
 				heldPencil = isPencilTouch(first);
-				revealIdRef.current++;
 			}
 			hooksRef.current.onTouchStart?.(held);
 			if (e.touches.length !== 1 || leaveAlone(e.target)) {
@@ -408,26 +492,30 @@ export function useDockTouchScroll(rootRef: RefObject<HTMLElement | null>, trans
 		// A touch on the transcript itself stops a fling, as native scrolling does.
 		transcript.addEventListener("touchstart", onTranscriptStart, { passive: true });
 		transcript.addEventListener("scroll", onTranscriptScroll, { passive: true });
-		// Scrolling by other means lets go of a reveal, as a touch does: a wheel
-		// (an iPad's trackpad), a mouse on the lesson or its scrollbar (a touch
-		// laptop), the scrolling keys.
+		// Scrolling by other means ends a glide too: a wheel (an iPad's
+		// trackpad), a mouse on the lesson or its scrollbar (a touch laptop),
+		// the scrolling keys. Their own scrolling then goes on, and nothing
+		// pulls the lesson back.
+		const onWheel = () => stopGlide(false);
 		const onPointerDown = (e: PointerEvent) => {
-			if (e.pointerType === "mouse") onInput();
+			if (e.pointerType === "mouse") stopGlide(true);
 		};
 		const onKeyDown = (e: KeyboardEvent) => {
-			if (keyScrollsLesson(e.key, e.target, transcript, document)) onInput();
+			if (keyScrollsLesson(e.key, e.target, transcript, document)) stopGlide(false);
 		};
-		root.addEventListener("wheel", onInput, { passive: true });
-		transcript.addEventListener("wheel", onInput, { passive: true });
+		root.addEventListener("wheel", onWheel, { passive: true });
+		transcript.addEventListener("wheel", onWheel, { passive: true });
 		transcript.addEventListener("pointerdown", onPointerDown, { passive: true });
 		document.addEventListener("keydown", onKeyDown, true);
 		return () => {
 			transcript.style.overscrollBehaviorY = previousOverscroll;
 			stopFling();
+			endStop();
+			endGlide(false);
 			settleHeld(false);
-			motion.stop = () => {};
-			root.removeEventListener("wheel", onInput);
-			transcript.removeEventListener("wheel", onInput);
+			glideRef.current = null;
+			root.removeEventListener("wheel", onWheel);
+			transcript.removeEventListener("wheel", onWheel);
 			transcript.removeEventListener("pointerdown", onPointerDown);
 			document.removeEventListener("keydown", onKeyDown, true);
 			root.removeEventListener("touchstart", onStart);
@@ -438,5 +526,5 @@ export function useDockTouchScroll(rootRef: RefObject<HTMLElement | null>, trans
 			transcript.removeEventListener("scroll", onTranscriptScroll);
 		};
 	}, [touch, rootRef, transcriptRef]);
-	return { revealToBottom, revealHoldMs: touch ? REVEAL_HOLD_MS : undefined };
+	return { glideToBottom };
 }
