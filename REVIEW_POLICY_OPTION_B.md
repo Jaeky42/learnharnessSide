@@ -41,7 +41,7 @@ Avoid full logs, unrestricted repository sweeps, and entire diffs unless necessa
 
 ## Concurrency, routing and limits
 
-- Up to four concurrent subagents via the provided project settings; normally two or three implementation workers plus a focused scout or verifier when helpful.
+- Up to five concurrent subagents via the provided project settings; normally two or three implementation workers plus a focused scout or verifier when helpful.
 - Haiku medium for exploration; Sonnet medium as standard implementer and verifier; Sonnet high by invocation when ambiguity warrants; Opus high for hard work and high-risk review.
 - Independent workstreams only. No overlapping file edits without a specific integration/isolation plan.
 - Review gates run after the relevant implementation is ready; do not spawn all reviewer agents before code exists.

@@ -43,7 +43,7 @@ When clarification is needed:
 
 1. Clarify goals, constraints, acceptance criteria and important interfaces from project context. Apply the **user design-decision approval gate** above and resolve blocking decisions before starting affected implementation. Prepare a concise plan and get it approved by the user before delegating any implementation.
 2. Decompose into bounded tasks with exclusive file ownership. List dependencies, test commands, risk (low / moderate / high), and recommended worker model/effort.
-3. Use **up to four concurrent subagents**, not always four. Launch only genuinely independent tasks simultaneously; dependent tasks run in sequence. For a small task, use one worker or handle directly.
+3. Use **up to five concurrent subagents**, not always five. Launch only genuinely independent tasks simultaneously; dependent tasks run in sequence. For a small task, use one worker or handle directly.
 4. For each Agent invocation, specify the agent type, model and effort explicitly; do not use `inherit` and do not spawn a general-purpose Fable worker accidentally. Read `/tasks` to confirm actual models.
 5. No worker may create another agent. Do not spawn an agent team unless explicitly requested; ordinary subagents are the default.
 
@@ -84,7 +84,7 @@ Fable MUST perform a concise integration assessment at each major milestone. A s
 
 ### Efficiency and reporting
 
-Limit simultaneous agents to four. Default to two or three active implementation agents, scaling to four only when workstreams are truly independent. Avoid repeated repository-wide scans and long logs in Fable's context. Workers should return file paths, concise evidence, and verification results rather than bulk tool output. Review escalation should be based on risk, not on automatically invoking every reviewer. Avoid redundant Fable reviews after a passing independent review. Finish each milestone with status, verification, residual risks, and the agent/model assignments. Never claim an unrun test passed.
+Limit simultaneous agents to five. Default to two or three active implementation agents, scaling to five only when workstreams are truly independent. Avoid repeated repository-wide scans and long logs in Fable's context. Workers should return file paths, concise evidence, and verification results rather than bulk tool output. Review escalation should be based on risk, not on automatically invoking every reviewer. Avoid redundant Fable reviews after a passing independent review. Finish each milestone with status, verification, residual risks, and the agent/model assignments. Never claim an unrun test passed.
 
 ## Performance Investigation Mode
 
