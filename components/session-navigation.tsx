@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import { useStickToBottomContext, type StickToBottomContext } from "use-stick-to-bottom";
 import { messageAnchorId, messageIdFromHash } from "@/src/core";
+import { revealOffscreenTarget } from "./offscreen-target";
 
 export type SessionScrollContext = Pick<StickToBottomContext, "scrollRef" | "stopScroll">;
 
@@ -13,6 +14,13 @@ export function scrollSessionTarget(target: Range | HTMLElement, scope: HTMLElem
 	const node = "startContainer" in target ? target.startContainer : target;
 	const main = context?.scrollRef.current;
 	if (main?.contains(node)) context!.stopScroll();
+	// Fork (performance): a message the off-screen rule skipped is drawn before
+	// the passage in it is measured, and the jump is checked once more after
+	// the messages around it have their real heights (offscreen-target.ts).
+	revealOffscreenTarget(target, main ?? null, () => placeSessionTarget(target, node, scope, main));
+}
+
+function placeSessionTarget(target: Range | HTMLElement, node: Node, scope: HTMLElement, main: HTMLElement | null | undefined): void {
 	for (let element = node.parentElement; element && scope.contains(element); element = element.parentElement) {
 		const view = element.ownerDocument.defaultView;
 		const style = typeof view?.getComputedStyle === "function" ? view.getComputedStyle(element) : null;

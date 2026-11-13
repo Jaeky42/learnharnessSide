@@ -6,13 +6,38 @@
  *
  * Targets only the message blocks directly in the transcript column: the
  * learner's rows and the assistant's Message. Not the phase dividers, cards,
- * placeholders (a 600px estimate would inflate their height) and not the dock
- * spacer (a sibling of the column, never a child of it). The assistant's
+ * placeholders (a message-sized estimate would inflate their height) and not
+ * the dock spacer (a sibling of the column, never a child of it). The assistant's
  * MessageContent already clips with overflow-hidden, so paint containment adds
  * no new clipping there.
  */
-html:not([data-lh-offscreen="off"]) [data-session-find-root] > [data-testid="user-message"],
+html:not([data-lh-offscreen="off"]) [data-session-find-root] > [data-testid="user-message"] {
+	content-visibility: auto;
+	contain-intrinsic-size: auto 60px;
+}
 html:not([data-lh-offscreen="off"]) [data-session-find-root] > .is-assistant {
 	content-visibility: auto;
-	contain-intrinsic-size: auto 600px;
+	contain-intrinsic-size: auto 700px;
+}
+
+/* The estimates are the mean heights measured in a long lesson (a narrower
+ * column makes taller rows on a phone). A message drawn once remembers its
+ * real height ("auto"). components/offscreen-target.ts uses the same two
+ * selectors (OFFSCREEN_BLOCK_SELECTORS; a test keeps them equal).
+ *
+ * The assistant's estimate stays 700px on a phone, although its messages
+ * average about 1,000px there: with 1000px a lesson opened 38px short of its
+ * bottom at phone size (3 of 3 loads; 1px with 700px). */
+@media (max-width: 639.98px) {
+	html:not([data-lh-offscreen="off"]) [data-session-find-root] > [data-testid="user-message"] {
+		contain-intrinsic-size: auto 100px;
+	}
+}
+
+/* A jump into a skipped message (Find, "Show in the lesson", a link to a
+ * message) draws it, and the messages it brings on screen, for a few frames
+ * before measuring: components/offscreen-target.ts sets the attribute. */
+html:not([data-lh-offscreen="off"]) [data-session-find-root] > [data-testid="user-message"][data-lh-draw],
+html:not([data-lh-offscreen="off"]) [data-session-find-root] > .is-assistant[data-lh-draw] {
+	content-visibility: visible;
 }
