@@ -12,7 +12,7 @@ import { findSurfaceBoundary } from "./plugin-surface-targets";
 import { scheduleOpeningSubmission } from "./plugin-submission-opening";
 import { activeProblemOccurrenceOf, buildAnswer, toClientQuestion, type PluginSubmission, type PluginSubmissionTarget, type QuestionData } from "@/src/core";
 import { validatePluginBuiltinSubmissionAnswer } from "@/src/core";
-import { sameJsonValue, visibleQueuedSteers } from "@/components/session-core";
+import { catchUpRead, sameJsonValue, visibleQueuedSteers } from "@/components/session-core";
 import { SetupDialog } from "@/components/setup-dialog";
 import { Hint } from "@/components/ui/hint";
 import { cn } from "@/lib/utils";
@@ -1306,16 +1306,25 @@ export function Chat({
 	// guess so the static paint has a sane tail. The first layout effect
 	// replaces it with the measured truth before paint.
 	const [dockReserve, setDockReserve] = useState(208);
-	const syncTurns = useCallback(async () => {
-		try {
-			// Fork (performance): the usage fields alone (`?only=turns`), not the
-			// whole record; the same staleness rule as the read it replaces.
-			const usage = await readUsage();
-			if (!usage) return;
-			adoptUsage(usage.turns, usage.pricing);
-		} catch {
-			// transient blip: stats stay on the last known figures
-		}
+	// Fork (performance): the newest usage read still under way, so the catch-up
+	// can wait for the one the page started at mount instead of asking again.
+	// syncTurns itself always starts a fresh read: the one after a turn settles
+	// must not be answered by a read that began before the turn's entry was saved.
+	const usageInFlightRef = useRef<Promise<void> | null>(null);
+	const syncTurns = useCallback((): Promise<void> => {
+		const run: Promise<void> = (async () => {
+			try {
+				// Fork (performance): the usage fields alone (`?only=turns`), not the
+				// whole record; the same staleness rule as the read it replaces.
+				const usage = await readUsage();
+				if (!usage) return;
+				adoptUsage(usage.turns, usage.pricing);
+			} catch {
+				// transient blip: stats stay on the last known figures
+			}
+		})().finally(() => { if (usageInFlightRef.current === run) usageInFlightRef.current = null; });
+		usageInFlightRef.current = run;
+		return run;
 	}, [readUsage, adoptUsage]);
 	useEffect(() => {
 		void syncTurns();
@@ -1585,18 +1594,23 @@ export function Chat({
 	// An app that isn't paired asks nothing more than before.
 	//
 	// Fork (performance): the read is first a stamp check (`?only=stamp`). When
-	// the record still has the stamp of the one this page shows (and its usage
-	// has been read), nothing is downloaded and nothing re-renders; only the
-	// owed-continuation check of the full read runs, on the same messages. A
+	// the record still has the stamp of the one this page shows, nothing is
+	// downloaded (usage not yet read is read through `?only=turns`) and nothing
+	// re-renders; only the owed-continuation check of the full read runs, on the same messages. A
 	// different stamp, an unknown one, or a failed check: the full read, as before.
 	const catchUpRef = useRef(() => {});
 	catchUpRef.current = () => {
 		if (!isSyncInUse()) return;
 		if (localStreamRef.current || turnInFlightRef.current) return;
-		void (async () => {
-			if (usageReadRef.current && await recordUnchanged()) { continueIfOwed(canonicalNow()); return; }
-			void syncFromServer();
-		})();
+		// Usage not yet read (a slow device: the mount's read is still in flight)
+		// is read through `?only=turns`, not by the full download.
+		void catchUpRead({
+			recordUnchanged,
+			usageRead: () => usageReadRef.current,
+			readUsage: () => usageInFlightRef.current ?? syncTurns(),
+			continueOwed: () => continueIfOwed(canonicalNow()),
+			fullRead: () => void syncFromServer(),
+		});
 	};
 	useEffect(() => {
 		if (!isSyncInUse()) return;

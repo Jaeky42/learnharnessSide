@@ -10,7 +10,7 @@
  */
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { SessionModel, sameJsonValue } from "../components/session-core.ts";
+import { SessionModel, catchUpRead, sameJsonValue } from "../components/session-core.ts";
 import type { LhMessage } from "../src/core/native-messages.ts";
 
 function userMsg(id: string, text: string): LhMessage {
@@ -214,5 +214,41 @@ describe("sameJsonValue", () => {
 		assert.equal(sameJsonValue({ a: { b: 1 } }, { a: { b: 2 } }), false);
 		assert.equal(sameJsonValue(null, {}), false);
 		assert.equal(sameJsonValue(0, -0), false);
+	});
+});
+
+describe("catchUpRead (the catch-up before any usage read has landed)", () => {
+	function drive(stamp: string, usageReadFails = false) {
+		const { server, model } = setup(stamp);
+		server.turns = [];
+		const seen = { usage: false, continued: 0, full: 0 };
+		const done = catchUpRead({
+			recordUnchanged: () => model.recordUnchanged(),
+			usageRead: () => seen.usage,
+			readUsage: async () => { const u = usageReadFails ? undefined : await model.readUsage(); if (u) seen.usage = true; },
+			continueOwed: () => { seen.continued++; },
+			fullRead: () => { seen.full++; },
+		});
+		return { server, seen, done };
+	}
+
+	it("unchanged stamp, usage not read: no full GET, usage read cheaply, continuation checked", async () => {
+		const { server, seen, done } = drive("s1");
+		await done;
+		assert.deepEqual(server.calls, ["/api/chats/chat_x?only=stamp", "/api/chats/chat_x?only=turns"]);
+		assert.deepEqual(seen, { usage: true, continued: 1, full: 0 });
+	});
+
+	it("a changed stamp still does the full read", async () => {
+		const { server, seen, done } = drive("s2");
+		await done;
+		assert.deepEqual(server.calls, ["/api/chats/chat_x?only=stamp"]);
+		assert.deepEqual(seen, { usage: false, continued: 0, full: 1 });
+	});
+
+	it("a usage read that leaves the page without figures falls back to the full read", async () => {
+		const { seen, done } = drive("s1", true);
+		await done;
+		assert.deepEqual(seen, { usage: false, continued: 0, full: 1 });
 	});
 });

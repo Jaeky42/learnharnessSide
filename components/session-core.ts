@@ -100,6 +100,25 @@ export function sameJsonValue(a: unknown, b: unknown): boolean {
 	return true;
 }
 
+/** Fork (performance): what the sync catch-up does. An unchanged record is
+ *  never downloaded again only because the usage figures haven't been read
+ *  yet: they are read the cheap way (`readUsage`), then the owed-continuation
+ *  check runs. A changed or unknown stamp, a failed check, or a usage read
+ *  that left the page without figures: the full read. */
+export async function catchUpRead(steps: {
+	recordUnchanged: () => Promise<boolean>;
+	usageRead: () => boolean;
+	readUsage: () => Promise<void>;
+	continueOwed: () => void;
+	fullRead: () => void;
+}): Promise<void> {
+	if (await steps.recordUnchanged()) {
+		if (!steps.usageRead()) await steps.readUsage();
+		if (steps.usageRead()) { steps.continueOwed(); return; }
+	}
+	steps.fullRead();
+}
+
 /** How often to poll turnInFlight while a racing turn runs (409 retry). */
 export const TURN_POLL_MS = 500;
 /** Give up waiting (a wake turn can run long) and surface the 409. */
