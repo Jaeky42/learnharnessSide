@@ -165,6 +165,9 @@ function page(userAgent?: string) {
 		click: (target: unknown) => fire(doc, "click", { target }),
 		scroll: () => fire(element, "scroll", {}),
 		contextmenu: () => fire(element, "contextmenu", {}),
+		key: (key: string) => fire(doc, "keydown", { key }),
+		blur: () => fire(view, "blur", {}),
+		focus: (target: unknown = text) => fire(doc, "focusin", { target }),
 		/** iOS's press and hold: the system takes the touch, then selects. */
 		hold(pointerId = 1) { this.down("touch", pointerId); this.cancel("touch", pointerId); observer.selectionChanged(); },
 		done() { observer.dispose(); Date.now = realNow; },
@@ -549,6 +552,79 @@ describe("the desktop app: selection changes during a finger's press are upstrea
 		p.mouseup(1, 9, 9);
 		p.advance(16);
 		assert.deepEqual(p.log, ["show"]);
+		p.done();
+	});
+});
+
+describe("while the toolbar is hidden by a scroll, what ends the following still ends it (found by a reviewer)", () => {
+	/** Shown, following, then a handle autoscroll hides it; 50 ms into the scroll's settle window. */
+	const hiddenByScroll = () => {
+		const p = page();
+		p.hold();
+		p.advance(SHOW);
+		p.observer.selectionChanged();
+		p.advance(16);
+		p.scroll();
+		p.advance(50);
+		return p;
+	};
+	it("a new press and hold elsewhere: nothing shows when the scroll settles; the new selection settles first, with its finger rules", () => {
+		const p = hiddenByScroll();
+		p.down("touch", 9);
+		p.cancel("touch", 9); // iOS takes the touch
+		p.observer.selectionChanged();
+		const before = p.shown.length;
+		p.advance(120); // the scroll's 150 ms and a frame have passed
+		assert.equal(p.shown.length, before, "not shown at the scroll's restore");
+		p.advance(SHOW);
+		assert.equal(p.shown.length, before + 1, "shown once the new selection has settled");
+		p.done();
+	});
+	it("a finger that stays down (a tap or a hold elsewhere): nothing shows while it is down", () => {
+		const p = hiddenByScroll();
+		p.down("touch", 9);
+		const before = p.shown.length;
+		p.advance(130);
+		assert.equal(p.shown.length, before);
+		p.done();
+	});
+	it("Esc: the following ends; nothing comes back when the scroll settles", () => {
+		const p = hiddenByScroll();
+		p.key("Escape");
+		const before = p.shown.length;
+		p.advance(1000);
+		assert.equal(p.shown.length, before);
+		p.observer.selectionChanged();
+		p.advance(16);
+		assert.equal(p.shown.length, before, "the next change settles first");
+		p.advance(SHOW);
+		assert.equal(p.shown.length, before + 1);
+		p.done();
+	});
+	it("the window losing focus: the same", () => {
+		const p = hiddenByScroll();
+		p.blur();
+		const before = p.shown.length;
+		p.advance(1000);
+		assert.equal(p.shown.length, before);
+		p.observer.selectionChanged();
+		p.advance(16);
+		assert.equal(p.shown.length, before);
+		p.done();
+	});
+	it("focus moving into a text box: the same", () => {
+		const p = hiddenByScroll();
+		p.focus();
+		const before = p.shown.length;
+		p.advance(1000);
+		assert.equal(p.shown.length, before);
+		p.done();
+	});
+	it("with nothing else happening it still comes back 150 ms after the scroll, plus a frame", () => {
+		const p = hiddenByScroll();
+		const before = p.shown.length;
+		p.advance(100 + 16);
+		assert.equal(p.shown.length, before + 1);
 		p.done();
 	});
 });

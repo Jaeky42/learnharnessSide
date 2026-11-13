@@ -147,6 +147,15 @@ export function observeSelectionActions({ element, getActionElement, restoreAfte
 		if (shown) dismiss("cancel");
 		settleTouch();
 	};
+	// Side-tutor fork (touch): end the following also while a scroll has the
+	// toolbar hidden (shown and the timers are then off, so the dismissals
+	// below don't run); the scroll's restore then doesn't show it.
+	const stopFollowing = () => {
+		if (!following) return;
+		following = false;
+		if (scrollTimer !== undefined) view.clearTimeout(scrollTimer);
+		scrollTimer = undefined;
+	};
 	const dismiss = (reason: SelectionDismissReason, keepFollowing = false) => {
 		clearPending();
 		shown = false;
@@ -166,6 +175,7 @@ export function observeSelectionActions({ element, getActionElement, restoreAfte
 			return;
 		}
 		if (shown || timer !== undefined) dismiss("interaction");
+		stopFollowing();
 		// Side-tutor fork (touch): a touch or pen never sets pointerDown; it
 		// is never cleared on iOS (no mouseup) and blocked the toolbar for good.
 		touch = isTouchPointer(event);
@@ -197,11 +207,11 @@ export function observeSelectionActions({ element, getActionElement, restoreAfte
 		if (actionPress !== null && onAction(event.target)) view.setTimeout(endActionPress, 0);
 	};
 	const keyDown = (event: KeyboardEvent) => {
-		if (event.key === "Escape") { if (shown || timer !== undefined) dismiss("cancel"); return; }
+		if (event.key === "Escape") { if (shown || timer !== undefined) dismiss("cancel"); stopFollowing(); return; }
 		pointerDown = false;
 		touch = false; // Side-tutor fork: keyboard selection reports as upstream's
 	};
-	const cancel = () => { if (shown || timer !== undefined) dismiss("cancel"); };
+	const cancel = () => { if (shown || timer !== undefined) dismiss("cancel"); stopFollowing(); };
 	// Side-tutor fork (touch): the system taking a touch (a press-and-hold
 	// selection) must not drop a selection that is settling.
 	const pointerCancel = (event: PointerEvent) => {
@@ -214,7 +224,11 @@ export function observeSelectionActions({ element, getActionElement, restoreAfte
 	// Side-tutor fork (touch): Android fires contextmenu on a long press,
 	// then selects; look again once the selection rests.
 	const contextMenu = () => { dismiss("interaction"); if (touch) settleTouch(); };
-	const focusIn = (event: FocusEvent) => { if (shown && !onAction(event.target)) dismiss("interaction"); };
+	const focusIn = (event: FocusEvent) => {
+		if (onAction(event.target)) return;
+		if (shown) dismiss("interaction");
+		stopFollowing();
+	};
 	const scroll = () => {
 		if (pointerDown) return; // autoscroll while dragging keeps the gesture
 		// Side-tutor fork (touch): a touch selection still settling (a scroll
