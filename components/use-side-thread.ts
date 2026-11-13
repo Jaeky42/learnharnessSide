@@ -49,22 +49,44 @@ export function sideThreadReducer(state: SideThreadState | null, action: SideThr
 	if (action.type === "mode") return { ...state, mode: action.mode };
 	const threadId = "thread" in action ? action.thread.id : action.threadId;
 	if (threadId !== state.threadId) return state;
-	if (action.type === "snapshot" || action.type === "done") return {
-		...state, messages: action.thread.messages,
-		...(action.type === "done" || (action.type === "snapshot" && action.answering === false && action.thread.messages.at(-1)?.role === "assistant") ? { error: undefined } : {}),
-		...(action.type === "done" ? { answering: false, streamText: "" } : {
-			...(action.answering !== undefined ? { answering: action.answering } : {}),
-			...(action.text !== undefined ? { streamText: action.text } : {}),
-		}),
-	};
+	if (action.type === "snapshot" || action.type === "done") {
+		const next = {
+			...state, messages: action.thread.messages,
+			...(action.type === "done" || (action.type === "snapshot" && action.answering === false && action.thread.messages.at(-1)?.role === "assistant") ? { error: undefined } : {}),
+			...(action.type === "done" ? { answering: false, streamText: "" } : {
+				...(action.answering !== undefined ? { answering: action.answering } : {}),
+				...(action.text !== undefined ? { streamText: action.text } : {}),
+			}),
+		};
+		// Fork (performance): a snapshot that changes nothing keeps the state.
+		return action.type === "snapshot" && sameState(state, next) ? state : next;
+	}
 	if (action.type === "start") return { ...state, answering: true, streamText: "", error: undefined, failedQuestion: undefined };
 	if (action.type === "accepted") return { ...state, pendingPassage: undefined };
 	if (action.type === "text") return { ...state, answering: true, streamText: action.text };
 	return { ...state, answering: false, error: action.error, failedQuestion: action.question };
 }
 
+/** Fork (performance): the same fields with the same values (identity for objects). */
+function sameState(a: SideThreadState, b: SideThreadState): boolean {
+	const keys = new Set([...Object.keys(a), ...Object.keys(b)]) as Set<keyof SideThreadState>;
+	for (const key of keys) if (!Object.is(a[key], b[key]) || Object.hasOwn(a, key) !== Object.hasOwn(b, key)) return false;
+	return true;
+}
+
 export function useSideThread(chatId: string, messages: readonly LhMessage[], getWorking?: () => string) {
-	const [state, dispatch] = useReducer(sideThreadReducer, null);
+	const [state, dispatchToReact] = useReducer(sideThreadReducer, null);
+	// Fork (performance): the reducer's state with every action applied, also
+	// those React hasn't rendered yet, so a refresh can tell that its snapshot
+	// would change nothing and not dispatch it (a dispatch always re-rendered
+	// the lesson, even when the reducer kept the state).
+	const reduced = useRef<SideThreadState | null>(null);
+	const dispatch = useCallback((action: SideThreadAction) => {
+		reduced.current = sideThreadReducer(reduced.current, action);
+		dispatchToReact(action);
+	}, []);
+	// Fork (performance): the last list read, so an equal one sets no state.
+	const lastRead = useRef<{ chatId: string; text: string; revision: number; payload: { threads: SideChatThread[]; answering: Record<string, string> } } | null>(null);
 	const [threads, setThreads] = useState<SideChatThread[]>([]);
 	const stateRef = useRef(state); stateRef.current = state;
 	const messagesRef = useRef(messages); messagesRef.current = messages;
@@ -93,13 +115,23 @@ export function useSideThread(chatId: string, messages: readonly LhMessage[], ge
 		try {
 			const response = await fetch(`/api/chats/${chatId}/side-chats`, { cache: "no-store" });
 			if (!response.ok) return;
-			const payload = await response.json() as { threads: SideChatThread[]; answering: Record<string, string> };
+			const text = await response.text();
 			if (request !== refreshSerial.current || before !== revision.current) return;
-			setThreads(payload.threads);
+			// Fork (performance): the same text, with nothing adopted since it was
+			// set (adopt bumps revision), is the list on screen: keep it, and its
+			// objects, so the snapshot below can be seen to change nothing.
+			const last = lastRead.current;
+			const same = last !== null && last.chatId === chatId && last.text === text && last.revision === revision.current;
+			const payload = same ? last.payload : JSON.parse(text) as { threads: SideChatThread[]; answering: Record<string, string> };
+			if (!same) { setThreads(payload.threads); lastRead.current = { chatId, text, revision: revision.current, payload }; }
 			const current = stateRef.current;
 			const thread = current && payload.threads.find((entry) => entry.id === current.threadId);
-			if (thread) dispatch({ type: "snapshot", thread,
-				answering: Object.hasOwn(payload.answering, thread.id), text: payload.answering[thread.id] ?? "" });
+			if (thread) {
+				const action: SideThreadAction = { type: "snapshot", thread,
+					answering: Object.hasOwn(payload.answering, thread.id), text: payload.answering[thread.id] ?? "" };
+				// The reducer would keep its state: nothing to dispatch.
+				if (sideThreadReducer(reduced.current, action) !== reduced.current) dispatch(action);
+			}
 		} catch { /* a later change/resync retries a detached view's read */ }
 	}, [chatId]);
 	useEffect(() => { void refresh(); return () => { refreshSerial.current++; connection.current?.controller.abort(); }; }, [refresh]);

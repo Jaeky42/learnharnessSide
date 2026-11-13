@@ -89,16 +89,33 @@ function updateJob(id: string, patch: JobPatch): JobRecord | null {
 	return next;
 }
 
+/** Job file name -> the chat it belongs to (perf round). A job's chatId never
+ *  changes, so this needs no stat. The stale-job sweep lists the jobs of every
+ *  chat in turn, and each listing used to read and parse EVERY job file in the
+ *  folder; now a listing reads only the files mapped to its chat plus files not
+ *  seen yet, and always returns freshly read records (nothing parsed is kept).
+ *  Entries of files that are gone are dropped at each listing; a file whose read
+ *  failed is not recorded, so it is read again next time. */
+const jobChat = new Map<string, string>();
+
 /** All jobs for a chat, newest activity first. */
 function listJobs(chatId: string): JobRecord[] {
 	try {
 		fs.mkdirSync(JOBS_DIR, { recursive: true });
-		return fs
-			.readdirSync(/* turbopackIgnore: true */ JOBS_DIR)
-			.filter((f) => f.endsWith(".json"))
-			.map((f) => getJob(f.slice(0, -5)))
-			.filter((j): j is JobRecord => j !== null && j.chatId === chatId)
-			.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+		const seen = new Set<string>();
+		const jobs: JobRecord[] = [];
+		for (const f of fs.readdirSync(/* turbopackIgnore: true */ JOBS_DIR)) {
+			if (!f.endsWith(".json")) continue;
+			seen.add(f);
+			const known = jobChat.get(f);
+			if (known !== undefined && known !== chatId) continue; // someone else's job: not even read
+			const job = getJob(f.slice(0, -5));
+			if (job === null) continue;
+			if (typeof job.chatId === "string") jobChat.set(f, job.chatId);
+			if (job.chatId === chatId) jobs.push(job);
+		}
+		for (const f of jobChat.keys()) if (!seen.has(f)) jobChat.delete(f);
+		return jobs.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 	} catch {
 		return [];
 	}

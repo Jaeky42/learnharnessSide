@@ -26,14 +26,16 @@ export interface UseChatSessionOptions {
 	initialError?: string;
 	/** Reattach on mount: a turn is running server-side with no live view. */
 	initiallyInFlight?: boolean;
+	/** Fork (performance): the stamp of the record initialMessages came from. */
+	initialStamp?: string | null;
 }
 
-export function useChatSession({ chatId, initialMessages, initialError, initiallyInFlight }: UseChatSessionOptions) {
+export function useChatSession({ chatId, initialMessages, initialError, initiallyInFlight, initialStamp }: UseChatSessionOptions) {
 	// The model is per-mount (chatId-keyed component); onChange forces the
 	// re-render. The ref pattern keeps it stable across renders.
 	const modelRef = useRef<SessionModel | null>(null);
 	if (modelRef.current === null) {
-		modelRef.current = new SessionModel({ chatId, initialMessages, initialError });
+		modelRef.current = new SessionModel({ chatId, initialMessages, initialError, initialStamp });
 	}
 	const model = modelRef.current;
 	// The render VERSION — bumped by every model change, so the state memo
@@ -130,6 +132,10 @@ export function useChatSession({ chatId, initialMessages, initialError, initiall
 	const stop = useCallback(() => model.stop(), [model]);
 	const clearError = useCallback(() => model.clearError(), [model]);
 	const resumeStream = useCallback(() => void model.resumeStream(), [model]);
+	// Fork (performance): the cloud catch-up's stamp check and the usage-only read.
+	const recordUnchanged = useCallback(() => model.recordUnchanged(), [model]);
+	const canonicalNow = useCallback(() => model.canonicalNow(), [model]);
+	const readUsage = useCallback((options?: Parameters<SessionModel["readUsage"]>[0]) => model.readUsage(options), [model]);
 
 	return {
 		messages: state.messages,
@@ -163,5 +169,8 @@ export function useChatSession({ chatId, initialMessages, initialError, initiall
 		clearError,
 		resumeStream,
 		setReattachSettled,
+		recordUnchanged,
+		canonicalNow,
+		readUsage,
 	};
 }

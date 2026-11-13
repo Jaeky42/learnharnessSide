@@ -12,7 +12,7 @@ import { findSurfaceBoundary } from "./plugin-surface-targets";
 import { scheduleOpeningSubmission } from "./plugin-submission-opening";
 import { activeProblemOccurrenceOf, buildAnswer, toClientQuestion, type PluginSubmission, type PluginSubmissionTarget, type QuestionData } from "@/src/core";
 import { validatePluginBuiltinSubmissionAnswer } from "@/src/core";
-import { visibleQueuedSteers } from "@/components/session-core";
+import { sameJsonValue, visibleQueuedSteers } from "@/components/session-core";
 import { SetupDialog } from "@/components/setup-dialog";
 import { Hint } from "@/components/ui/hint";
 import { cn } from "@/lib/utils";
@@ -68,7 +68,7 @@ import { PlanBlock, PlanPopup, latestTree } from "@/components/plan-block";
 import { PlanMarginalia, planExists } from "@/components/plan-window";
 import { SideTutor } from "@/components/side-tutor";
 import { SessionStrip } from "@/components/cloud/session-strip";
-import { useSessionHolder } from "@/components/cloud/cloud-state";
+import { useSessionHeld } from "@/components/cloud/cloud-state";
 import { isSyncInUse } from "@/components/cloud/sync-marker";
 import { HELD_TEXT } from "@/src/core";
 import { NotesDrawer, useNotesDrawerOpen } from "@/components/notes/notes-drawer";
@@ -283,6 +283,7 @@ export function Chat({
 	initiallyCompacting = false,
 	initialConfigured = false,
 	kind = "teach",
+	initialStamp,
 }: {
 	chatId: string;
 	title: string;
@@ -306,6 +307,9 @@ export function Chat({
 	 *  it (BYOK, owner 2026-09-22). The server gate stays the truth; this
 	 *  only decides whether the pill rides the composer. */
 	initialConfigured?: boolean;
+	/** Fork (performance): the stamp of the record the page was rendered from;
+	 *  the cloud catch-up skips its full read while the record still has it. */
+	initialStamp?: string | null;
 }) {
 	// Reattach plumbing (background-turn runner wave): the hook holds the
 	// settled terminal's callback — a stable ref assigned below, once
@@ -318,8 +322,8 @@ export function Chat({
 	// (core/view.ts projectView); sends are ONE explicit input event each
 	// ({chatId, input} — the stash indirection died with the SDK), and the
 	// turn stream is the VERBATIM AgentEvent passthrough the server emits.
-	const { canonicalMessages, reconciliation, reconcile, pluginQuestionAvailability, pluginQuestionDraft, pluginProblemAvailability, pluginProblemDraft, dismissPluginQuestion, readRecord, messages, nativeMessages, hasConfirmedConversation, contextTokens, send, continueIfOwed, steer, steerQueue, submitAnswer, dismissQuestion, dismissProblem, questionDraft, saveQuestionDraft, status, evaluating, error, stop, clearError, resumeStream, setReattachSettled } =
-		useChatSession({ chatId, initialMessages, initialError, initiallyInFlight });
+	const { canonicalMessages, reconciliation, reconcile, pluginQuestionAvailability, pluginQuestionDraft, pluginProblemAvailability, pluginProblemDraft, dismissPluginQuestion, readRecord, messages, nativeMessages, hasConfirmedConversation, contextTokens, send, continueIfOwed, steer, steerQueue, submitAnswer, dismissQuestion, dismissProblem, questionDraft, saveQuestionDraft, status, evaluating, error, stop, clearError, resumeStream, setReattachSettled, recordUnchanged, canonicalNow, readUsage } =
+		useChatSession({ chatId, initialMessages, initialError, initiallyInFlight, initialStamp });
 
 	const controller = useOptionalInteractionLayers();
 	const sessionFindScopeRef = useRef<HTMLDivElement | null>(null);
@@ -384,7 +388,8 @@ export function Chat({
 	const [renaming, setRenaming] = useState(false);
 	// Cloud sync (Phase 6): another device holds this session, so it is
 	// read-only here until it is taken over. Always false where sync isn't in use.
-	const heldElsewhere = useSessionHolder(chatId) !== null;
+	// Fork (performance): the boolean alone, so a sync poll doesn't re-render the lesson.
+	const heldElsewhere = useSessionHeld(chatId);
 	const [titleDraft, setTitleDraft] = useState("");
 	const titleInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -1125,11 +1130,30 @@ export function Chat({
 	 * when nothing is active; the two never overlap). */
 	useEnterSubmits(sendNext, sessionFindScopeRef);
 
+	// Fork (performance): the usage state as last set, so a read that brings the
+	// same turns or pricing sets no state (an equal value re-rendered the whole
+	// lesson). usageReadRef: a read has set them at least once.
+	const turnsShownRef = useRef<TurnUsage[]>([]);
+	const pricingShownRef = useRef<SessionPricing | undefined>(undefined);
+	const usageReadRef = useRef(false);
+	const adoptUsage = useCallback((nextTurns: unknown, nextPricing: SessionPricing | undefined) => {
+		usageReadRef.current = true;
+		if (Array.isArray(nextTurns) && !sameJsonValue(turnsShownRef.current, nextTurns)) {
+			turnsShownRef.current = nextTurns as TurnUsage[];
+			setTurns(nextTurns as TurnUsage[]);
+		}
+		if (!sameJsonValue(pricingShownRef.current, nextPricing)) {
+			pricingShownRef.current = nextPricing;
+			setPricing(nextPricing);
+		}
+	}, []);
+
 	const syncFromServer = useCallback(async () => {
-		const record = await readRecord().catch(() => undefined);
+		// Fork (performance): rememberStamp, because this read also adopts the
+		// record's usage below, so the page then shows that record whole.
+		const record = await readRecord({ rememberStamp: true }).catch(() => undefined);
 		if (!record) return;
-		if (Array.isArray(record.turns)) setTurns(record.turns);
-		setPricing(record.pricing);
+		adoptUsage(record.turns, record.pricing);
 		// The continuation seam (contracts.ts protocol §4): a job result
 		// landing in the record leaves the agent owing a continuation — the
 		// record ENDS on un-consumed results, the dock owns no question, and
@@ -1138,7 +1162,7 @@ export function Chat({
 		// Current model truth also guards retained/live failures: canonical
 		// sync must never automatically replace a reply that failed to save.
 		continueIfOwed(record.messages);
-	}, [readRecord, continueIfOwed]);
+	}, [readRecord, continueIfOwed, adoptUsage]);
 
 	// The settled terminal's other half (stream-reattach wave): the
 	// transport resolved turn-settled — no turn running, the record is
@@ -1284,14 +1308,15 @@ export function Chat({
 	const [dockReserve, setDockReserve] = useState(208);
 	const syncTurns = useCallback(async () => {
 		try {
-			const record = await readRecord({ adoption: "none" });
-			if (!record) return;
-			if (Array.isArray(record.turns)) setTurns(record.turns);
-			setPricing(record.pricing);
+			// Fork (performance): the usage fields alone (`?only=turns`), not the
+			// whole record; the same staleness rule as the read it replaces.
+			const usage = await readUsage();
+			if (!usage) return;
+			adoptUsage(usage.turns, usage.pricing);
 		} catch {
 			// transient blip: stats stay on the last known figures
 		}
-	}, [readRecord]);
+	}, [readUsage, adoptUsage]);
 	useEffect(() => {
 		void syncTurns();
 	}, [syncTurns]);
@@ -1384,6 +1409,8 @@ export function Chat({
 	// (duplicate message ids). So: a settle during a busy turn defers the
 	// sync; the next idle fetch adopts the finished record.
 	const [jobs, setJobs] = useState<JobRecord[]>([]);
+	// Fork (performance): the list as last set; an equal refetch sets no state.
+	const jobsShownRef = useRef<JobRecord[]>([]);
 	const localStreamRef = useRef(false);
 	localStreamRef.current = localStream;
 	const jobStatusRef = useRef<Map<string, string>>(new Map());
@@ -1436,7 +1463,12 @@ export function Chat({
 				pendingSyncRef.current = false;
 				void syncFromServer();
 			}
-			setJobs(list);
+			// Fork (performance): only a list that changed is set (the settle
+			// detection above runs either way).
+			if (!sameJsonValue(jobsShownRef.current, list)) {
+				jobsShownRef.current = list;
+				setJobs(list);
+			}
 			// (Wake-turn adoption that lived here — the turnInFlight attach
 			// line — died at S3: turn-started on the events channel owns
 			// discovery now. turnInFlight is STILL READ above: the settle
@@ -1551,11 +1583,20 @@ export function Chat({
 	// sync is in use, read the record once more a moment after opening, when
 	// the live channel is surely attached, and after every reconnect of it.
 	// An app that isn't paired asks nothing more than before.
+	//
+	// Fork (performance): the read is first a stamp check (`?only=stamp`). When
+	// the record still has the stamp of the one this page shows (and its usage
+	// has been read), nothing is downloaded and nothing re-renders; only the
+	// owed-continuation check of the full read runs, on the same messages. A
+	// different stamp, an unknown one, or a failed check: the full read, as before.
 	const catchUpRef = useRef(() => {});
 	catchUpRef.current = () => {
 		if (!isSyncInUse()) return;
 		if (localStreamRef.current || turnInFlightRef.current) return;
-		void syncFromServer();
+		void (async () => {
+			if (usageReadRef.current && await recordUnchanged()) { continueIfOwed(canonicalNow()); return; }
+			void syncFromServer();
+		})();
 	};
 	useEffect(() => {
 		if (!isSyncInUse()) return;
@@ -2699,8 +2740,15 @@ export function DockOverlay({
 		const content = el?.firstElementChild as HTMLElement | null | undefined;
 		if (!el || !content) return;
 		let prevH = content.getBoundingClientRect().height;
-		const ro = new ResizeObserver(() => {
-			const h = content.getBoundingClientRect().height;
+		// Fork (performance): the entry's own border-box height, not a fresh
+		// getBoundingClientRect() (which forced a layout of the whole transcript
+		// when another observer had just changed the page). The same number here:
+		// the content box has no padding or border, nothing scales it, and the
+		// writing mode is horizontal.
+		const ro = new ResizeObserver((entries) => {
+			const entry = entries[entries.length - 1];
+			if (!entry) return;
+			const h = entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect.height;
 			if (h > prevH + 0.5) growthAtRef.current = Date.now();
 			prevH = Math.max(prevH, h);
 		});

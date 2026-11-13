@@ -65,6 +65,9 @@ afterEach(async () => {
 		await act(async () => root.unmount());
 		host.remove();
 	}
+	// A closed dialog hands the focus back from a zero-delay timer; let it run
+	// here, not in the next test, where it would take the focus from that test's box.
+	await new Promise<void>((r) => realTimers.setTimeout(r, 10));
 	Object.assign(globalThis, realTimers);
 	globalThis.fetch = originalFetch;
 	cookie = "";

@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { Chat } from "@/components/chat";
-import { slotsConfigured } from "@/src/core";
-import { compactionInFlight, getChat, isTurnRunning, readSettingsRecord, turnFailure } from "@/src/server";
+import { slotsConfigured, withoutThinkingSignatures } from "@/src/core";
+import { compactionInFlight, readBrowserState, isTurnRunning, readSettingsRecord, turnFailure } from "@/src/server";
 
 export const dynamic = "force-dynamic";
 
@@ -13,8 +13,12 @@ export default async function ChatPage({
 	searchParams: Promise<{ prompt?: string }>;
 }) {
 	const [{ id }, { prompt }] = await Promise.all([params, searchParams]);
-	const chat = getChat(id);
-	if (!chat) notFound();
+	// Perf round: the same composite stamp as the full GET and ?only=stamp (one shared
+	// function). Its file part is taken BEFORE the read, so a write in between gives an
+	// older stamp with newer content (the client then re-reads once).
+	const state = await readBrowserState(id);
+	if (!state) notFound();
+	const { chat, stamp } = state;
 	// The persistent setup CTA's seed (BYOK, owner 2026-09-22): slotsConfigured
 	// over the settings record, server-read — the same gate home/new read. The
 	// server's 503 stays the truth; this only decides whether the pill rides.
@@ -28,7 +32,10 @@ export default async function ChatPage({
 			// Wave D: the record IS native agent history — the client view is
 				// derived app-side (core/view.ts projectView; GET serves the same
 				// native messages).
-				initialMessages={chat.messages}
+				// Perf round: without the reasoning blocks' thinkingSignature (no browser code reads it).
+				initialMessages={withoutThinkingSignatures(chat.messages)}
+				// null while a plugin question or problem is pending: the client then reads in full.
+				initialStamp={stamp}
 			initialError={turnFailure(chat.id)}
 			initialConfigured={slotsConfigured(record?.models)}
 			initialPrompt={prompt}

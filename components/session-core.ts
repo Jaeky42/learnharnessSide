@@ -55,9 +55,19 @@ export interface SessionRecordSnapshot {
 	turnInFlight?: boolean;
 	turns?: TurnUsage[];
 	pricing?: SessionPricing;
+	/** Fork (performance): opaque; changes whenever the session's file changes. */
+	stamp?: string;
+}
+/** Fork (performance): `GET /api/chats/<id>?only=turns`, the usage fields alone. */
+export interface SessionUsageSnapshot {
+	turns?: TurnUsage[];
+	pricing?: SessionPricing;
 }
 export interface SessionRecordReadOptions {
 	adoption?: "replace" | "append" | "none";
+	/** Fork (performance): a replace adoption remembers the record's stamp as the
+	 *  one this page shows (the caller also adopts the record's other fields). */
+	rememberStamp?: boolean;
 	signal?: AbortSignal;
 	/** Local React cancellation must be checked after the complete body read. */
 	isCurrent?: () => boolean;
@@ -69,6 +79,26 @@ export interface SessionRecordReadOptions {
 }
 export interface PluginQuestionDraft { answer: PluginQuestionAnswerState; thinking: string; readingThinking: string }
 export type SessionStatus = "ready" | "submitted" | "streaming" | "error";
+
+/** Fork (performance): exact structural equality of two JSON values (what an
+ *  API response parses to), so a refetch that changed nothing sets no state.
+ *  Key order is ignored; an own `undefined` key differs from a missing one. */
+export function sameJsonValue(a: unknown, b: unknown): boolean {
+	if (Object.is(a, b)) return true;
+	if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
+	if (Array.isArray(a)) {
+		if (!Array.isArray(b) || a.length !== b.length) return false;
+		for (let i = 0; i < a.length; i++) if (!sameJsonValue(a[i], b[i])) return false;
+		return true;
+	}
+	if (Array.isArray(b)) return false;
+	const aKeys = Object.keys(a), bKeys = Object.keys(b);
+	if (aKeys.length !== bKeys.length) return false;
+	for (const key of aKeys) {
+		if (!Object.hasOwn(b, key) || !sameJsonValue((a as Record<string, unknown>)[key], (b as Record<string, unknown>)[key])) return false;
+	}
+	return true;
+}
 
 /** How often to poll turnInFlight while a racing turn runs (409 retry). */
 export const TURN_POLL_MS = 500;
@@ -256,6 +286,8 @@ export interface SessionModelOptions extends SessionModelDeps {
 	initialMessages: LhMessage[];
 	/** Retained, memory-only server failure when reopening a session. */
 	initialError?: string;
+	/** Fork (performance): the stamp of the record `initialMessages` came from. */
+	initialStamp?: string | null;
 	/** Fires on every state change (the hook re-renders). */
 	onChange?: () => void;
 	/** The reattach settled terminal (turn-settled): no turn running, the
@@ -329,6 +361,11 @@ export class SessionModel {
 	/** Synchronous ready check for the gate (send/read mount logic). */
 	readyRef = true;
 
+	/** Fork (performance): the stamp of the record the page shows, with the
+	 *  state it was taken in. Any later change to that state (a stream, an
+	 *  append, another adoption, an error) makes the stamp unknown. */
+	private shownStamp: { stamp: string; base: LhMessage[]; tail: LhMessage[]; error: { message: string } | null; questionAvailability?: PluginQuestionAvailability; problemAvailability?: PluginProblemAvailability } | null = null;
+
 	private history?: { base: LhMessage[]; tail: LhMessage[]; messages: LhMessage[] };
 
 	constructor(opts: SessionModelOptions) {
@@ -347,6 +384,59 @@ export class SessionModel {
 		this.waitMaxMs = opts.waitMaxMs ?? TURN_WAIT_MAX_MS;
 		this.onChange = opts.onChange;
 		this.onReattachSettled = opts.onReattachSettled;
+		if (typeof opts.initialStamp === "string") this.rememberStamp(opts.initialStamp);
+	}
+
+	private rememberStamp(stamp: string): void {
+		this.shownStamp = { stamp, base: this.base, tail: this.tail, error: this.errorValue, questionAvailability: this.pluginQuestionAvailability, problemAvailability: this.pluginProblemAvailability };
+	}
+
+	/** Fork (performance): the stamp of the record the page shows, or null when
+	 *  it isn't known (the page changed since, or nothing was remembered). */
+	knownStamp(): string | null {
+		const shown = this.shownStamp;
+		if (!shown) return null;
+		if (shown.base !== this.base || shown.tail !== this.tail || shown.error !== this.errorValue || shown.questionAvailability !== this.pluginQuestionAvailability || shown.problemAvailability !== this.pluginProblemAvailability) {
+			this.shownStamp = null;
+			return null;
+		}
+		return shown.stamp;
+	}
+
+	/** Fork (performance): the canonical messages as they are now (the record the
+	 *  page shows when knownStamp() isn't null). */
+	canonicalNow(): readonly LhMessage[] {
+		return this.base;
+	}
+
+	/** Fork (performance): true only when the server's stamp for this session is
+	 *  the one the page shows, and the page hasn't changed while asking. Any
+	 *  failure answers false (the caller then does the full read). */
+	async recordUnchanged(): Promise<boolean> {
+		const known = this.knownStamp();
+		if (known === null) return false;
+		try {
+			const response = await this.fetch(`/api/chats/${encodeURIComponent(this.chatId)}?only=stamp`, { cache: "no-store" });
+			if (!response.ok) return false;
+			const body = (await response.json()) as { stamp?: unknown };
+			return typeof body.stamp === "string" && body.stamp === known && this.knownStamp() === known;
+		} catch {
+			return false;
+		}
+	}
+
+	/** Fork (performance): the usage fields alone (`?only=turns`), under the same
+	 *  staleness rule a non-adopting readRecord had: a read overtaken by a newer
+	 *  adoption, or by an action/stream epoch, returns undefined. */
+	async readUsage(options: { signal?: AbortSignal; isCurrent?: () => boolean } = {}): Promise<SessionUsageSnapshot | undefined> {
+		const ticket = ++this.canonicalIssued;
+		const epoch = this.canonicalEpoch;
+		const response = await this.fetch(`/api/chats/${encodeURIComponent(this.chatId)}?only=turns`, { signal: options.signal });
+		const text = await response.text();
+		if (!response.ok) throw new Error(text || "Could not read the session's usage.");
+		const usage = JSON.parse(text) as SessionUsageSnapshot;
+		if (epoch !== this.canonicalEpoch || ticket < this.canonicalAcknowledged || options.signal?.aborted || options.isCurrent?.() === false) return undefined;
+		return usage;
 	}
 
 	/** Injectable settle hook (the adapter wires its ref). */
@@ -474,6 +564,10 @@ export class SessionModel {
 		} else if (mode === "replace") {
 			this.canonicalAcknowledged = Math.max(this.canonicalAcknowledged, ticket);
 			this.replaceMessages(record.messages, record.turnError, record.pluginQuestionAvailability, record.pluginProblemAvailability);
+			// Fork (performance): the page now shows exactly this record. Every
+			// other adoption changes the state the stamp was taken in, so it
+			// forgets the stamp by itself (knownStamp).
+			if (options.rememberStamp && typeof record.stamp === "string") this.rememberStamp(record.stamp);
 		}
 		return record;
 	}

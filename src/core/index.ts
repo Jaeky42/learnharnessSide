@@ -44,6 +44,8 @@ export * from "./math-delims.ts";
 // and the input-events contract — all
 // pure logic, browser-safe.
 export * from "./native-messages.ts";
+// Perf round: the browser copy of a record leaves reasoning signatures out.
+export { withoutThinkingSignatures } from "./browser-record.ts";
 export { copyImmutableData } from "./immutable-data.ts";
 export * from "./compaction.ts";
 export * from "./input-events.ts";

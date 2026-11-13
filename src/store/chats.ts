@@ -78,49 +78,101 @@ function getChat(id: string): ChatRecord | null {
 	return parsed as ChatRecord;
 }
 
+/** A cheap identity for a file as it is on disk: changes whenever the file is
+ *  replaced or rewritten, by this store (atomic rename: new inode), by cloud
+ *  sync or by the official app (neither goes through this store). Only a stat
+ *  sees every writer, so nothing else is trusted. Null when it can't be read. */
+function fileStamp(file: string): string | null {
+	try {
+		const st = fs.statSync(/* turbopackIgnore: true */ file);
+		return `${st.ino}-${st.size}-${st.mtimeMs}-${st.ctimeMs}`;
+	} catch {
+		return null;
+	}
+}
+
+/** One session's stamp, computed without reading or parsing its file (the
+ *  browser's "did it change?" check). Null when the file is missing.
+ *  Take it BEFORE reading the record: a write landing in between then gives an
+ *  older stamp with newer content, the safe direction (one extra re-read). */
+export function chatStamp(id: string): string | null {
+	try {
+		return fileStamp(chatFile(id));
+	} catch {
+		return null; // an id that can never name a chat file, like getChat's null
+	}
+}
+
+/** The session list's row for one record (null when its projection fails). */
+function summarize(record: ChatRecord): ChatSummary | null {
+	const { messages, tree, turns, extractions, imageSnapshots: _imageSnapshots, sideChats: _sideChats, ...summary } = record;
+	// Per-record isolation (Wave B): a record whose messages fail the
+	// projection (e.g. pre-Wave-B UIMessage-format scratch — the
+	// zero-back-compat wipe makes these "corrupt") must not blank the
+	// whole sidebar — same isolation getChat's per-file catch gives.
+	try {
+		return {
+			// turns and extractions stay out of the list payload (list =
+			// summaries; usage aggregates ride the full record, the picker
+			// never needs them).
+			...summary,
+			// Normalized kind: absent record field reads as teach.
+			kind: summary.kind ?? "teach",
+			messageCount: messages.length,
+			// Record-derived status for the session picker: phase from the
+			// transcript's explicit events (probe_done concluded / verdict
+			// accepted — docs/archive/probe-teach-split.md §4), pending question
+			// from the native dangling-call scan. Wave D: both folds read
+			// the NATIVE record (core/phases.ts phaseAt3Lh +
+			// native-messages.ts danglingQuestionOf). Liveness (busy) is
+			// NOT record-derived — the API route merges it (ChatListItem).
+			phase: phaseAt3Lh(messages),
+			pendingQuestion: danglingQuestionOf(messages) !== null,
+			// Practice: a posed problem with no conclude (the sidebar's
+			// "Problem waiting"); false on teaching sessions, which
+			// have no problem tool.
+			pendingProblem: activeProblemOf(messages) !== null,
+		};
+	} catch (err) {
+		console.error(`[chat ${summary.id}] summary projection failed:`, err);
+		return null;
+	}
+}
+
+/** Summaries by file and stat stamp (perf round): the list used to parse every
+ *  chat file in full, multi-MB each, for a few KB of summaries. A file is parsed
+ *  again only when its stamp changed; entries of deleted files are dropped.
+ *  Failures are never cached (an unreadable, corrupt or newer-format file is
+ *  read again at each call, as before). Each call hands out fresh copies, so no caller can alias
+ *  the cache. */
+const summaryCache = new Map<string, { stamp: string; summary: ChatSummary }>();
+
 function listChats(): ChatSummary[] {
 	try {
 		fs.mkdirSync(PATHS.chats, { recursive: true });
-		return fs
-			.readdirSync(/* turbopackIgnore: true */ PATHS.chats)
-			.filter((f) => f.endsWith(".json"))
-			.map((f) => getChat(f.slice(0, -5)))
-			.filter((r): r is ChatRecord => r !== null)
-			.map(({ messages, tree, turns, extractions, imageSnapshots: _imageSnapshots, sideChats: _sideChats, ...summary }) => {
-				// Per-record isolation (Wave B): a record whose messages fail the
-				// projection (e.g. pre-Wave-B UIMessage-format scratch — the
-				// zero-back-compat wipe makes these "corrupt") must not blank the
-				// whole sidebar — same isolation getChat's per-file catch gives.
-				try {
-					return {
-						// turns and extractions stay out of the list payload (list =
-						// summaries; usage aggregates ride the full record, the picker
-						// never needs them).
-						...summary,
-						// Normalized kind: absent record field reads as teach.
-						kind: summary.kind ?? "teach",
-						messageCount: messages.length,
-						// Record-derived status for the session picker: phase from the
-						// transcript's explicit events (probe_done concluded / verdict
-						// accepted — docs/archive/probe-teach-split.md §4), pending question
-						// from the native dangling-call scan. Wave D: both folds read
-						// the NATIVE record (core/phases.ts phaseAt3Lh +
-						// native-messages.ts danglingQuestionOf). Liveness (busy) is
-						// NOT record-derived — the API route merges it (ChatListItem).
-						phase: phaseAt3Lh(messages),
-						pendingQuestion: danglingQuestionOf(messages) !== null,
-						// Practice: a posed problem with no conclude (the sidebar's
-						// "Problem waiting"); false on teaching sessions, which
-						// have no problem tool.
-						pendingProblem: activeProblemOf(messages) !== null,
-					};
-				} catch (err) {
-					console.error(`[chat ${summary.id}] summary projection failed:`, err);
-					return null;
-				}
-			})
-			.filter((s) => s !== null)
-			.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+		const seen = new Set<string>();
+		const summaries: ChatSummary[] = [];
+		for (const f of fs.readdirSync(/* turbopackIgnore: true */ PATHS.chats)) {
+			if (!f.endsWith(".json")) continue;
+			const file = path.join(/* turbopackIgnore: true */ PATHS.chats, f);
+			seen.add(file);
+			const stamp = fileStamp(file); // before the read: a write in between re-parses next time
+			if (stamp === null) { summaryCache.delete(file); continue; }
+			let entry = summaryCache.get(file);
+			if (!entry || entry.stamp !== stamp) {
+				const record = getChat(f.slice(0, -5));
+				const summary = record ? summarize(record) : null;
+				// Never cache a failure: getChat swallows every error, and a read that
+				// fails once (a file held by antivirus, mid-swap, EMFILE) must be tried
+				// again at the next call without the file changing.
+				if (summary === null) { summaryCache.delete(file); continue; }
+				entry = { stamp, summary };
+				summaryCache.set(file, entry);
+			}
+			summaries.push(structuredClone(entry.summary));
+		}
+		for (const file of summaryCache.keys()) if (!seen.has(file)) summaryCache.delete(file);
+		return summaries.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 	} catch {
 		return [];
 	}

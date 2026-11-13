@@ -766,7 +766,9 @@ export function recoverStaleJobs(): void {
 			for (const job of stores.jobStore.listJobs(chat.id)) {
 				if (isJobLive(job.id)) continue; // never re-run beside live computation
 				if (!holdsSession(job.chatId)) continue; // side-tutor fork (cloud sync): helpers restart only on the device that holds the session
-				if (!stores.chatStore.getChat(job.chatId)) continue;
+				// (No per-job chat read: listChats() above just returned this chat and
+				// listJobs(chat.id) returns only its own jobs, so the chat exists. The
+				// check used to parse the whole chat file once per job.)
 				if (isTurnRunning(job.chatId)) continue;
 				const recovered = normalizeLegacyResult(job);
 				if (recovered.delivery?.status === "pending") {

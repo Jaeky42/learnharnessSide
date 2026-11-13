@@ -7,6 +7,8 @@
 export * from "./chat-handler.ts";
 export * from "./events-stream.ts";
 export * from "./chats.ts";
+// Perf round: the composite session stamp, shared by the full GET, ?only=stamp and the lesson page.
+export { browserState, readBrowserState, type BrowserState } from "./browser-stamp.ts";
 export * from "./graph.ts";
 export * from "./source-organization.ts";
 export * from "./source-deletion.ts";

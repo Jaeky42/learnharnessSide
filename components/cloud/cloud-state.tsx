@@ -13,7 +13,7 @@
  * says a session changed or the sync state changed, and every 10 seconds.
  */
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { syncTrouble, syncTroubleDueIn, type SessionHolder, type SyncTrouble } from "@/src/core";
 import { useServerEvent, useServerResync } from "@/components/server-events";
 import { useSyncInUse } from "./sync-marker";
@@ -45,8 +45,35 @@ export interface CloudState {
 }
 
 const EMPTY: CloudState = { role: null, held: {}, sync: null, notices: [], refresh: () => {} };
-const CloudContext = createContext<CloudState>(EMPTY);
 const POLL_MS = 10_000;
+
+/**
+ * The state lives in a small external store, not in the context value, so a
+ * poll that changes only a timestamp doesn't re-render the whole lesson:
+ * `useCloud()` re-renders on any change, `useSessionHeld` and
+ * `useSessionHolder` only when their own answer changes.
+ */
+interface CloudStore {
+	get: () => CloudState;
+	set: (next: Omit<CloudState, "refresh">) => void;
+	subscribe: (listener: () => void) => () => void;
+}
+
+function createStore(refresh: () => void): CloudStore {
+	// Every state the store holds carries the same `refresh`, so it is stable
+	// and real from the first render on.
+	let state: CloudState = { ...EMPTY, refresh };
+	const listeners = new Set<() => void>();
+	return {
+		get: () => state,
+		set: (next) => { state = { ...next, refresh }; for (const l of [...listeners]) l(); },
+		subscribe: (listener) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
+	};
+}
+
+/** Only read from outside a provider: `set` is never reachable through it. */
+const CloudContext = createContext<CloudStore>(createStore(() => {}));
+
 
 type Answer = { role?: unknown; held?: unknown; sync?: unknown; notices?: unknown };
 
@@ -59,55 +86,78 @@ function read(answer: Answer): Omit<CloudState, "refresh"> | null {
 
 export function CloudProvider({ children }: { children: ReactNode }) {
 	const inUse = useSyncInUse();
-	const [state, setState] = useState<Omit<CloudState, "refresh">>(EMPTY);
+	const refreshRef = useRef<() => void>(() => {});
+	const [store] = useState(() => createStore(() => refreshRef.current()));
+	const aliveRef = useRef(true);
 	const inUseRef = useRef(inUse);
 	inUseRef.current = inUse;
 	const lastRef = useRef("");
 
 	const refresh = useCallback(() => {
-		if (!inUseRef.current) return;
+		if (!inUseRef.current || !aliveRef.current) return;
 		fetch("/api/cloud", { cache: "no-store" })
 			.then((response) => (response.ok ? response.json() : null))
 			.then((answer: Answer | null) => {
 				const next = answer ? read(answer) : null;
-				if (!next || !inUseRef.current) return;
+				if (!next || !inUseRef.current || !aliveRef.current) return;
 				// The same answer again changes nothing, so nothing re-renders.
 				const text = JSON.stringify(next);
 				if (text === lastRef.current) return;
 				lastRef.current = text;
-				setState(next);
+				store.set(next);
 			})
 			.catch(() => { /* asked again at the next look */ });
+	}, [store]);
+
+	refreshRef.current = refresh;
+	useEffect(() => {
+		aliveRef.current = true;
+		return () => { aliveRef.current = false; };
 	}, []);
 
 	useEffect(() => {
 		if (!inUse) {
 			lastRef.current = "";
-			setState(EMPTY);
+			if (store.get().role !== null) store.set({ role: null, held: {}, sync: null, notices: [] });
 			return;
 		}
 		refresh();
 		const timer = setInterval(() => { if (document.visibilityState !== "hidden") refresh(); }, POLL_MS);
 		return () => clearInterval(timer);
-	}, [inUse, refresh]);
+	}, [inUse, refresh, store]);
 
 	// A session moved, arrived or went; the PC's sync state changed.
 	useServerEvent("chats-changed", refresh);
 	useServerEvent("cloud-changed", refresh);
 	useServerResync(refresh);
 
-	const value = useMemo(() => ({ ...state, refresh }), [state, refresh]);
-	return <CloudContext.Provider value={value}>{children}</CloudContext.Provider>;
+	return <CloudContext.Provider value={store}>{children}</CloudContext.Provider>;
 }
 
 export function useCloud(): CloudState {
-	return useContext(CloudContext);
+	const store = useContext(CloudContext);
+	return useSyncExternalStore(store.subscribe, store.get, store.get);
 }
 
-/** Who holds this session, when it isn't this copy; null when it can be continued here. */
+/** True when another device holds this session. Re-renders only when that flips. */
+export function useSessionHeld(chatId: string | null | undefined): boolean {
+	const store = useContext(CloudContext);
+	const snapshot = useCallback(() => (chatId ? store.get().held[chatId] !== undefined : false), [store, chatId]);
+	return useSyncExternalStore(store.subscribe, snapshot, snapshot);
+}
+
+/** Who holds this session, when it isn't this copy; null when it can be continued here.
+ *  Re-renders only when this session's holder changes in value. */
 export function useSessionHolder(chatId: string | null | undefined): SessionHolder | null {
-	const { held } = useCloud();
-	return chatId ? held[chatId] ?? null : null;
+	const store = useContext(CloudContext);
+	const last = useRef<{ holder: SessionHolder | null; text: string }>({ holder: null, text: "null" });
+	const snapshot = useCallback((): SessionHolder | null => {
+		const holder = chatId ? store.get().held[chatId] ?? null : null;
+		const text = JSON.stringify(holder);
+		if (text !== last.current.text) last.current = { holder, text };
+		return last.current.holder;
+	}, [store, chatId]);
+	return useSyncExternalStore(store.subscribe, snapshot, snapshot);
 }
 
 /**

@@ -13,6 +13,7 @@ import { holdsSession } from "./sync/engine.ts";
 import { recordGraphAction } from "./sync/graph-engine.ts";
 import { HELD_ELSEWHERE_CODE, HELD_ELSEWHERE_MESSAGE } from "../core/sync/sessions.ts";
 import { sideChats } from "./side-chat.ts";
+import type { LhMessage } from "../core/native-messages.ts";
 
 /**
  * Server-side chat entries for the transport layer (app/api/chats*,
@@ -28,6 +29,8 @@ import { sideChats } from "./side-chat.ts";
 
 export const { createChat, getChat, listChats } = stores.chatStore;
 export { titleFromPrompt };
+// Perf round: a session's file stamp, computed from the file's stat with no read (not on the ChatStore port).
+export { chatStamp } from "../store/chats.ts";
 export type { ChatDeleteMode, ChatDeletionStats } from "../core/graph-deletion.ts";
 
 /** How long the wind-down wait may take before the caller gets a retryable
@@ -192,8 +195,9 @@ export interface SessionCoverage {
 
 /** The per-session coverage block (see SessionCoverage). Null when the
  *  chat doesn't exist — callers own the 404. */
-export function sessionCoverage(chatId: string): SessionCoverage | null {
-	const record = stores.chatStore.getChat(chatId);
+export function sessionCoverage(chatId: string, known?: { messages: LhMessage[] } | null): SessionCoverage | null {
+	// `known`: a record the caller has just read (the full GET), so the file isn't parsed again.
+	const record = known ?? stores.chatStore.getChat(chatId);
 	if (!record) return null;
 	const entries = stores.graphStore.readCoverage();
 	// Wave B: the record is native history — coverage reads through the

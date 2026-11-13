@@ -60,6 +60,7 @@ const STORAGE_KEY = "lh:sidebar-open";
 import type { ChatGPTControlBridge, NativeSubscriptionControlBridge } from "@/src/core";
 import type { UpdateState } from "@/components/settings/update-settings.tsx";
 import { FilePathDropZone } from "@/components/file-path-drop-zone";
+import { sameJsonValue } from "@/components/session-core";
 const SIDEBAR_AUTOCLOSE = 928;
 
 // Module scope, guarded for SSR (the server has no navigator).
@@ -482,7 +483,8 @@ function SessionsSidebar() {
 		try {
 			const res = await fetch("/api/chats", { cache: "no-store" });
 			const d = (await res.json()) as { chats: ChatListItem[] };
-			setChats(d.chats);
+			// Fork (performance): an equal list keeps the one on screen (no re-render).
+			setChats((prev) => (prev && sameJsonValue(prev, d.chats) ? prev : d.chats));
 		} catch {
 			// a transient failure keeps the last snapshot
 			setChats((prev) => prev ?? []);

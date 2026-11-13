@@ -1,24 +1,65 @@
-import { compactionInFlight, deleteChatSession, getChat, isTurnRunning, sessionCoverage, sessionCost, stores, turnFailure, type ChatDeleteMode, pluginQuestionAvailabilityOf, reconcilePluginQuestionCompatibility, type QuestionTypeResolver, getPluginQuestionTypeResolver, getPluginHost, pluginProblemAvailabilityOf, type ProblemTypeResolver } from "@/src/server";
-import { pendingPluginQuestionOf, activeProblemOf } from "@/src/core";
+import { browserState, chatStamp, compactionInFlight, deleteChatSession, getChat, isTurnRunning, readBrowserState, sessionCoverage, sessionCost, stores, type ChatDeleteMode, reconcilePluginQuestionCompatibility } from "@/src/server";
+import { withoutThinkingSignatures } from "@/src/core";
 
-export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+/** GET ?only=…: one small field of the session, so a client that needs one
+ *  thing doesn't download and parse the whole record (perf round). Read-only:
+ *  never reconciles plugin questions and never writes. */
+const ONLY_VALUES = ["stamp", "coverage", "settings", "turns"] as const;
+
+async function onlyResponse(id: string, only: string): Promise<Response> {
+	if (!(ONLY_VALUES as readonly string[]).includes(only)) {
+		return Response.json({ error: 'only must be "stamp", "coverage", "settings" or "turns"', code: "bad_only" }, { status: 400 });
+	}
+	// The stamp covers what the full GET adds to the file (turnError, plugin
+	// availability, pricing), so it reads the record once: no reconcile, no write.
+	if (only === "stamp") {
+		const state = await readBrowserState(id);
+		return state === null ? Response.json({ error: "Not found" }, { status: 404 }) : Response.json({ stamp: state.stamp });
+	}
+	if (only === "coverage") {
+		const coverage = sessionCoverage(id);
+		return coverage === null ? Response.json({ error: "Not found" }, { status: 404 }) : Response.json({ coverage });
+	}
+	const chat = getChat(id);
+	if (!chat) return Response.json({ error: "Not found" }, { status: 404 });
+	return only === "settings"
+		? Response.json({ settings: chat.settings })
+		: Response.json({ turns: chat.turns, pricing: sessionCost(chat) });
+}
+
+export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
 	const { id } = await params;
-	await reconcilePluginQuestionCompatibility(stores.chatStore, id);
+	const only = new URL(req.url).searchParams.get("only");
+	if (only !== null) return await onlyResponse(id, only);
+	// Perf round: the record is read once and handed to the helpers below. Each
+	// read takes the file's stamp first, so a write landing in between yields an
+	// older stamp with newer content (the client then re-reads once).
+	let stamp = chatStamp(id);
 	let chat = getChat(id);
 	if (!chat) return Response.json({ error: "Not found" }, { status: 404 });
-	let questionResolver: QuestionTypeResolver | undefined;
-	if (pendingPluginQuestionOf(chat.messages)) {
-		try { questionResolver = await getPluginQuestionTypeResolver(); } catch { /* unavailable fallback */ }
-		// No awaited plugin startup may separate this read from the response projection.
+	// reconcile reads the record once at its start: serve it the one just read
+	// (its later reads, after awaits, go to the store), and note if it wrote.
+	let reconciled = false;
+	let firstRead: typeof chat | null = chat;
+	await reconcilePluginQuestionCompatibility({
+		...stores.chatStore,
+		getChat: (chatId) => {
+			if (firstRead && chatId === id) { const known = firstRead; firstRead = null; return known; }
+			return stores.chatStore.getChat(chatId);
+		},
+		saveMessages: (chatId, messages) => { reconciled = true; stores.chatStore.saveMessages(chatId, messages); },
+	}, id);
+	if (reconciled) {
+		stamp = chatStamp(id);
 		chat = getChat(id);
 		if (!chat) return Response.json({ error: "Not found" }, { status: 404 });
 	}
-	let problemResolver: ProblemTypeResolver | undefined;
-	if (activeProblemOf(chat.messages)?.pluginProblem) {
-		try { problemResolver = (await getPluginHost()).resolveProblemType; } catch { /* unavailable fallback */ }
-		chat = getChat(id);
-		if (!chat) return Response.json({ error: "Not found" }, { status: 404 });
-	}
+	// The resolvers, the re-reads after their awaits, the availability, pricing
+	// and turnError values and the stamp: one shared function with ?only=stamp
+	// and the lesson page (src/server/browser-stamp.ts).
+	const state = await browserState(id, { chat, fileStamp: stamp });
+	if (!state) return Response.json({ error: "Not found" }, { status: 404 });
+	chat = state.chat;
 	// turnInFlight lets a returning client re-attach to a running turn
 	// (chat-handler write-ahead + registry — see src/server/turn-liveness.ts).
 	// coverage (extraction-UX redesign, 2026-09-24): the chat view's ring
@@ -29,19 +70,23 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 	// agent history, served VERBATIM — the client derives its view
 	// (core/view.ts projectView). turnInFlight lets a returning client
 	// re-attach to a running turn; coverage is the chat view's ring meter.
+	// Perf round (owner's decision): "verbatim" except the reasoning blocks'
+	// thinkingSignature, which no browser code reads (a quarter of a long
+	// session's bytes); the stored record keeps it.
 	// Snapshot bytes have a session-scoped endpoint; do not resend the whole image pool on every poll.
 	const { imageSnapshots: _imageSnapshots, ...record } = chat;
 	return Response.json({
 		...record,
-		messages: chat.messages,
-		pluginQuestionAvailability: pluginQuestionAvailabilityOf(chat, questionResolver),
-		pluginProblemAvailability: pluginProblemAvailabilityOf(chat, problemResolver),
-		pricing: sessionCost(chat),
+		messages: withoutThinkingSignatures(chat.messages),
+		stamp: state.stamp,
+		pluginQuestionAvailability: state.pluginQuestionAvailability,
+		pluginProblemAvailability: state.pluginProblemAvailability,
+		pricing: state.pricing,
 		turnInFlight: isTurnRunning(id),
 		// Also reaches idle views that missed the failing turn's stream.
-		turnError: turnFailure(id),
+		turnError: state.turnError,
 		compacting: compactionInFlight(id),
-		coverage: sessionCoverage(id),
+		coverage: sessionCoverage(id, chat),
 	});
 }
 
