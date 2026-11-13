@@ -309,16 +309,25 @@ describe("drag on the dock scrolls the lesson", async () => {
 		assert.equal(g(4000, GLIDE_QUIET_MS, 0, GLIDE_PULLED_BACK_PX), "again", "a rounding wobble isn't a scroll back up");
 		assert.equal(g(10, 0, 0, 500), "arrived", "arrived wins");
 	});
-	it("a glide in flight is re-aimed when the bottom moves away: more than a few px, at most every 100 ms, never once it has ended", async () => {
-		const { shouldRetarget, GLIDE_RETARGET_PX, GLIDE_RETARGET_MS, GLIDE_QUIET_MS } = await import("../components/phone/use-dock-touch-scroll.ts");
+	it("a glide in flight is re-aimed when the bottom moves away: once it has slowed, more than a few px, at most every 100 ms, never once it has ended", async () => {
+		const { shouldRetarget, glideSpeed, GLIDE_RETARGET_PX, GLIDE_RETARGET_MS, GLIDE_RETARGET_SLOW, GLIDE_QUIET_MS } = await import("../components/phone/use-dock-touch-scroll.ts");
 		assert.equal(GLIDE_RETARGET_MS, 100);
-		const r = (bottom: number, aimed: number | null, sinceAimMs = GLIDE_RETARGET_MS, quietMs = 0) => shouldRetarget({ bottom, aimed, sinceAimMs, quietMs });
-		assert.equal(r(10000, 9000), true, "the lesson grew under it");
+		assert.equal(GLIDE_RETARGET_SLOW, 0.6, "px per ms: 10 px a frame at 60 Hz, 5 at 120 Hz");
+		const r = (bottom: number, aimed: number | null, sinceAimMs = GLIDE_RETARGET_MS, quietMs = 0, speed = 0.3, moved = true) => shouldRetarget({ bottom, aimed, moved, sinceAimMs, quietMs, speed });
+		assert.equal(r(10000, 9000), true, "the lesson grew under a glide that has slowed");
+		assert.equal(r(10000, 9000, GLIDE_RETARGET_MS, 0, 6), false, "still fast: a re-aim now could be a brake from full speed");
+		assert.equal(r(10000, 9000, GLIDE_RETARGET_MS, 0, GLIDE_RETARGET_SLOW), false);
+		assert.equal(r(10000, 9000, GLIDE_RETARGET_MS, 0, 0), true, "just come to a stop, not yet at rest");
+		// The speed over the last frame or two, so one long frame doesn't read as slow.
+		assert.equal(glideSpeed([{ t: 0, top: 0 }, { t: 8, top: 40 }, { t: 48, top: 60 }]), 1.25, "a 40 ms frame after a fast one");
+		assert.equal(glideSpeed([{ t: 0, top: 100 }, { t: 8, top: 104 }, { t: 16, top: 108 }]), 0.5, "120 Hz, 4 px a frame");
+		assert.equal(glideSpeed([{ t: 0, top: 100 }]), 0);
 		assert.equal(r(9000 + GLIDE_RETARGET_PX, 9000), false, "a few px");
 		assert.equal(r(9000, 9500), false, "the bottom came closer: the scroll ends there anyway");
 		assert.equal(r(10000, 9000, GLIDE_RETARGET_MS - 1), false, "not more often than every 100 ms");
 		assert.equal(r(10000, 9000, GLIDE_RETARGET_MS, GLIDE_QUIET_MS), false, "it has ended: the retry rule's case");
-		assert.equal(r(10000, null), false, "not started yet (the stop's hidden frame still to come)");
+		assert.equal(r(10000, null), false, "not asked for yet (the stop's hidden frame still to come)");
+		assert.equal(r(10000, 9000, GLIDE_RETARGET_MS, 0, 0, false), false, "asked for but not moving yet: its speed of 0 isn't \"slowed\"");
 	});
 	it("takes the throw from the last moments of the drag, not the last twitch", async () => {
 		const { releaseVelocity, FLING_MAX } = await import("../components/phone/use-dock-touch-scroll.ts");

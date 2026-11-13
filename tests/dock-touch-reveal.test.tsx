@@ -544,7 +544,7 @@ describe("a tap on the folded question glides down into it (touch screen)", () =
 		}
 	});
 
-	it("the lesson grows under the glide in flight (a demo sizing itself): the same glide is aimed at the new bottom and goes on, no rest, no retry", async () => {
+	it("the lesson grows under the glide in flight (a demo sizing itself): once the glide has slowed it is aimed at the new bottom and goes on, no rest, no retry", async () => {
 		await mount();
 		await tapOn("bar");
 		const early = await run(5);
@@ -555,6 +555,28 @@ describe("a tap on the folded question glides down into it (touch screen)", () =
 		assert.equal(probe.expanded(), true);
 		assert.ok(distance() <= 2);
 		assert.ok(beforeArrival(frames).every((f) => !f.open));
+	});
+
+	it("a fast glide whose bottom moved is not aimed again until it has slowed: never a brake from full speed", async () => {
+		const { GLIDE_RETARGET_SLOW } = await import("../components/phone/use-dock-touch-scroll.ts");
+		await mount();
+		await tapOn("bar");
+		await run(5);
+		scrollHeight += 1500;
+		let speedAtAim: number | null = null;
+		let last = top;
+		for (let i = 0; i < 120 && speedAtAim === null; i++) {
+			const calls = smoothCalls;
+			await frame();
+			const speed = Math.abs(top - last) / 16;
+			last = top;
+			if (smoothCalls > calls) speedAtAim = speed;
+		}
+		assert.ok(speedAtAim !== null, "aimed again in the end");
+		assert.ok(speedAtAim! < GLIDE_RETARGET_SLOW * 2, `only once slow (${speedAtAim!.toFixed(2)} px/ms at the re-aim)`);
+		await run(120);
+		assert.equal(probe.expanded(), true);
+		assert.ok(distance() <= 2);
 	});
 
 	it("a glide that ends short and rests (the browser stopped it): the retry rule glides once more, as before", async () => {
@@ -568,18 +590,21 @@ describe("a tap on the folded question glides down into it (touch screen)", () =
 		assert.ok(distance() <= 2);
 	});
 
-	it("a lesson growing every frame under the glide: re-aimed at most every 100 ms", async () => {
-		await mount({ from: 6000 });
+	it("a lesson growing every frame under a slow glide: re-aimed at most every 100 ms", async () => {
+		await mount({ from: 300 });
 		await tapOn("bar");
-		await run(2);
+		// Let the short glide slow down, with its bottom kept just out of reach.
 		const before = smoothCalls;
-		for (let i = 0; i < 30; i++) {
-			scrollHeight += 40;
+		const times: number[] = [];
+		for (let i = 0; i < 60; i++) {
+			scrollHeight += 6;
+			const calls = smoothCalls;
 			await frame();
+			if (smoothCalls > calls) times.push(clock);
 		}
 		const aims = smoothCalls - before;
 		assert.ok(aims >= 2, `re-aimed (${aims} times)`);
-		assert.ok(aims <= Math.ceil((30 * 16) / 100), `but not more often than every 100 ms (${aims} times in 480 ms)`);
+		assert.ok(times.every((at, i) => i === 0 || at - times[i - 1]! >= 100), `never twice within 100 ms (${times.map((at) => at - times[0]!).join(", ")})`);
 	});
 
 	it("a browser that won't glide, with nobody touching: a couple more tries, never one per frame, then the net opens the question where it is and slides it down, as a computer does", async () => {
