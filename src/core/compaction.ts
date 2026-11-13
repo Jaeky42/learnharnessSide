@@ -38,7 +38,7 @@ import type { PlanTree } from "./contracts/plan.ts";
 import { derivePlanStatusesLh, derivedNodeStatus } from "./contracts/plan.ts";
 import { COMPACTED_HISTORY_HEADER } from "./contracts/chat.ts";
 import type { LhMessage, LhMarkerMessage } from "./native-messages.ts";
-import { newMessageId } from "./native-messages.ts";
+import { newMessageId, userFacingTextOf } from "./native-messages.ts";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Api, AssistantMessage, Model, ToolResultMessage, SystemMessage } from "@earendil-works/pi-ai";
 
@@ -324,6 +324,14 @@ export function keptIndexFor(messages: readonly LhMessage[], marker: LhMarkerMes
 
 // ─── the summarizer input (pi's mirror: labeled text, truncated results) ─────
 
+const DRAWING_MARKER = "[drawing attached]";
+
+/** One marker per image block of an array content. */
+function imageMarkers(content: unknown): string[] {
+	if (!Array.isArray(content)) return [];
+	return content.filter((b) => b && typeof b === "object" && (b as { type?: unknown }).type === "image").map(() => DRAWING_MARKER);
+}
+
 /** Serialize a message span as labeled text for the summarizer. Tool
  * results truncate at ~2k chars (the kept tail carries them verbatim for
  * the model; the SUMMARY only needs their gist). */
@@ -332,7 +340,14 @@ export function serializeForSummary(messages: readonly LhMessage[]): string {
 	for (const m of messages) {
 		const role = (m as { role?: string }).role;
 		if (role === "user") {
-			lines.push(`[LEARNER] ${citationsToReadableText((m as { content: string }).content)}`);
+			// Array content (a message sent with a Drawing Pad picture) is not a string: read its text
+			// array-safely and mark each picture, so serialization never throws and no base64 leaks.
+			const content = (m as { content: unknown }).content;
+			if (typeof content === "string") lines.push(`[LEARNER] ${citationsToReadableText(content)}`);
+			else {
+				const parts = [citationsToReadableText(userFacingTextOf(content).join("\n")), ...imageMarkers(content)].filter((p) => p !== "");
+				lines.push(`[LEARNER] ${parts.join(" ")}`);
+			}
 		} else if (role === "assistant") {
 			const assistant = m as AssistantMessage;
 			const blocks: string[] = [];
@@ -346,7 +361,7 @@ export function serializeForSummary(messages: readonly LhMessage[]): string {
 		} else if (role === "toolResult") {
 			const result = m as ToolResultMessage;
 			const text = result.content
-				.map((c) => (c.type === "text" ? c.text : JSON.stringify(c)))
+				.map((c) => (c.type === "text" ? c.text : c.type === "image" ? DRAWING_MARKER : JSON.stringify(c)))
 				.join("\n");
 			lines.push(
 				`[RESULT for ${result.toolName}${result.isError ? " (error)" : ""}] ${

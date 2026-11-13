@@ -228,20 +228,19 @@ async function compact(deps: CompactionDeps, chatId: string): Promise<void> {
 	// The separately supplied prior summary replaces all summary markers
 	// in this span. Without a resolved prior boundary, retain the existing
 	// legacy fallback rather than silently discarding summary-only context.
-	const summaryMessages = priorSummary
-		? span.filter((m) => m.role !== "custom" || m.customType !== "compaction")
-		: span;
-	const spanText = serializeForSummary(summaryMessages);
-	const fullSpan = priorSummary ? `[SYSTEM NOTE — prior compaction summary, still authoritative where not superseded]\n${priorSummary}\n\n${spanText}` : spanText;
-
-	const prompt = buildCompactionPrompt({
-		spanText: fullSpan,
-		planTreeText: planTreeToText(record.tree, messages),
-		kind: deps.kind,
-	});
-
 	emit("compaction-changed", { chatId, running: true });
 	try {
+		const summaryMessages = priorSummary
+			? span.filter((m) => m.role !== "custom" || m.customType !== "compaction")
+			: span;
+		const spanText = serializeForSummary(summaryMessages);
+		const fullSpan = priorSummary ? `[SYSTEM NOTE — prior compaction summary, still authoritative where not superseded]\n${priorSummary}\n\n${spanText}` : spanText;
+
+		const prompt = buildCompactionPrompt({
+			spanText: fullSpan,
+			planTreeText: planTreeToText(record.tree, messages),
+			kind: deps.kind,
+		});
 		const summarize = deps.summarize ?? subagentSummarizer;
 		const { summary, usage } = await summarize(prompt, deps.engine);
 		const trimmed = summary.trim();
@@ -344,7 +343,10 @@ export function kickCompaction(buildDeps: () => CompactionDeps | null, chatId: s
 	if (projectedContextTokens(record.messages, deps.systemPromptTokens, deps.includeReasoning ? deps.engine.model : undefined) <= deps.thresholdTokens) return;
 	const run = compact(deps, chatId);
 	state().inFlight.set(chatId, run);
-	void run.finally(() => {
-		if (state().inFlight.get(chatId) === run) state().inFlight.delete(chatId);
-	});
+	// compact() logs its own failures; the catch only guards against an unhandled rejection.
+	void run
+		.catch((err) => console.error(`[chat ${chatId}] compaction failed:`, err))
+		.finally(() => {
+			if (state().inFlight.get(chatId) === run) state().inFlight.delete(chatId);
+		});
 }
