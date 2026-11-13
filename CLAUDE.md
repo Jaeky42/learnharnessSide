@@ -32,7 +32,7 @@ Fable is the planner and recommender, **not the final authority over unspecified
 
 When clarification is needed:
 1. Ask **before spawning implementers for the affected work**. If useful, first delegate read-only exploration to establish the actual options.
-2. Batch up to **three related, high-value questions** in one checkpoint (fewer when only one decision blocks progress). For each, explain the decision, give 2–3 concrete options and their relevant tradeoffs, state a recommended option with reasons, and explicitly request the user's choice. Use Claude Code's interactive question capability when available; otherwise ask in chat.
+2. Ask **one question per call**: never batch several decisions into one checkpoint. When more than one decision is open, ask them one after another, the most blocking first. For each, explain the decision, give 2–3 concrete options and their relevant tradeoffs, state a recommended option with reasons, and explicitly request the user's choice. Use Claude Code's interactive question capability when available; otherwise ask in chat.
 3. Label these questions `USER DECISION REQUIRED`. **Never silently choose your recommended option, treat silence as approval, or have a subagent make the choice on the user's behalf.** If waiting for a reply, stop work dependent on that decision; independent read-only work or unrelated approved implementation may proceed.
 4. Record decisions and constraints in the active plan/handoff. For long-running projects, update a suitable existing project decision or planning document if one exists; avoid creating redundant documentation. Pass the approved decision and acceptance criteria to every affected worker.
 5. If implementation reveals a new material option, conflicting requirements, or a necessary departure from an approved decision, pause the affected work and ask again, rather than quietly revising the design. In final reports, distinguish approved choices from unresolved choices.
@@ -85,3 +85,60 @@ Fable MUST perform a concise integration assessment at each major milestone. A s
 ### Efficiency and reporting
 
 Limit simultaneous agents to four. Default to two or three active implementation agents, scaling to four only when workstreams are truly independent. Avoid repeated repository-wide scans and long logs in Fable's context. Workers should return file paths, concise evidence, and verification results rather than bulk tool output. Review escalation should be based on risk, not on automatically invoking every reviewer. Avoid redundant Fable reviews after a passing independent review. Finish each milestone with status, verification, residual risks, and the agent/model assignments. Never claim an unrun test passed.
+
+## Performance Investigation Mode
+
+Activate this mode when the user asks to analyze,
+profile, audit, or optimize application performance.
+
+### Phase 1: Establish the baseline
+- Identify the application architecture and runtime.
+- Identify relevant performance metrics.
+- Determine whether representative benchmarks,
+  profiling tools, or production telemetry exist.
+- Ask the user which performance outcomes matter
+  when the objective is ambiguous.
+- Do not modify application code during this phase.
+
+### Phase 2: Investigate
+- Delegate independent investigations when useful.
+- Use Haiku for lightweight exploration and tooling.
+- Use Sonnet for routine performance investigations.
+- Use Opus for complex bottlenecks and concurrency.
+- Avoid overlapping investigations.
+- Run appropriate profiling or benchmarks when possible.
+- Distinguish measured problems from hypotheses.
+
+### Phase 3: Report findings
+For each potential improvement, include:
+- Problem and affected component
+- Evidence and confidence level
+- Expected performance benefit, if supportable
+- Implementation difficulty
+- Regression or compatibility risk
+- Recommended priority
+
+Rank improvements by expected impact,
+confidence, effort, and risk.
+
+### Phase 4: User approval
+- Present the prioritized optimization plan.
+- Ask the user which changes to implement.
+- Do not implement consequential optimizations
+  before receiving approval.
+- Ask about tradeoffs affecting functionality,
+  reliability, resource consumption, or UX.
+- Proceed independently on routine investigation.
+
+### Phase 5: Implementation and validation
+After approval:
+- Delegate implementation using existing agents.
+- Measure performance before and after changes.
+- Run regression tests.
+- Use independent review proportional to risk.
+- Escalate architectural concerns to Fable.
+- Report actual improvements, remaining issues,
+  and any limitations in the measurements.
+
+Never present theoretical improvements as
+measured performance gains.
