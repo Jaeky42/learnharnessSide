@@ -76,6 +76,7 @@ let scrollPending = false;
 let smooth: { from: number; to: number; t0: number } | null = null;
 let momentum = 0; // px per frame, upwards
 let smoothRefused = false; // a browser that gives up on its smooth scroll at once
+let momentumOutlivesStop = false; // a hidden frame that didn't catch Safari's momentum
 let smoothCalls = 0;
 function setTop(v: number) {
 	const next = Math.max(0, Math.min(scrollHeight - CLIENT_H, v));
@@ -101,7 +102,7 @@ function fakeScroller(el: HTMLElement) {
 			value: ({ top: to, behavior }: { top: number; behavior?: string }) => {
 				if (behavior === "smooth") {
 					smoothCalls++;
-					smooth = smoothRefused ? null : { from: top, to, t0: clock };
+					smooth = smoothRefused || momentum ? null : { from: top, to, t0: clock };
 					return;
 				}
 				smooth = null;
@@ -163,9 +164,11 @@ function Harness({ teach = false }: { teach?: boolean }) {
 			const el = stick.scrollRef.current;
 			if (el && expandedRef.current && !atBottomRef.current && el.scrollHeight - el.clientHeight - el.scrollTop > COLLAPSE_DIST) setExpanded(false);
 		},
-		onGlideEnd: (arrived) => {
-			if (arrived && !expandedRef.current) arriveAtBottomRef.current();
+		onGlideEnd: (end) => {
+			const reveal = openOnArrivalRef.current;
+			if (end === "arrived" && !expandedRef.current) arriveAtBottomRef.current();
 			openOnArrivalRef.current = false;
+			if (end === "gave-up" && !expandedRef.current) openAtOnce(reveal);
 		},
 	});
 	const suppressFoldDuringReveal = () => {
@@ -180,6 +183,11 @@ function Harness({ teach = false }: { teach?: boolean }) {
 		});
 	};
 	const openOnArrivalRef = useRef(false);
+	const openAtOnce = (reveal: boolean) => {
+		if (reveal) setRevealed(true);
+		setExpanded(true);
+		void suppressFoldDuringReveal();
+	};
 	const openDock = (reveal: boolean) => {
 		if (!atBottomRef.current) {
 			if (stickState.animation) stopScroll();
@@ -188,9 +196,7 @@ function Harness({ teach = false }: { teach?: boolean }) {
 				return;
 			}
 		}
-		if (reveal) setRevealed(true);
-		setExpanded(true);
-		void suppressFoldDuringReveal();
+		openAtOnce(reveal);
 	};
 	const arriveAtBottomRef = useRef(() => {});
 	arriveAtBottomRef.current = () => {
@@ -260,7 +266,7 @@ function Harness({ teach = false }: { teach?: boolean }) {
 async function frame() {
 	await act(async () => {
 		clock += 16;
-		if (momentum && scroller.style.overflowY === "hidden") momentum = 0;
+		if (momentum && scroller.style.overflowY === "hidden" && !momentumOutlivesStop) momentum = 0;
 		if (momentum) {
 			setTop(top - momentum);
 			momentum = momentum * 0.97 < 1 ? 0 : momentum * 0.97;
@@ -299,6 +305,7 @@ async function mount({ teach = false, from = 4000 }: { teach?: boolean; from?: n
 	smooth = null;
 	momentum = 0;
 	smoothRefused = false;
+	momentumOutlivesStop = false;
 	smoothCalls = 0;
 	rafQueue = [];
 	const host = dom.document.createElement("div");
@@ -486,8 +493,14 @@ describe("a tap on the folded question glides down into it (touch screen)", () =
 			await tapOn("bar");
 			await run(6);
 			await act(async () => {
-				if (input === "wheel") $("lesson").dispatchEvent(new dom.window.Event("wheel", { bubbles: true }));
+				if (input === "wheel") {
+					$("lesson").dispatchEvent(new dom.window.Event("wheel", { bubbles: true }));
+					// The wheel's own step up. A browser's smooth scroll runs on under
+					// a wheel (headless Chrome: the lesson still ended at the bottom).
+					setTop(top - 300);
+				}
 				if (input === "mouse") {
+					// A press that doesn't scroll by itself.
 					const e = new dom.window.Event("pointerdown", { bubbles: true });
 					Object.assign(e, { pointerType: "mouse" });
 					$("lesson").dispatchEvent(e);
@@ -496,9 +509,9 @@ describe("a tap on the folded question glides down into it (touch screen)", () =
 					const e = new dom.window.Event("keydown", { bubbles: true });
 					Object.assign(e, { key: "PageUp" });
 					dom.document.body.dispatchEvent(e);
+					// The key's own scroll, which cancels a smooth scroll in Chrome.
+					scroller.scrollTop = top - 500;
 				}
-				// The learner's own scroll up that the input makes.
-				scroller.scrollTop = top - 500;
 			});
 			await run(4);
 			const at = distance();
@@ -524,13 +537,59 @@ describe("a tap on the folded question glides down into it (touch screen)", () =
 		assert.ok(beforeArrival(frames).every((f) => !f.open));
 	});
 
-	it("a browser that gives up: at most a couple more glides, never one per frame, and the question stays folded", async () => {
+	it("a browser that won't glide, with nobody touching: a couple more tries, never one per frame, then the net opens the question where it is and slides it down, as a computer does", async () => {
 		await mount();
 		smoothRefused = true;
 		await tapOn("bar");
-		await run(200);
+		const frames = await run(200);
 		assert.equal(smoothCalls, 1 + GLIDE_RETRIES);
-		assert.equal(probe.expanded(), false);
+		const opened = frames.findIndex((f) => f.open);
+		assert.ok(opened > 0, "opened by the net, not at the tap");
+		assert.ok(frames[opened - 1]!.d >= 3999, `where the lesson was (${frames[opened - 1]!.d} px up)`);
+		assert.equal(probe.expanded(), true);
+		assert.ok(probe.slides >= 1, "use-stick-to-bottom's slide");
+		assert.ok(distance() <= 2, `at the bottom (${distance()} px)`);
+	});
+
+	it("the net for a teach check: revealed, as its Open asked", async () => {
+		await mount({ teach: true });
+		smoothRefused = true;
+		await tapOn("open");
+		await run(200);
+		assert.equal(probe.revealed(), true);
+		assert.equal(probe.expanded(), true);
+		assert.ok(distance() <= 2);
+	});
+
+	it("Safari's momentum outlives the stop: the glide waits it out and goes down then, not read as the learner's", async () => {
+		await mount({ from: 3000 });
+		momentum = 30;
+		momentumOutlivesStop = true;
+		await run(3);
+		await tapOn("bar");
+		const frames = await run(300);
+		assert.equal(momentum, 0, "it died by itself");
+		assert.equal(probe.expanded(), true, "open in the end");
+		assert.ok(distance() <= 2);
+		assert.ok(smoothCalls >= 2, "glided again once the momentum had died");
+		const opened = frames.findIndex((f) => f.open);
+		assert.ok(frames[opened]!.d < EXPAND_DIST, "and opened on arrival, not by the net");
+	});
+
+	it("something else moves the lesson back up during the glide (\"Show in the lesson\", the status bar): the glide ends there, folded, and doesn't come back", async () => {
+		await mount();
+		await tapOn("bar");
+		await run(8);
+		// A scroll this hook can't see: scrollIntoView, iOS's tap on the status bar.
+		await act(async () => {
+			scroller.scrollTop = top - 800;
+		});
+		await run(4);
+		const at = distance();
+		await run(80);
+		assert.ok(at > COLLAPSE_DIST && Math.abs(distance() - at) <= 1, `left where it was put (${at} → ${distance()})`);
+		assert.equal(smoothCalls, 1, "no glide back down");
+		assert.equal(probe.expanded(), false, "folded, as after a learner's stop");
 	});
 
 	it("with reduced motion it jumps, and opens", async () => {

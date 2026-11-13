@@ -44,8 +44,13 @@
  *     in chat.tsx;
  *   - a touch on the lesson or the dock, a wheel, a mouse press or a
  *     scrolling key during the glide ends it where it is, and nothing pulls
- *     the lesson back; ending short with nobody touching (the lesson grew
- *     under it) glides once more, at most GLIDE_RETRIES times.
+ *     the lesson back; so does anything else that moves the lesson back up
+ *     once the glide has gone down (the status bar's scroll to the top, "Show
+ *     in the lesson");
+ *   - ending short with nobody touching (the lesson grew under it) glides
+ *     once more, at most GLIDE_RETRIES times; if the lesson still won't go
+ *     down, the caller opens the question where it is, as a computer does (a
+ *     net, so a tap is never lost).
  * At the bottom the tap opens the question at once, as on a computer. (The
  * first version opened the question at the tap and slid the lesson with
  * use-stick-to-bottom's spring, sliding again each time a scroll report ended
@@ -194,10 +199,14 @@ export type DockTouchHooks = {
 	/** A held dock touch is known: a tap (take the reveal up again) or not
 	 *  (a drag, a long press, a second finger: let go, as a touch did before). */
 	onTouchSettled?: (tap: boolean) => void;
-	/** A glide to the bottom (glideToBottom) is over: it arrived, or the
-	 *  learner stopped it (a touch, a wheel, a mouse press, a scrolling key),
-	 *  or it gave up short of the bottom. */
-	onGlideEnd?: (arrived: boolean) => void;
+	/** A glide to the bottom (glideToBottom) is over:
+	 *    "arrived"  at the bottom;
+	 *    "stopped"  the learner stopped it (a touch, a wheel, a mouse press, a
+	 *               scrolling key), or something else moved the lesson back up
+	 *               (the status bar's scroll to the top, "Show in the lesson");
+	 *    "gave-up"  the lesson wouldn't go down, with nobody touching: the
+	 *               caller opens the question where it is, as a computer does. */
+	onGlideEnd?: (end: GlideEnd) => void;
 };
 
 /** The keys that scroll the lesson when it or the page has the focus. */
@@ -223,16 +232,29 @@ export const GLIDE_QUIET_MS = 150;
 /** At most this many more glides when one ends short with nobody touching
  *  (the lesson grew under it, or the browser gave up). */
 export const GLIDE_RETRIES = 2;
+/** How far above the lowest point a glide has reached the lesson may be
+ *  before something else has moved it back up. A glide only goes down, and
+ *  the lesson growing under it doesn't move it up. */
+export const GLIDE_PULLED_BACK_PX = 8;
+
+export type GlideEnd = "arrived" | "stopped" | "gave-up";
 
 /** Pure rule, exported for tests: one look at a glide to the bottom.
- *    "arrived" close enough to the bottom;
- *    "wait"    still moving (or not started yet);
- *    "again"   ended short with nobody touching: glide once more;
- *    "give-up" ended short GLIDE_RETRIES times already. */
-export function glideStep(distance: number, quietMs: number, retries: number): "arrived" | "wait" | "again" | "give-up" {
-	if (distance <= GLIDE_ARRIVED_PX) return "arrived";
-	if (quietMs < GLIDE_QUIET_MS) return "wait";
-	return retries < GLIDE_RETRIES ? "again" : "give-up";
+ *    "arrived"     close enough to the bottom;
+ *    "interrupted" it had gone down, and something moved the lesson back up
+ *                  (a scroll this file can't see): end it as a learner's stop;
+ *    "wait"        still moving (or not started yet);
+ *    "again"       ended short with nobody touching: glide once more;
+ *    "give-up"     ended short GLIDE_RETRIES times already.
+ *  `pulledBack` is how far the lesson is above the lowest point this glide
+ *  took it to, counted only once it has gone down at all: before that, motion
+ *  up is Safari's momentum the stop didn't catch, and a later glide, once it
+ *  has died, can still go down. */
+export function glideStep(g: { distance: number; quietMs: number; retries: number; pulledBack: number }): "arrived" | "interrupted" | "wait" | "again" | "give-up" {
+	if (g.distance <= GLIDE_ARRIVED_PX) return "arrived";
+	if (g.pulledBack > GLIDE_PULLED_BACK_PX) return "interrupted";
+	if (g.quietMs < GLIDE_QUIET_MS) return "wait";
+	return g.retries < GLIDE_RETRIES ? "again" : "give-up";
 }
 
 function prefersReducedMotion(): boolean {
@@ -322,7 +344,7 @@ export function useDockTouchScroll(rootRef: RefObject<HTMLElement | null>, trans
 		// smooth scroll, watched each frame only to know how it ends. Input from
 		// the learner ends it for good (stopGlide); ending short with nobody
 		// touching starts it once more, at most GLIDE_RETRIES times.
-		let glide: { frame: number; retries: number; top: number; movedAt: number } | null = null;
+		let glide: { frame: number; retries: number; top: number; movedAt: number; start: number; lowest: number } | null = null;
 		const smoothToBottom = () => {
 			transcript.scrollTo({ top: transcript.scrollHeight - transcript.clientHeight, behavior: prefersReducedMotion() ? "auto" : "smooth" });
 		};
@@ -330,37 +352,41 @@ export function useDockTouchScroll(rootRef: RefObject<HTMLElement | null>, trans
 			if (restore) glideAfterRestore = true;
 			else smoothToBottom();
 		};
-		const endGlide = (arrived: boolean) => {
+		const endGlide = (end: GlideEnd) => {
 			glideAfterRestore = false;
 			if (!glide) return;
 			cancelAnimationFrame(glide.frame);
 			glide = null;
-			hooksRef.current.onGlideEnd?.(arrived);
+			hooksRef.current.onGlideEnd?.(end);
 		};
 		/** The learner took the lesson: end the glide where it is. `halt` also
 		 *  stops the browser's smooth scroll, for an input that doesn't scroll
 		 *  by itself; a wheel or a key moves the lesson anyway. */
 		const stopGlide = (halt: boolean) => {
 			if (!glide) return;
-			endGlide(false);
+			endGlide("stopped");
 			if (halt) transcript.scrollTo({ top: transcript.scrollTop, behavior: "instant" });
 		};
 		glideRef.current = () => {
 			if (distance() <= GLIDE_ARRIVED_PX) return false;
 			stopFling();
-			endGlide(false);
-			glide = { frame: 0, retries: 0, top: transcript.scrollTop, movedAt: performance.now() };
+			endGlide("stopped");
+			const top = transcript.scrollTop;
+			glide = { frame: 0, retries: 0, top, movedAt: performance.now(), start: top, lowest: top };
 			glideOnce();
 			const watch = () => {
 				if (!glide) return;
 				const t = performance.now();
-				if (transcript.scrollTop !== glide.top) {
-					glide.top = transcript.scrollTop;
+				const now = transcript.scrollTop;
+				if (now !== glide.top) {
+					glide.top = now;
 					glide.movedAt = t;
 				}
-				const step = glideStep(distance(), t - glide.movedAt, glide.retries);
-				if (step === "arrived" || step === "give-up") {
-					endGlide(step === "arrived");
+				glide.lowest = Math.max(glide.lowest, now);
+				const pulledBack = glide.lowest > glide.start + GLIDE_PULLED_BACK_PX ? glide.lowest - now : 0;
+				const step = glideStep({ distance: distance(), quietMs: t - glide.movedAt, retries: glide.retries, pulledBack });
+				if (step !== "wait" && step !== "again") {
+					endGlide(step === "arrived" ? "arrived" : step === "give-up" ? "gave-up" : "stopped");
 					return;
 				}
 				if (step === "again") {
@@ -400,7 +426,7 @@ export function useDockTouchScroll(rootRef: RefObject<HTMLElement | null>, trans
 			movingAtStart = frame !== 0 || scrolledRecently || sliding;
 			startT = e.timeStamp;
 			stopFling();
-			endGlide(false);
+			endGlide("stopped");
 			if (nativeMotion) stopMomentum();
 			settleHeld(false);
 			const first = e.touches[0];
@@ -496,7 +522,9 @@ export function useDockTouchScroll(rootRef: RefObject<HTMLElement | null>, trans
 		// trackpad), a mouse on the lesson or its scrollbar (a touch laptop),
 		// the scrolling keys. Their own scrolling then goes on, and nothing
 		// pulls the lesson back.
-		const onWheel = () => stopGlide(false);
+		// A wheel halts it too: the browser's smooth scroll runs on under a
+		// wheel, and the wheel's own step still applies after the halt.
+		const onWheel = () => stopGlide(true);
 		const onPointerDown = (e: PointerEvent) => {
 			if (e.pointerType === "mouse") stopGlide(true);
 		};
@@ -511,7 +539,7 @@ export function useDockTouchScroll(rootRef: RefObject<HTMLElement | null>, trans
 			transcript.style.overscrollBehaviorY = previousOverscroll;
 			stopFling();
 			endStop();
-			endGlide(false);
+			endGlide("stopped");
 			settleHeld(false);
 			glideRef.current = null;
 			root.removeEventListener("wheel", onWheel);

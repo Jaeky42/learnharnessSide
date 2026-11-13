@@ -2749,9 +2749,14 @@ export function DockOverlay({
 			const el = scrollRef.current;
 			if (el && expandedRef.current && !atBottomRef.current && el.scrollHeight - el.clientHeight - el.scrollTop > COLLAPSE_DIST) setExpanded(false);
 		},
-		onGlideEnd: (arrived) => {
-			if (arrived && !expandedRef.current) arriveAtBottomRef.current();
+		onGlideEnd: (end) => {
+			const reveal = openOnArrivalRef.current;
+			if (end === "arrived" && !expandedRef.current) arriveAtBottomRef.current();
 			openOnArrivalRef.current = false;
+			// The net: the lesson wouldn't go down with nobody touching it (the
+			// glide gave up), so the tap isn't lost: open where it is, as a
+			// computer does. A glide the learner stopped stays as it is.
+			if (end === "gave-up" && !expandedRef.current) openAtOnce(reveal);
 		},
 	});
 
@@ -2786,6 +2791,11 @@ export function DockOverlay({
 	// (openOnArrivalRef), so a glide the learner stops leaves its invitation
 	// as it was. At the bottom, and on a computer, it opens at once as before.
 	const openOnArrivalRef = useRef(false);
+	const openAtOnce = (reveal: boolean) => {
+		if (reveal) setRevealed(true); // the teach-check invitation was accepted (W5)
+		setExpanded(true);
+		void suppressFoldDuringReveal();
+	};
 	const openDock = (reveal: boolean) => {
 		if (!atBottomRef.current) {
 			if (stickState.animation) stopScroll();
@@ -2794,9 +2804,7 @@ export function DockOverlay({
 				return;
 			}
 		}
-		if (reveal) setRevealed(true); // the teach-check invitation was accepted (W5)
-		setExpanded(true);
-		void suppressFoldDuringReveal();
+		openAtOnce(reveal);
 	};
 	const expandAndReveal = () => openDock(true);
 	const expandAndRevealRef = useRef(expandAndReveal);
