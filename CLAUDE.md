@@ -54,6 +54,7 @@ When clarification is needed:
 - `complex-implementer` / Opus high: difficult algorithmic work, debugging multiple components, migrations, tricky architecture-sensitive implementation. Do not use for routine formatting or boilerplate.
 - `test-verifier` / Sonnet medium: run targeted tests, check acceptance criteria, inspect the relevant diff, independently identify reproducible issues. No code edits.
 - `deep-reviewer` / Opus high: only high-risk or cross-cutting changes (authentication, money, sensitive data, migrations, concurrency, security), or unresolved substantive concerns. Read-only review.
+- `performance-analyst` / Opus high: performance audits and optimization planning: bottleneck analysis, profiling evidence, non-destructive diagnostics, ranked recommendations. No code edits.
 - Fable high: architectural planning and final integration; escalate to Fable's own detailed review only for critical or ambiguous unresolved risk, and preferably once per milestone rather than per commit.
 
 ### Execution contract
@@ -102,6 +103,9 @@ profile, audit, or optimize application performance.
 
 ### Phase 2: Investigate
 - Delegate independent investigations when useful.
+- Prefer analysis-focused agents for the audit: `performance-analyst`
+  for bottleneck and profiling work, `Explore` for lightweight
+  lookups. Implementation agents wait for Phase 5.
 - Use Haiku for lightweight exploration and tooling.
 - Use Sonnet for routine performance investigations.
 - Use Opus for complex bottlenecks and concurrency.
