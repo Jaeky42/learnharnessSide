@@ -17,7 +17,8 @@
  * They get `data-lh-draw`, which app/offscreen.css answers with
  * `content-visibility: visible`. Once the layout has settled (a few frames)
  * the passage is measured again and put back ONCE if it moved, unless the
- * learner scrolled or another jump started meanwhile. Then the attribute is
+ * learner scrolled (a wheel, a touch, a press or a scroll key anywhere on the
+ * page) or another jump started meanwhile. Then the attribute is
  * removed: a message on screen stays drawn, and one off screen keeps its real
  * height as its remembered size ("auto" in the stylesheet).
  *
@@ -153,13 +154,16 @@ export function revealOffscreenTarget(target: Range | HTMLElement, main: HTMLEle
 		if (frame) view.cancelAnimationFrame?.(frame);
 		view.clearTimeout(timer);
 		frame = 0;
-		main.removeEventListener("wheel", onInput, true);
-		main.removeEventListener("touchstart", onInput, true);
-		main.removeEventListener("pointerdown", onInput, true);
+		doc.removeEventListener("wheel", onInput, true);
+		doc.removeEventListener("touchstart", onInput, true);
+		doc.removeEventListener("pointerdown", onInput, true);
 		doc.removeEventListener("keydown", onKey, true);
 		if (active === handle) active = null;
 	};
-	/** The learner scrolls: no correction. The attribute stays two more frames,
+	/** The learner scrolls: no correction. Heard on the whole page, not on the
+	 *  lesson alone: a wheel or a drag on the dock (the lesson's sibling) scrolls
+	 *  the lesson from script, and the check would take that for the passage
+	 *  having moved and put it back. The attribute stays two more frames,
 	 *  so a message still on screen isn't skipped before the browser has
 	 *  seen it there. */
 	const onInput = () => {
@@ -192,9 +196,9 @@ export function revealOffscreenTarget(target: Range | HTMLElement, main: HTMLEle
 	};
 	const handle = { cancel: giveUp };
 	active = handle;
-	main.addEventListener("wheel", onInput, { capture: true, passive: true });
-	main.addEventListener("touchstart", onInput, { capture: true, passive: true });
-	main.addEventListener("pointerdown", onInput, { capture: true, passive: true });
+	doc.addEventListener("wheel", onInput, { capture: true, passive: true });
+	doc.addEventListener("touchstart", onInput, { capture: true, passive: true });
+	doc.addEventListener("pointerdown", onInput, { capture: true, passive: true });
 	doc.addEventListener("keydown", onKey, true);
 	frame = view.requestAnimationFrame(tick);
 	timer = view.setTimeout(giveUp, RELEASE_FALLBACK_MS);

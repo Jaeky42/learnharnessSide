@@ -218,7 +218,7 @@ describe("a jump into a skipped message", () => {
 		scrollSessionTarget(target, env.main, env.context);
 		const placed = env.scrolls.length;
 		env.frame();
-		env.main.dispatchEvent(new env.window.Event("wheel"));
+		env.main.dispatchEvent(new env.window.Event("wheel", { bubbles: true }));
 		assert.ok(env.drawnAttributes() > 0, "kept for two more frames");
 		env.frame(() => { env.rows[0]!.real = 500; });
 		env.frame();
@@ -226,6 +226,26 @@ describe("a jump into a skipped message", () => {
 		assert.equal(env.scrolls.length, placed, "no correction");
 		assert.equal(env.topOf(target), 216);
 		assert.equal(env.drawnAttributes(), 0);
+	});
+
+	it("a wheel or a touch on the dock, the lesson's sibling, cancels the check too", () => {
+		for (const type of ["wheel", "touchstart", "pointerdown"]) {
+			const rows = [{ kind: "card" as const, real: 300 }, ...Array.from({ length: 20 }, (_, i) => ({ kind: i % 2 ? "assistant" as const : "user" as const, real: i % 2 ? 900 : 50 }))];
+			const env = setup({ rows });
+			env.scrollTo(1e9);
+			const target = env.passage(16);
+			scrollSessionTarget(target, env.main, env.context);
+			const placed = env.scrolls.length;
+			env.frame();
+			// The dock forwards the gesture by setting the lesson's scrollTop.
+			const dock = env.document.createElement("div");
+			env.document.body.appendChild(dock);
+			dock.dispatchEvent(new env.window.Event(type, { bubbles: true }));
+			env.frame(() => { env.rows[0]!.real = 500; });
+			for (let i = 0; i < SETTLE_MAX_FRAMES; i++) env.frame();
+			assert.equal(env.scrolls.length, placed, `${type}: no correction`);
+			assert.equal(env.drawnAttributes(), 0, type);
+		}
 	});
 
 	it("a scrolling key cancels the check, typing in a box doesn't", () => {
