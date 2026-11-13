@@ -1,0 +1,18 @@
+/*
+ * Side-tutor fork: let the browser skip drawing lesson messages that are off
+ * screen. Fork-owned, unlayered, on in every browser and in the desktop app.
+ * `?offscreen=off` in the address turns it off for that page load (the inline
+ * script in app/layout.tsx sets data-lh-offscreen="off" on <html>).
+ *
+ * Targets only the message blocks directly in the transcript column: the
+ * learner's rows and the assistant's Message. Not the phase dividers, cards,
+ * placeholders (a 600px estimate would inflate their height) and not the dock
+ * spacer (a sibling of the column, never a child of it). The assistant's
+ * MessageContent already clips with overflow-hidden, so paint containment adds
+ * no new clipping there.
+ */
+html:not([data-lh-offscreen="off"]) [data-session-find-root] > [data-testid="user-message"],
+html:not([data-lh-offscreen="off"]) [data-session-find-root] > .is-assistant {
+	content-visibility: auto;
+	contain-intrinsic-size: auto 600px;
+}
