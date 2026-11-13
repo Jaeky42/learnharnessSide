@@ -6,6 +6,7 @@ This is a fork of amosblomqvist/learnharness. All fork work lives on the `side-t
 @docs/side-tutor.md
 @docs/cloud-sync.md
 @docs/upstream-0.6.0.md
+@docs/performance.md
 
 ## Working here
 
@@ -15,8 +16,8 @@ This is a fork of amosblomqvist/learnharness. All fork work lives on the `side-t
 - **Every push to `side-tutor` publishes a release** that installed apps download automatically, and needs the owner's approval every time. Pushes that only change `CLAUDE.md` or `docs/` don't build. Any other push builds, `.claude/` included, unless its commit message carries `[skip ci]`.
 - **Two branches feed two things:** `side-tutor` feeds the Windows app (and the server image `:latest`); the owner's server follows the image `:dev`, built from `claude/pensive-goldberg-7dty2m`. A change both should get goes to both branches, kept at the same commit. See "After the merge" under "Handoff" in `docs/cloud-sync.md`.
 - **The desktop app and the server must speak the same sync protocol version** (3 now). A change that raises it has to reach both, the server first, or sync pauses.
-- What is built, the owner's decisions and what is still open are in the docs, not here: `docs/side-tutor.md` (the Tutor, the notes drawer, the Windows app), `docs/cloud-sync.md` (the server, phone and tablet layouts, sync) and `docs/upstream-0.6.0.md` (the 0.6.0 merge and what came after it). Change a recorded decision only with the owner's approval.
-- Keep this file, `docs/side-tutor.md`, `docs/cloud-sync.md` and `docs/upstream-0.6.0.md` technical. The fork is public: no personal information.
+- What is built, the owner's decisions and what is still open are in the docs, not here: `docs/side-tutor.md` (the Tutor, the notes drawer, the Windows app), `docs/cloud-sync.md` (the server, phone and tablet layouts, sync), `docs/upstream-0.6.0.md` (the 0.6.0 merge and what came after it) and `docs/performance.md` (the long-session audit and what was built from it). Change a recorded decision only with the owner's approval.
+- Keep this file, `docs/side-tutor.md`, `docs/cloud-sync.md`, `docs/upstream-0.6.0.md` and `docs/performance.md` technical. The fork is public: no personal information.
 
 ## Fable orchestration policy — Option B (selective reviews)
 
