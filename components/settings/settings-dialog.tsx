@@ -66,8 +66,9 @@ import { AccountSection, useServerAccount } from "./account-section.tsx";
 import { ObsidianSection } from "./obsidian-section.tsx";
 import { CloudSection } from "./cloud-section.tsx";
 import { CloudServerSection } from "./cloud-server-section.tsx";
+import { CloudObsidianGroup } from "./cloud-obsidian-group.tsx";
 import { isPhoneNow, useIsPhone } from "@/components/phone/use-phone";
-import { isPhoneHiddenSettingsSection, isPhoneReadyPlugin } from "@/components/phone/phone-plugins";
+import { isPhoneHiddenSettingsSection, phoneSettingsBack, phoneSettingsSection } from "@/components/phone/phone-plugins";
 import { isServerMode } from "./server-mode";
 
 /** Owner (2026-09-20): hints earn their place — mechanics-explaining
@@ -338,6 +339,18 @@ export function SettingsDialogBody({
 		setActive("keys");
 		setPhoneScreen("list");
 	}, [phonePluginSection]);
+	// Side-tutor fork: on a phone Obsidian is a group inside Cloud (owner's
+	// ask; phone-plugins.ts). A link to it, or the layout turning into the
+	// phone one on it, shows Cloud with the group scrolled into view; Cloud
+	// then stays when the layout turns wide again.
+	const phoneMoved = phone && phoneSettingsSection(active) !== active;
+	const [scrollToObsidian, setScrollToObsidian] = useState(false);
+	const obsidianScrolled = useCallback(() => setScrollToObsidian(false), []);
+	useEffect(() => {
+		if (!phoneMoved) return;
+		setActive(phoneSettingsSection(active) as SectionId);
+		setScrollToObsidian(true);
+	}, [phoneMoved, active]);
 
 	const enabledPlugins = snapshot.plugins.filter(plugin => plugin.info.enabled);
 	const activePluginId = active.startsWith("plugin:") ? active.slice("plugin:".length) : null;
@@ -349,30 +362,36 @@ export function SettingsDialogBody({
 	useEffect(() => {
 		if (missingPlugin) setActive(management);
 	}, [missingPlugin, management]);
-	const selected = missingPlugin ? management : active;
+	const selected = missingPlugin ? management : phoneMoved ? phoneSettingsSection(active) as SectionId : active;
+	// Side-tutor fork: a scroll to the Obsidian group that never happened is dropped once Cloud is left.
+	useEffect(() => {
+		if (!phone || selected !== "cloud") setScrollToObsidian(false);
+	}, [phone, selected]);
 	// Side-tutor fork: the server-only rows (on a phone, Account shows from
 	// the first frame on the server, from the lh_server cookie, so it doesn't
-	// pop into the list once the device list arrives), and no Keyboard row on
-	// a phone.
+	// pop into the list once the device list arrives), and no Keyboard row
+	// and no Obsidian row (it is inside Cloud) on a phone.
 	const nativeSections = SECTIONS.filter((s) =>
 		(s.id !== "account" || account.devices || (phone && account.devices === undefined && isServerMode())) &&
 		(s.id !== "obsidian" || isServerMode()) &&
-		!(phone && s.id === "keyboard"));
-	// Side-tutor fork: a phone lists Core plugins and the page of each
-	// phone-ready plugin that is on; no Community plugins row and none of the
-	// dividers that set the plugin rows apart below.
+		!(phone && (s.id === "keyboard" || phoneSettingsSection(s.id) !== s.id)));
+	// Side-tutor fork: a phone lists Core plugins; no Community plugins row,
+	// no plugin's own page (it opens from its settings button on Core
+	// plugins; owner's ask) and none of the dividers that set the plugin rows
+	// apart below.
 	const navSections: { id: SectionId; label: string; icon?: LucideIcon }[] = phone ? [
 		...nativeSections,
 		{ id: "core-plugins", label: "Core plugins", icon: PlugIcon },
-		...enabledPlugins.filter(plugin => isPhoneReadyPlugin(plugin.info.id))
-			.map(plugin => ({ id: `plugin:${plugin.info.id}` as const, label: plugin.info.manifest?.name ?? plugin.info.id })),
 	] : [
 		...nativeSections,
 		{ id: "core-plugins", label: "Core plugins", icon: PlugIcon },
 		{ id: "plugins", label: "Community plugins", icon: PuzzleIcon },
 		...enabledPlugins.map(plugin => ({ id: `plugin:${plugin.info.id}` as const, label: plugin.info.manifest?.name ?? plugin.info.id })),
 	];
-	const activeLabel = navSections.find((s) => s.id === selected)?.label ?? "Settings";
+	// Side-tutor fork: a plugin's page has no row on a phone; its title is still the plugin's name.
+	const selectedPlugin = snapshot.plugins.find(plugin => `plugin:${plugin.info.id}` === selected)?.info;
+	const activeLabel = navSections.find((s) => s.id === selected)?.label ??
+		(selectedPlugin ? selectedPlugin.manifest?.name ?? selectedPlugin.id : "Settings");
 
 	// A save may finish after its original dialog closes. Publish its
 	// acknowledged snapshot to whichever Settings instance is mounted now.
@@ -479,8 +498,9 @@ export function SettingsDialogBody({
 					<button
 						type="button"
 						data-phone="settings-back"
-						aria-label="Back to all settings"
-						onClick={() => setPhoneScreen("list")}
+						// Side-tutor fork: from a plugin's own page back to Core plugins (owner's choice).
+						aria-label={phoneSettingsBack(selected) === "core-plugins" ? "Back to Core plugins" : "Back to all settings"}
+						onClick={() => { if (phoneSettingsBack(selected) === "core-plugins") setActive("core-plugins"); else setPhoneScreen("list"); }}
 						className="-ml-2 flex items-center gap-1 rounded-md py-2 pr-2 font-title text-2xl tracking-tight"
 					>
 						<svg viewBox="0 0 16 16" className="size-5" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
@@ -598,14 +618,16 @@ export function SettingsDialogBody({
 									/>
 								</SettingsSection>
 							)}
-							{active === "obsidian" && isServerMode() && (
+							{selected === "obsidian" && isServerMode() && (
 								<SettingsSection title="Obsidian" testid="section-obsidian">
 									<ObsidianSection />
 								</SettingsSection>
 							)}
-							{active === "cloud" && (
+							{selected === "cloud" && (
 								<SettingsSection title="Cloud" testid="section-cloud">
 									{isServerMode() ? <CloudServerSection /> : <CloudSection />}
+									{/* Side-tutor fork: on a phone on the server, Obsidian is a group here (owner's ask). */}
+									{phone && isServerMode() && <CloudObsidianGroup scrollIntoView={scrollToObsidian} onScrolled={obsidianScrolled} />}
 								</SettingsSection>
 							)}
 							{active === "account" && account.devices && (

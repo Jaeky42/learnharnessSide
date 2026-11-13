@@ -9,12 +9,15 @@
  *     by app/phone.css;
  *   - a plugin page opened on a phone renders for a phone-ready plugin and
  *     shows one sentence for any other (components/phone/phone-plugin-page.tsx);
- *   - Settings lists Core plugins and the own page of each phone-ready plugin
- *     that is on, after Account; no Community plugins row and no other
- *     plugin's page. A link to an unlisted plugin section lands on the list
- *     (components/settings/settings-dialog.tsx). On the Core plugins page the
- *     switches of the other core plugins are greyed and can't be changed, and
- *     their settings button is hidden (components/settings/plugins-section.tsx);
+ *   - Settings lists Core plugins after Account; no Community plugins row and
+ *     no plugin's own page (a phone-ready plugin's page opens from its
+ *     settings button on Core plugins, and its back arrow returns there). A
+ *     link to a phone-ready plugin's page opens it; a link to any other
+ *     plugin section lands on the list (components/settings/settings-dialog.tsx).
+ *     On the Core plugins page the other core plugins read "Disabled", with
+ *     their switch off, greyed and unchangeable, and their settings button
+ *     hidden (components/settings/plugins-section.tsx). Obsidian is a group
+ *     inside Cloud (phoneSettingsSection below);
  *   - a plugin question the teacher asks is parked, with a way to dismiss
  *     it, and a plugin's practice problem is parked
  *     (components/phone/parked-plugin-question.tsx).
@@ -68,7 +71,24 @@ export function isPhoneHiddenSettingsSection(section: string): boolean {
 }
 
 /** On the Core plugins page on a phone: a core plugin that isn't phone-ready
- *  shows its switch greyed and unchangeable, and no settings button. */
+ *  reads as off there ("Disabled", its switch off), greyed and unchangeable,
+ *  and has no settings button (owner's ask). Display only: nothing is
+ *  written, and the plugin stays on for a tablet or a computer. */
 export function isPhoneLockedPlugin(phone: boolean, plugin: { id: string; origin: string }): boolean {
 	return phone && plugin.origin === "core" && !isPhoneReadyPlugin(plugin.id);
+}
+
+/** Settings on a phone (owner's ask, "getting very cramped"): the list has
+ *  no row of its own for Obsidian, which is a group inside Cloud there, and
+ *  no row for a plugin's own page, which opens from its settings button on
+ *  Core plugins. The section a phone shows for `section`: Cloud for
+ *  Obsidian, the section itself otherwise. */
+export function phoneSettingsSection(section: string): string {
+	return section === "obsidian" ? "cloud" : section;
+}
+
+/** Where a phone's back arrow goes from `section`: a plugin's own page goes
+ *  back to Core plugins (owner's choice), everything else to the list. */
+export function phoneSettingsBack(section: string): "core-plugins" | "list" {
+	return section.startsWith("plugin:") ? "core-plugins" : "list";
 }

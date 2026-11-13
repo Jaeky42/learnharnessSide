@@ -122,13 +122,13 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 
 - The official headless client `obsidian-headless` (`ob`) runs **inside the LearnHarness container** as one more Obsidian Sync device, named **"LearnHarness server"** (owner's choices). The notes drawer on the phone then shows the same notes as Obsidian.
   - Notes are stored decrypted on the server's disk, the same as on any other synced device.
-- **Set up in Settings → Obsidian** (owner's choice over SSH). The section shows only on the server, just above Account.
+- **Set up in Settings → Obsidian** (owner's choice over SSH). The section shows only on the server, just above Cloud and Account. On a phone it has no row of its own: it is a group inside Cloud, under "Desktop apps" (owner's ask; "A less cramped list" under "Plugins on a phone").
   1. Sign in: Obsidian email, password, and a two-step code if the account uses one.
   2. Choose the vault and give its encryption password (empty for a standard vault).
   3. A status line: Starting… / Downloading your notes… / Up to date (with "Last synced …") / Syncing… / Can't reach Obsidian. Trying again. / the stopped states under "Keeping sync safe".
   - SSH still works as a backup: `docker compose exec lh ob …` uses the same files, and the page reads its state from `ob` itself.
 - **One vault, at `/data/vault`** (`LH_VAULT_DIR`), in the existing data volume (owner's choice).
-  - Connecting points the notes drawer at it. Nobody types a folder path on the server: the drawer shows "Connect your Obsidian vault" with **Open Settings**, its gear opens Settings → Obsidian, and `POST /api/notes {action:"vault"}` answers 403.
+  - Connecting points the notes drawer at it. Nobody types a folder path on the server: the drawer shows "Connect your Obsidian vault" with **Open Settings**, its gear opens Settings → Obsidian (on a phone: Cloud, with the Obsidian group in view), and `POST /api/notes {action:"vault"}` answers 403.
   - While sync is stopped, the drawer shows "Not syncing with Obsidian right now. What you write here is kept and syncs when it's back." The notes still open and save. An offline spell shorter than a minute isn't shown.
 - **Conflicts: `merge`** (owner's choice; `ob`'s default).
 - **None of `.obsidian` syncs** (owner's choice; `ob` syncs no settings unless `--configs` names some). So the server can't read Obsidian's attachment setting, and pictures pasted on the phone go to `LearnHarness/attachments`, the drawer's existing fallback. **The server never writes outside `LearnHarness/`.**
@@ -278,7 +278,7 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 - **Footer row** (context and cost, model, thinking level): all stay, on one row; the model name is kept to one line. The idle Dictate button is icon-only.
   - **While dictating** (owner's ask): a small live waveform (3.5rem, the desktop's meter) replaces the red dot, and the red Stop button is icon-only, so the row still fits.
 - **Home:** the knowledge graph. The toolbar is fitted: search becomes an icon that opens a full-width field, and the other buttons are icon-only. The graph already supports touch drag and pinch (d3-zoom).
-- **Settings:** the desktop's floating panel, centred (90% wide, at most 85% of the visible height); the owner preferred it to a full-screen page. Inside: the section list first, then the section with a back arrow. It opens with the desktop's fade-and-grow and fades back out on close (150ms; closing waits for the fade). The Keyboard section is hidden on phones; nothing else is removed. (Since the upstream 0.6.0 merge the plugin rows were left out too; with the phone plugins round Core plugins and the phone-ready plugins' pages are back: "Plugins on a phone" below.)
+- **Settings:** the desktop's floating panel, centred (90% wide, at most 85% of the visible height); the owner preferred it to a full-screen page. Inside: the section list first, then the section with a back arrow. It opens with the desktop's fade-and-grow and fades back out on close (150ms; closing waits for the fade). The Keyboard section is hidden on phones. (Since the upstream 0.6.0 merge the plugin rows were left out too; with the phone plugins round Core plugins came back, and the phone-ready plugins' pages open from it. Since the owner's ask that the list was "very cramped", Obsidian is a group inside Cloud on a phone, with no row of its own: "Settings on a phone" and "A less cramped list" under "Plugins on a phone" below.)
   - On the server the Account row shows from the first frame (the `lh_server` cookie), so it doesn't pop into the list when the device list arrives; the section shows "Loading…" until then.
 - **Plan and diagram viewers:** one-finger drag, two-finger pinch to zoom (new), and the − / + buttons.
 
@@ -406,10 +406,22 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 
 **Settings on a phone** (decision 3)
 
-- **The list**, after Account: **Core plugins**, then **Flashcards** and **Rich code blocks**, each only while its plugin is on. No Community plugins row, no other plugin's page, and no dividers above the plugin rows. A link to an unlisted plugin section lands on the list (`isPhoneHiddenSettingsSection`).
-- **The Core plugins page** lists all four core plugins. The switches of Coding questions and Drawing Pad are greyed and can't be changed (`isPhoneLockedPlugin`; disabled, `data-phone="plugin-locked"`), with no explaining text.
+- **The list**, after Account: **Core plugins** only. No Community plugins row, no plugin's own page, and no dividers above the plugin rows. On the server's site that is eight rows: Providers, Agent, Appearance, Graph, General, Cloud, Account, Core plugins (no Obsidian row, see "A less cramped list" below).
+  - **Replaced** (owner's ask, after the round shipped: "this settings page is getting very cramped on my phone"): the list had a **Flashcards** and a **Rich code blocks** row after Core plugins, each while its plugin was on. Their pages are reached from their ⚙ on Core plugins instead.
+- **A plugin's own page** opens from its ⚙ on the Core plugins page, and from a link to it (`lh:open-plugin-settings`, or `open("plugin:<id>")`) for a phone-ready plugin. A link to any other plugin section lands on the list (`isPhoneHiddenSettingsSection`). Its header is the plugin's name (it used to come from the list's row; it is now taken from the plugin when no row has it).
+- **The back arrow** on a plugin's own page goes to **Core plugins** (owner's choice), however the page was reached; its label for screen readers reads "Back to Core plugins". On Core plugins, and every other page, it goes to the list, as before (`phoneSettingsBack` in `components/phone/phone-plugins.ts`).
+- **The Core plugins page** lists all four core plugins. **Coding questions and Drawing Pad read as off on a phone** (owner's ask: "drawing pad should be default disabled, and greyed out like it already is"): the hint reads "Disabled" and the switch shows off, greyed and unchangeable (`isPhoneLockedPlugin`; disabled, `data-phone="plugin-locked"`), whether the plugin is on or off, with no explaining text. Display only: nothing is written, and the plugin stays as it is on a tablet and a computer, where it reads "Enabled" with its switch on when it is on. A plugin's error text below the row is shown as before.
+  - **Replaced:** the locked switch used to show whether the plugin was on, with upstream's hint ("Enabled", "Saving…", "Error", "Loading…").
 - Their ⚙ is hidden; Flashcards' and Rich code blocks' ⚙ open their own pages.
 - Finger-sized on these pages: the ⚙ is 40 px, and a switch keeps its look with a 40 × 40 touch area around it (`app/phone.css`).
+
+**A less cramped list: Obsidian inside Cloud** (owner's ask, the same message: "could we move the obsidian tab into cloud")
+
+- **On a phone on the server's site, Cloud holds two groups:** "Desktop apps" as before, then, under a divider (the one `SettingsGroup` draws between two groups), a group headed "Obsidian" with the unchanged Settings → Obsidian inside (`components/settings/cloud-obsidian-group.tsx`). The owner chose that order. There is no Obsidian row in the phone's list.
+- **Every link to Settings → Obsidian** (the notes drawer's "Open Settings", its gear and its banner's "Settings") opens Cloud on a phone with the Obsidian group scrolled to the top of the page. The mapping is in the Settings dialog itself (`phoneSettingsSection`), not in the callers. Both groups load their state after they open, so the group is kept at the top while the page settles, for 2 seconds or until the learner touches, scrolls or presses a key there.
+- **The layout changing:** turning into the phone layout while Obsidian is open shows Cloud (with the group in view); turning wide again while on Cloud stays on Cloud.
+- **Unchanged:** a tablet and a computer browser keep the Obsidian row (between General and Cloud) and its own page; the desktop app never shows Obsidian, and its own Cloud page (`cloud-section.tsx`) is untouched.
+- Built on `claude/upstream-0.6.0`, not shipped. Checked in a browser at iPhone size in server mode (the list, Cloud with both groups, Core plugins, Flashcards' page and both back arrows, the notes drawer's "Open Settings" landing on Cloud with the group in view) and at 1280 px, where the Settings dialog was pixel for pixel the same as before. Tests: `tests/phone-plugins-ui.test.tsx`, `tests/phone-layout.test.ts`.
 
 **Flashcards' screens** (decisions 1, 4a–4d, 5a–5c, 6; the look is `app/phone-flashcards.css`, the touch behaviour `components/phone/flashcards-touch.ts`)
 

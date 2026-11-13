@@ -56,13 +56,13 @@ function PluginRow({ plugin, onSettings }: { plugin: FrontendPlugin; onSettings:
 	const { manager, snapshot } = usePlugins();
 	const { info } = plugin;
 	const name = info.manifest?.name ?? info.id;
-	// Side-tutor fork: on a phone a core plugin that isn't phone-ready keeps
-	// its switch, greyed (app/phone.css) and unchangeable, and has no
-	// settings button.
+	// Side-tutor fork: on a phone a core plugin that isn't phone-ready reads
+	// as off ("Disabled", its switch off), greyed (app/phone.css) and
+	// unchangeable, with no settings button. Display only: nothing is written.
 	const phoneLocked = isPhoneLockedPlugin(useIsPhone(), info);
-	const toggle = <Toggle label={`Enable ${name}`} checked={info.enabled} disabled={phoneLocked || !manager || plugin.busy || snapshot.refreshing || (!info.manifest && !info.enabled)} onChange={enabled => { if (!phoneLocked) void manager?.setEnabled(info.id, enabled); }} />;
+	const toggle = <Toggle label={`Enable ${name}`} checked={info.enabled && !phoneLocked} disabled={phoneLocked || !manager || plugin.busy || snapshot.refreshing || (!info.manifest && !info.enabled)} onChange={enabled => { if (!phoneLocked) void manager?.setEnabled(info.id, enabled); }} />;
 	return <div className="border-t border-border/60 pt-3" data-testid={`plugin-${info.id}`}>
-		<SettingsRow label={name} hint={[info.origin === "community" ? info.manifest?.version : undefined, plugin.busy ? "Saving…" : plugin.error ? "Error" : plugin.phase === "loading" ? "Loading…" : info.enabled ? "Enabled" : "Disabled"].filter(Boolean).join(" · ")}>
+		<SettingsRow label={name} hint={phoneLocked ? "Disabled" : [info.origin === "community" ? info.manifest?.version : undefined, plugin.busy ? "Saving…" : plugin.error ? "Error" : plugin.phase === "loading" ? "Loading…" : info.enabled ? "Enabled" : "Disabled"].filter(Boolean).join(" · ")}>
 			<div className="flex shrink-0 items-center gap-2">
 				{info.enabled && !phoneLocked && <button type="button" data-phone="plugin-settings-link" aria-label={`Settings for ${name}`} title={`Settings for ${name}`}
 					className="flex size-7 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"

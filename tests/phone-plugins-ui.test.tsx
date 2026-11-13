@@ -2,10 +2,12 @@
  * PLUGINS ON A PHONE (fork; components/phone/phone-plugins.ts and
  * docs/phone-plugins-plan.md). Flashcards and Rich code blocks are
  * phone-ready: Flashcards' session-list entry and page show, and Settings
- * lists Core plugins and both plugins' own pages. Every other plugin stays
- * hidden: its page reads "Open this on a computer.", its Settings page isn't
- * listed, its switch on the Core plugins page is greyed and its settings
- * button hidden. Plugin questions and problems stay parked, and the phone's
+ * lists Core plugins, from which both plugins' own pages open (their back
+ * arrow returns there). Every other plugin stays hidden: its page reads
+ * "Open this on a computer.", its Settings page doesn't open, and on the Core
+ * plugins page it reads "Disabled", its switch off and greyed, its settings
+ * button hidden. On the server's site Obsidian is a group inside Cloud on a
+ * phone. Plugin questions and problems stay parked, and the phone's
  * Enter rule holds in upstream's new text boxes. The phone layout is played
  * by a scripted matchMedia; everything else is the real components. The
  * sentences here are the owner's wording.
@@ -26,10 +28,22 @@ const dom = parseHTML("<!doctype html><html><head></head><body></body></html>");
 Object.defineProperty(dom.document, "oninput", { configurable: true, value: null });
 /** "desktop": no query matches; "phone": narrow, mouse; "touch": narrow, finger. */
 let layout: "desktop" | "phone" | "touch" = "desktop";
+/** Who listens for the layout to change (useIsPhone). */
+const layoutListeners = new Set<() => void>();
+/** The window turning narrower or wider under an open page. */
+async function turn(next: typeof layout) {
+	layout = next;
+	await act(async () => { for (const listener of [...layoutListeners]) listener(); });
+	await settle();
+}
+/** The server's site (the lh_server cookie, components/settings/server-mode.ts). */
+let cookie = "";
+Object.defineProperty(dom.document, "cookie", { configurable: true, get: () => cookie });
 Object.assign(dom.window, {
 	matchMedia: (query: string) => ({
 		matches: layout !== "desktop" && (query.includes("max-width") || (query.includes("pointer: coarse") && layout === "touch")),
-		addEventListener() {}, removeEventListener() {},
+		addEventListener(_type: string, listener: () => void) { layoutListeners.add(listener); },
+		removeEventListener(_type: string, listener: () => void) { layoutListeners.delete(listener); },
 	}),
 	// React reads the selection on key events.
 	getSelection: () => ({ anchorNode: null, focusNode: null, anchorOffset: 0, focusOffset: 0, rangeCount: 0 }),
@@ -62,7 +76,8 @@ beforeEach(() => {
 		if (url === "/api/keys") return Response.json({ keys: [] });
 		if (url === "/api/models") return Response.json({ models: [], slots: {}, providers: [] });
 		if (url === "/api/themes") return Response.json({ themes: [] });
-		if (url === "/api/cloud") return Response.json({ role: "desktop", sync: { state: "off" } });
+		if (url === "/api/cloud") return Response.json(cookie ? { role: "server", held: {}, desktops: [] } : { role: "desktop", sync: { state: "off" } });
+		if (url === "/api/server-auth/account") return cookie ? Response.json({ devices: [], desktops: [] }) : new Response(null, { status: 404 });
 		return Response.json({});
 	}) as typeof fetch;
 });
@@ -73,6 +88,7 @@ afterEach(async () => {
 	}
 	globalThis.fetch = originalFetch;
 	layout = "desktop";
+	cookie = "";
 	delete (window as { __lhPluginWindow?: unknown }).__lhPluginWindow;
 });
 process.on("exit", restoreModalDom);
@@ -156,22 +172,39 @@ describe("Settings on a phone", () => {
 		assert.equal(document.querySelectorAll('[data-testid="settings-nav"] > hr').length, 2);
 	});
 
-	it("a phone lists Core plugins, then Flashcards and Rich code blocks, after the app's own rows; no Community plugins row, no other plugin's page, no divider", async () => {
+	it("a phone lists Core plugins after the app's own rows; no Community plugins row, no plugin's own page, no divider (owner's ask)", async () => {
 		layout = "touch";
 		await mount(withPlugins(<SettingsDialogBody onClose={() => {}} />));
-		assert.deepEqual(navIds(), ["keys", "agent", "appearance", "graph", "general", "cloud", "core-plugins", "plugin:flashcards", "plugin:rich-code-blocks"]);
+		assert.deepEqual(navIds(), ["keys", "agent", "appearance", "graph", "general", "cloud", "core-plugins"]);
 		assert.equal(document.querySelectorAll('[data-testid="settings-nav"] > hr').length, 0);
 		assert.equal(document.querySelector('[data-phone="settings"]')?.getAttribute("data-phone-screen"), "list");
 		// Each row is the label in a span; app/phone.css hides the icon.
-		assert.deepEqual(["keys", "core-plugins", "plugin:flashcards", "plugin:rich-code-blocks"].map((id) => document.querySelector(`[data-testid="settings-nav-${id}"] > span`)?.textContent),
-			["Providers", "Core plugins", "Flashcards", "Rich code blocks"]);
+		assert.deepEqual(["keys", "core-plugins"].map((id) => document.querySelector(`[data-testid="settings-nav-${id}"] > span`)?.textContent),
+			["Providers", "Core plugins"]);
 	});
 
-	it("a phone-ready plugin's row shows only while that plugin is on", async () => {
+	it("whichever plugins are on, a phone lists no plugin's own page", async () => {
 		layout = "touch";
 		await mount(withPlugins(<SettingsDialogBody onClose={() => {}} />, ["flashcards"]));
-		assert.deepEqual(navIds(), ["keys", "agent", "appearance", "graph", "general", "cloud", "core-plugins", "plugin:rich-code-blocks"]);
+		assert.deepEqual(navIds(), ["keys", "agent", "appearance", "graph", "general", "cloud", "core-plugins"]);
 	});
+
+	it("on the server's site a phone lists eight rows: no Obsidian row, it is inside Cloud", async () => {
+		cookie = "lh_server=1";
+		layout = "touch";
+		await mount(withPlugins(<SettingsDialogBody onClose={() => {}} />));
+		assert.deepEqual(navIds(), ["keys", "agent", "appearance", "graph", "general", "cloud", "account", "core-plugins"]);
+	});
+
+	it("on the server's site a wide screen keeps the Obsidian row and its own section", async () => {
+		cookie = "lh_server=1";
+		await mount(withPlugins(<SettingsDialogBody onClose={() => {}} initialSection="obsidian" />));
+		assert.deepEqual(navIds().slice(0, 9), ["keys", "agent", "appearance", "graph", "keyboard", "general", "obsidian", "cloud", "account"]);
+		assert.equal(document.querySelector('[data-testid="settings-nav-obsidian"]')?.getAttribute("aria-current"), "true");
+		assert.ok(document.querySelector('[data-testid="section-obsidian"] [data-testid="obsidian-section"]'));
+		assert.equal(document.querySelector('[data-testid="section-cloud"]'), null);
+	});
+
 
 	it("a link to a listed section opens it; a link to any other plugin section lands on the list", async () => {
 		layout = "touch";
@@ -190,14 +223,20 @@ describe("Settings on a phone", () => {
 			assert.doesNotMatch(document.querySelector('[data-testid="settings-content"]')?.textContent ?? "", /preference|Community plugins/, `${section}: no plugin page behind the list`);
 			await close();
 		}
-		for (const [section, text] of [["core-plugins", "Core plugins"], ["plugin:flashcards", "Flashcards preference"], ["plugin:rich-code-blocks", "Rich code blocks preference"]] as const) {
+		for (const [section, text, title] of [["core-plugins", "Core plugins", "Core plugins"], ["plugin:flashcards", "Flashcards preference", "Flashcards"], ["plugin:rich-code-blocks", "Rich code blocks preference", "Rich code blocks"]] as const) {
 			await act(async () => settings.open(section));
 			await settle();
 			assert.equal(document.querySelector('[data-phone="settings"]')?.getAttribute("data-phone-screen"), "section", section);
-			assert.equal(document.querySelector(`[data-testid="settings-nav-${section}"]`)?.getAttribute("aria-current"), "true", section);
 			assert.match(document.querySelector('[data-testid="settings-content"]')?.textContent ?? "", new RegExp(text), section);
+			assert.equal(document.querySelector('[data-phone="settings-back"]')?.textContent, title, `${section}: the page's own name in the header`);
 			await close();
 		}
+		// A deep link to a phone-ready plugin's page opens it too.
+		await act(async () => { window.dispatchEvent(new dom.window.CustomEvent("lh:open-plugin-settings", { detail: "flashcards" })); });
+		await settle();
+		assert.equal(document.querySelector('[data-phone="settings"]')?.getAttribute("data-phone-screen"), "section");
+		assert.match(document.querySelector('[data-testid="settings-content"]')?.textContent ?? "", /Flashcards preference/);
+		await close();
 		// The app's own sections still open, as before.
 		await act(async () => settings.open("appearance"));
 		await settle();
@@ -214,6 +253,115 @@ describe("Settings on a phone", () => {
 			assert.equal(document.querySelector(`[data-testid="settings-nav-plugin:${id}"]`)?.getAttribute("aria-current"), "true", id);
 		}
 	});
+
+	const groups = () => [...document.querySelectorAll('[data-testid="section-cloud"] [data-testid]')]
+		.map((element) => element.getAttribute("data-testid")).filter((id) => id === "cloud-server-section" || id === "cloud-obsidian-group");
+	const screen = () => document.querySelector('[data-phone="settings"]')?.getAttribute("data-phone-screen");
+
+	it("Cloud on a phone on the server's site: Desktop apps, then Obsidian under its own heading; a wide screen shows only Desktop apps", async () => {
+		cookie = "lh_server=1";
+		layout = "touch";
+		await mount(withPlugins(<SettingsDialogBody onClose={() => {}} initialSection="cloud" phoneOpensSection />));
+		assert.deepEqual(groups(), ["cloud-server-section", "cloud-obsidian-group"]);
+		const group = document.querySelector('[data-testid="cloud-obsidian-group"]')!;
+		assert.equal(group.firstElementChild?.textContent, "Obsidian");
+		assert.ok(group.querySelector('[data-testid="obsidian-section"]'), "the unchanged Obsidian section");
+		assert.equal(group.previousElementSibling?.hasAttribute("hidden"), true, "only a hidden marker sits between the two groups");
+		assert.equal(group.previousElementSibling?.previousElementSibling?.getAttribute("data-testid"), "cloud-server-section");
+		for (const { root, host } of roots.splice(0)) { await act(async () => root.unmount()); host.remove(); }
+
+		layout = "desktop";
+		await mount(withPlugins(<SettingsDialogBody onClose={() => {}} initialSection="cloud" />));
+		assert.deepEqual(groups(), ["cloud-server-section"]);
+	});
+
+	it("the desktop app's Cloud has no Obsidian group, on a phone-width page too", async () => {
+		layout = "touch";
+		await mount(withPlugins(<SettingsDialogBody onClose={() => {}} initialSection="cloud" phoneOpensSection />));
+		assert.ok(document.querySelector('[data-testid="section-cloud"] [data-testid="cloud-section"]'));
+		assert.equal(document.querySelector('[data-testid="cloud-obsidian-group"]'), null);
+	});
+
+	it("a link to Obsidian on a phone (the notes drawer's) opens Cloud with the Obsidian group", async () => {
+		cookie = "lh_server=1";
+		layout = "touch";
+		let settings!: ReturnType<typeof useSettingsDialog>;
+		function Probe() { settings = useSettingsDialog(); return null; }
+		await mount(withPlugins(<SettingsDialogProvider><Probe /></SettingsDialogProvider>));
+		// The page's geometry: the scrolling column's top at 100, the Obsidian group's at 300.
+		const proto = dom.window.HTMLElement.prototype as unknown as Record<string, unknown>;
+		const own = { rect: Object.getOwnPropertyDescriptor(proto, "getBoundingClientRect"), scroll: Object.getOwnPropertyDescriptor(proto, "scrollTop") };
+		Object.defineProperty(proto, "getBoundingClientRect", { configurable: true, value(this: HTMLElement) {
+			const id = this.getAttribute("data-testid");
+			const top = id === "cloud-obsidian-group" ? 300 - (document.querySelector<HTMLElement>('[data-testid="settings-content"]')!.scrollTop) : id === "settings-content" ? 100 : 0;
+			return { top, bottom: top, left: 0, right: 0, width: 0, height: 0 };
+		} });
+		const scrolled = new WeakMap<object, number>();
+		Object.defineProperty(proto, "scrollTop", { configurable: true, get(this: object) { return scrolled.get(this) ?? 0; }, set(this: object, value: number) { scrolled.set(this, value); } });
+		const scrollTop = () => document.querySelector<HTMLElement>('[data-testid="settings-content"]')!.scrollTop;
+		try {
+			await act(async () => settings.open("obsidian"));
+			await settle();
+			assert.equal(screen(), "section");
+			assert.equal(document.querySelector('[data-phone="settings-back"]')?.textContent, "Cloud");
+			assert.equal(document.querySelector('[data-testid="section-obsidian"]'), null);
+			assert.deepEqual(groups(), ["cloud-server-section", "cloud-obsidian-group"]);
+			assert.equal(scrollTop(), 200, "the Obsidian group is scrolled to the top of the page");
+			// The back arrow goes to the list, which has no Obsidian row.
+			await press(document.querySelector('[data-phone="settings-back"]')!);
+			assert.equal(screen(), "list");
+			assert.equal(document.querySelector('[data-testid="settings-nav-obsidian"]'), null);
+			assert.equal(document.querySelector('[data-testid="settings-nav-cloud"]')?.getAttribute("aria-current"), "true");
+			// Cloud opened from the list afterwards isn't scrolled to the group again.
+			await press(document.querySelector('[data-testid="settings-nav-keys"]')!);
+			document.querySelector<HTMLElement>('[data-testid="settings-content"]')!.scrollTop = 0;
+			await press(document.querySelector('[data-testid="settings-nav-cloud"]')!);
+			assert.deepEqual(groups(), ["cloud-server-section", "cloud-obsidian-group"]);
+			assert.equal(scrollTop(), 0);
+		} finally {
+			for (const [name, descriptor] of [["getBoundingClientRect", own.rect], ["scrollTop", own.scroll]] as const) {
+				if (descriptor) Object.defineProperty(proto, name, descriptor); else delete proto[name];
+			}
+		}
+	});
+
+	it("the layout turning into the phone one on Obsidian shows Cloud; turning wide again, Cloud stays", async () => {
+		cookie = "lh_server=1";
+		await mount(withPlugins(<SettingsDialogBody onClose={() => {}} initialSection="obsidian" />));
+		assert.ok(document.querySelector('[data-testid="section-obsidian"]'));
+		await turn("touch");
+		assert.equal(document.querySelector('[data-testid="section-obsidian"]'), null);
+		assert.deepEqual(groups(), ["cloud-server-section", "cloud-obsidian-group"]);
+		await turn("desktop");
+		assert.equal(document.querySelector('[data-testid="settings-nav-cloud"]')?.getAttribute("aria-current"), "true");
+		assert.deepEqual(groups(), ["cloud-server-section"]);
+		assert.ok(document.querySelector('[data-testid="settings-nav-obsidian"]'), "the Obsidian row is back on a wide screen");
+	});
+
+	it("the back arrow on a plugin's own page goes to Core plugins, and from there to the list", async () => {
+		layout = "touch";
+		const back = () => document.querySelector('[data-phone="settings-back"]')!;
+		// Reached from its settings button on Core plugins.
+		await mount(withPlugins(<SettingsDialogBody onClose={() => {}} initialSection="core-plugins" phoneOpensSection />));
+		await press(document.querySelector('[data-testid="plugin-flashcards"] [data-phone="plugin-settings-link"]')!);
+		assert.equal(back().textContent, "Flashcards");
+		assert.equal(back().getAttribute("aria-label"), "Back to Core plugins");
+		await press(back());
+		assert.equal(screen(), "section");
+		assert.ok(document.querySelector('[data-testid="section-core-plugins"]'));
+		assert.equal(back().textContent, "Core plugins");
+		assert.equal(back().getAttribute("aria-label"), "Back to all settings");
+		await press(back());
+		assert.equal(screen(), "list");
+		for (const { root, host } of roots.splice(0)) { await act(async () => root.unmount()); host.remove(); }
+
+		// Reached by a link straight to the page.
+		await mount(withPlugins(<SettingsDialogBody onClose={() => {}} initialSection="plugin:rich-code-blocks" phoneOpensSection />));
+		assert.equal(back().textContent, "Rich code blocks");
+		await press(back());
+		assert.ok(document.querySelector('[data-testid="section-core-plugins"]'));
+		assert.equal(screen(), "section");
+	});
 });
 
 describe("Core plugins on a phone", () => {
@@ -225,18 +373,31 @@ describe("Core plugins on a phone", () => {
 		return document.querySelector('[data-testid="section-core-plugins"]')!;
 	}
 
-	it("Coding questions and Drawing Pad: greyed switches that show on or off and can't be changed, and no settings button", async () => {
+	/** The row's quiet line under its name (SettingsRow's hint). */
+	const hint = (id: string) => row(id).querySelector("span.min-w-0 > span:nth-child(2)")?.textContent;
+
+	it("Coding questions and Drawing Pad read as off: \"Disabled\", greyed switches that show off and can't be changed, and no settings button (owner's ask)", async () => {
 		layout = "touch";
+		// Drawing Pad is on, Coding questions off: both read the same on a phone.
 		await openCorePlugins(["coding-questions"]);
-		for (const [id, on] of [["drawing-pad", "true"], ["coding-questions", "false"]] as const) {
+		for (const id of ["drawing-pad", "coding-questions"]) {
+			assert.equal(hint(id), "Disabled", id);
 			assert.equal(toggle(id).hasAttribute("disabled"), true, id);
-			assert.equal(toggle(id).getAttribute("aria-checked"), on, `${id} still shows whether it is on`);
+			assert.equal(toggle(id).getAttribute("aria-checked"), "false", `${id} shows off`);
 			assert.equal(toggle(id).parentElement?.getAttribute("data-phone"), "plugin-locked", `${id} is greyed (app/phone.css)`);
 			assert.equal(gear(id), null, `${id} has no settings button`);
 			await press(toggle(id));
-			assert.equal(toggle(id).getAttribute("aria-checked"), on, `${id} is unchanged`);
+			assert.equal(toggle(id).getAttribute("aria-checked"), "false", `${id} is unchanged`);
 		}
-		assert.deepEqual(switched, [], "nothing was switched");
+		assert.deepEqual(switched, [], "nothing was switched or written");
+	});
+
+	it("a locked plugin that is on still reads \"Enabled\", switched on, on a computer", async () => {
+		await openCorePlugins(["coding-questions"]);
+		assert.equal(hint("drawing-pad"), "Enabled");
+		assert.equal(toggle("drawing-pad").getAttribute("aria-checked"), "true");
+		assert.equal(toggle("drawing-pad").hasAttribute("disabled"), false);
+		assert.equal(hint("coding-questions"), "Disabled");
 	});
 
 	it("Flashcards and Rich code blocks: working switches and settings buttons", async () => {
@@ -248,8 +409,8 @@ describe("Core plugins on a phone", () => {
 			assert.ok(gear(id), `${id} has its settings button`);
 		}
 		await press(gear("flashcards")!);
-		assert.equal(document.querySelector('[data-testid="settings-nav-plugin:flashcards"]')?.getAttribute("aria-current"), "true");
 		assert.match(document.querySelector('[data-testid="settings-content"]')?.textContent ?? "", /Flashcards preference/);
+		assert.equal(document.querySelector('[data-phone="settings-back"]')?.textContent, "Flashcards");
 	});
 
 	it("a phone-ready switch still works on a phone", async () => {
@@ -259,11 +420,13 @@ describe("Core plugins on a phone", () => {
 		assert.deepEqual(switched, ["/api/plugins/rich-code-blocks"]);
 	});
 
-	it("says nothing more than on a computer: no explaining text", async () => {
+	it("says nothing more than on a computer: no explaining text, only the locked plugins' \"Disabled\"", async () => {
 		const computer = (await openCorePlugins()).textContent;
 		for (const { root, host } of roots.splice(0)) { await act(async () => root.unmount()); host.remove(); }
 		layout = "touch";
-		assert.equal((await openCorePlugins()).textContent, computer);
+		const phone = (await openCorePlugins()).textContent;
+		assert.equal(phone, computer!.replace("Drawing PadEnabled", "Drawing PadDisabled").replace("Coding questionsEnabled", "Coding questionsDisabled"));
+		assert.notEqual(phone, computer);
 	});
 
 	it("on a computer every switch works and every plugin that is on has its settings button", async () => {

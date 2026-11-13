@@ -354,7 +354,7 @@ describe("model menu order (fork)", async () => {
 });
 
 describe("upstream 0.6.0 on a phone", async () => {
-	const { isPhoneHiddenSettingsSection, isPluginSettingsSection, PHONE_SIDEBAR_ENTRIES } = await import("../components/phone/phone-plugins.ts");
+	const { isPhoneHiddenSettingsSection, isPhoneLockedPlugin, isPluginSettingsSection, phoneSettingsBack, phoneSettingsSection, PHONE_SIDEBAR_ENTRIES } = await import("../components/phone/phone-plugins.ts");
 	/** The declarations of the rule whose selector list contains `needle`. */
 	const ruleWith = (needle: string) => {
 		for (const media of blocks(css)) for (const rule of blocks(media.body)) if (rule.prelude.includes(needle)) return rule.body;
@@ -387,9 +387,25 @@ describe("upstream 0.6.0 on a phone", async () => {
 		for (const own of ["keys", "appearance", "general", "cloud", "account", "obsidian"]) assert.equal(isPluginSettingsSection(own), false, own);
 	});
 
-	it("a phone lists Core plugins and the phone-ready plugins' pages, and hides the other plugin sections", () => {
+	it("a phone opens Core plugins and the phone-ready plugins' pages, and hides the other plugin sections", () => {
 		for (const listed of ["core-plugins", "plugin:flashcards", "plugin:rich-code-blocks", "keys", "account"]) assert.equal(isPhoneHiddenSettingsSection(listed), false, listed);
 		for (const hidden of ["plugins", "plugin:drawing-pad", "plugin:coding-questions", "plugin:fixture"]) assert.equal(isPhoneHiddenSettingsSection(hidden), true, hidden);
+	});
+
+	it("on a phone Obsidian is shown inside Cloud, and a plugin's page goes back to Core plugins (owner's ask)", () => {
+		assert.equal(phoneSettingsSection("obsidian"), "cloud");
+		for (const own of ["keys", "agent", "appearance", "graph", "general", "cloud", "account", "core-plugins", "plugin:flashcards"]) assert.equal(phoneSettingsSection(own), own, own);
+		for (const page of ["plugin:flashcards", "plugin:rich-code-blocks"]) assert.equal(phoneSettingsBack(page), "core-plugins", page);
+		for (const other of ["core-plugins", "cloud", "keys", "account"]) assert.equal(phoneSettingsBack(other), "list", other);
+	});
+
+	it("a plugin that can't be used on a phone is locked there, on its Core plugins row only", () => {
+		for (const id of ["drawing-pad", "coding-questions"]) {
+			assert.equal(isPhoneLockedPlugin(true, { id, origin: "core" }), true, id);
+			assert.equal(isPhoneLockedPlugin(false, { id, origin: "core" }), false, `${id} off a phone`);
+		}
+		for (const id of ["flashcards", "rich-code-blocks"]) assert.equal(isPhoneLockedPlugin(true, { id, origin: "core" }), false, id);
+		assert.equal(isPhoneLockedPlugin(true, { id: "fixture", origin: "community" }), false);
 	});
 
 	it("the plugin pages of Settings: a locked switch is greyed, the settings button and every switch's touch area are 40 px", () => {

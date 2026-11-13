@@ -20,7 +20,7 @@ Upstream 0.6.0 brought: plugins (core and community), themes, side conversations
 | 1f | Thinking | The session's thinking level, as upstream. |
 | 1g | Dividers | Each step's conversation starts with that step's first words, greyed. |
 | 6 | Sync | Protocol 2, plus a second lock: a side never accepts or sends a session newer than it can read. No message on screen. |
-| 7 | Settings list | **The fork's.** Obsidian, Cloud and Account sit above the divider, with icons; plugins below. On a phone the closing fade stays. |
+| 7 | Settings list | **The fork's.** Obsidian, Cloud and Account sit above the divider, with icons; plugins below. On a phone the closing fade stays. **Since then, on a phone** (owner's ask, "very cramped"): no Obsidian row (it is a group inside Cloud) and no plugin page rows; see "Settings" below. |
 | 8 | Themes | Everything of the fork's follows the chosen theme, including the login pages and the home-screen app's colours. |
 | 9 | Themes and devices | The theme, colour overrides, code ligatures and custom themes sync. "Reasoning in summaries" syncs; "helpers at once" stays per device. |
 | 10 | Phone | The Enter rule applies to upstream's new text boxes. Under 640 px no plugin is offered (Drawing Pad never will be), and a plugin's question is parked with a note. Phone layouts for Flashcards, Coding questions, Rich code blocks, the theme picker and plugin settings pages are a later round. **Since the phone plugins round**: Flashcards and Rich code blocks are offered on a phone, with Settings → Core plugins and their own pages; everything else stays as here. See "Phone" below. |
@@ -108,7 +108,7 @@ See `docs/side-tutor.md`. In short: the fork's engine (store, route, agent, prom
 ### Settings
 
 - **Rows, in order:** Providers, Agent, Appearance, Graph, Keyboard, General, Obsidian (server only), Cloud, Account (server only); a divider; Core plugins, Community plugins; a divider; one row per plugin that has settings. Icons for the fork's rows: a notebook with a pen (Obsidian), a cloud (Cloud), a person (Account). (`components/settings/settings-dialog.tsx`)
-- **On a phone:** the list has no icons, no Keyboard row and no plugin rows; a link to a plugin's section lands on the list. (Since the phone plugins round: Core plugins and the pages of Flashcards and Rich code blocks are listed after Account, with no dividers; "Plugins on a phone" in `docs/cloud-sync.md`.) The closing fade is kept by fading a copy of the panel's contents (`fadeOutCopy`), because upstream's dialog removes the panel at once.
+- **On a phone:** the list has no icons, no Keyboard row and no plugin rows; a link to a plugin's section lands on the list. (Since the phone plugins round: Core plugins is listed after Account, with no dividers, and the pages of Flashcards and Rich code blocks open from their ⚙ there, their back arrow returning to Core plugins; Coding questions and Drawing Pad read "Disabled" there, their switch off and greyed; on the server's site Obsidian is a group inside Cloud, under "Desktop apps", with no row of its own, so the list has eight rows. The pages' own rows and the Obsidian row were taken out at the owner's ask, "very cramped": "Settings on a phone" and "A less cramped list" under "Plugins on a phone" in `docs/cloud-sync.md`. Built on `claude/upstream-0.6.0`, not shipped.) The closing fade is kept by fading a copy of the panel's contents (`fadeOutCopy`), because upstream's dialog removes the panel at once.
 
 ### Phone
 
@@ -235,6 +235,9 @@ Protocol 2 means both sides must be updated, or sync pauses (nothing is discarde
     - `app/plugins/[pluginId]/[viewId]/page.tsx`: passes `pluginId` to `PhonePluginPage` (the wrapper itself dates from the merge);
     - `components/settings/settings-dialog.tsx`: the phone's rows (Core plugins, the phone-ready plugins' pages) and `isPhoneHiddenSettingsSection`;
     - `components/settings/plugins-section.tsx` (`PluginRow`): the switch pulled into a variable, disabled and wrapped in `data-phone="plugin-locked"` when locked on a phone; the ⚙ hidden when locked, and marked `data-phone="plugin-settings-link"`;
+  - **Added by the less cramped phone Settings** (owner's ask; "A less cramped list" under "Plugins on a phone" in `docs/cloud-sync.md`):
+    - `components/settings/settings-dialog.tsx`: no plugin page rows and no Obsidian row on a phone; Obsidian shown as Cloud there (`phoneSettingsSection`, an effect that moves to Cloud, and `selected` instead of `active` for the Obsidian and Cloud pages), with `CloudObsidianGroup` under the server's Cloud; the header's name taken from the plugin when no row has it; the back arrow from a plugin's page to Core plugins (`phoneSettingsBack`);
+    - `components/settings/plugins-section.tsx` (`PluginRow`): a locked plugin's switch shows off and its hint reads "Disabled" on a phone.
     - `components/md-blocks.tsx`: the phone frame around a smiles, abc or tikz block, and `data-lh-rich-fence` on its code fallback;
     - `components/session-overlay.tsx`: an optional `openDrawing` in the viewer's context and a `drawing` prop;
     - `components/chat.tsx`: `figureFocus` takes `{ drawing }`, and `openDrawing`;
