@@ -383,10 +383,39 @@ export type LinkResolution =
  * Anything not found in LearnHarness/ is "outside" (Obsidian may have it).
  */
 export function resolveLink(link: Pick<NoteLink, "kind" | "target">, fromPath: string, notePaths: readonly string[]): LinkResolution {
-	const raw = link.target.replace(/\\/g, "/");
-	if (!raw) return { kind: "note", path: fromPath };
+	return resolveLinkIn(link, fromPath, buildLinkIndex(notePaths));
+}
+
+/** Lookups `resolveLink` needs, built once for many links. */
+interface LinkIndex {
+	/** lower-cased path → path (the last of equal ones, as a plain scan would). */
+	lower: Map<string, string>;
+	/** lower-cased note name → paths with it, in the given order. Built at first use: a
+	 *  path-style link never needs it, so a single `resolveLink` call costs what it did. */
+	byName(): Map<string, string[]>;
+}
+
+function buildLinkIndex(notePaths: readonly string[]): LinkIndex {
 	const lower = new Map<string, string>();
 	for (const p of notePaths) lower.set(p.toLowerCase(), p);
+	let names: Map<string, string[]> | null = null;
+	const byName = () => {
+		if (names) return names;
+		names = new Map();
+		for (const p of notePaths) {
+			const key = noteName(p).toLowerCase();
+			const list = names.get(key);
+			if (list) list.push(p); else names.set(key, [p]);
+		}
+		return names;
+	};
+	return { lower, byName };
+}
+
+function resolveLinkIn(link: Pick<NoteLink, "kind" | "target">, fromPath: string, index: LinkIndex): LinkResolution {
+	const raw = link.target.replace(/\\/g, "/");
+	if (!raw) return { kind: "note", path: fromPath };
+	const { lower } = index;
 	const withMd = (p: string) => (p.toLowerCase().endsWith(".md") ? p : `${p}.md`);
 
 	if (link.kind === "markdown") {
@@ -413,7 +442,7 @@ export function resolveLink(link: Pick<NoteLink, "kind" | "target">, fromPath: s
 	}
 
 	const name = raw.toLowerCase().endsWith(".md") ? raw.slice(0, -3) : raw;
-	const matches = notePaths.filter((p) => noteName(p).toLowerCase() === name.toLowerCase());
+	const matches = index.byName().get(name.toLowerCase()) ?? [];
 	if (!matches.length) return { kind: "outside", target: raw };
 	const here = folderOf(fromPath);
 	const same = matches.find((p) => folderOf(p) === here);
@@ -424,12 +453,12 @@ export function resolveLink(link: Pick<NoteLink, "kind" | "target">, fromPath: s
 /** "Linked from": note path → the notes that link to it (embeds excluded,
  *  self-links excluded), sorted. */
 export function computeBacklinks(notes: ReadonlyArray<{ path: string; body: string }>): Record<string, string[]> {
-	const paths = notes.map((n) => n.path);
+	const index = buildLinkIndex(notes.map((n) => n.path));
 	const out: Record<string, Set<string>> = {};
 	for (const n of notes) {
 		for (const link of findLinks(n.body)) {
 			if (link.embed) continue;
-			const r = resolveLink(link, n.path, paths);
+			const r = resolveLinkIn(link, n.path, index);
 			if (r.kind !== "note" || r.path === n.path) continue;
 			(out[r.path] ??= new Set()).add(n.path);
 		}

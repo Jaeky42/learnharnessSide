@@ -192,3 +192,51 @@ describe("delete confirm (the owner's wording)", () => {
 		}
 	});
 });
+
+describe("computeBacklinks on a large vault", () => {
+	it("equals the plain per-link resolveLink loop", () => {
+		let seed = 7;
+		const rnd = (n: number) => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return Math.floor((seed / 0x80000000) * n); };
+		const folders = ["", "Physics", "Physics/Optics", "Math", "Math/Algebra", "Inbox", "Deep/Er/Folder"];
+		const names = Array.from({ length: 80 }, (_, i) => `Note ${i}`);
+		const notes: { path: string; body: string }[] = [];
+		const seen = new Set<string>();
+		while (notes.length < 300) {
+			const folder = folders[rnd(folders.length)]!;
+			const name = names[rnd(names.length)]!;
+			const path = folder ? `${folder}/${name}.md` : `${name}.md`;
+			if (seen.has(path)) continue;
+			seen.add(path);
+			notes.push({ path, body: "" });
+		}
+		const target = () => {
+			const n = notes[rnd(notes.length)]!;
+			const nm = (n.path.split("/").pop() ?? "").replace(/\.md$/, "");
+			switch (rnd(9)) {
+				case 0: return `[[${nm}]]`;
+				case 1: return `[[${nm.toUpperCase()}#Section]]`;
+				case 2: return `[[${nm}|alias]]`;
+				case 3: return `[[LearnHarness/${n.path.replace(/\.md$/, "")}]]`;
+				case 4: return `[[${n.path}]]`;
+				case 5: return `[txt](${encodeURI(n.path)})`;
+				case 6: return `[txt](../${encodeURI(n.path)})`;
+				case 7: return `[[Missing ${rnd(50)}]]`;
+				default: return `![[${nm}]]`;
+			}
+		};
+		for (const n of notes) n.body = Array.from({ length: 4 }, target).join(" and ");
+		const paths = notes.map((n) => n.path);
+		const expected: Record<string, Set<string>> = {};
+		for (const n of notes) {
+			for (const link of findLinks(n.body)) {
+				if (link.embed) continue;
+				const r = resolveLink(link, n.path, paths);
+				if (r.kind !== "note" || r.path === n.path) continue;
+				(expected[r.path] ??= new Set()).add(n.path);
+			}
+		}
+		const reference = Object.fromEntries(Object.entries(expected).map(([k, v]) => [k, [...v].sort((a, b) => a.localeCompare(b))]));
+		assert.ok(Object.keys(reference).length > 50);
+		assert.deepEqual(computeBacklinks(notes), reference);
+	});
+});
