@@ -8,6 +8,8 @@ Upstream 0.6.0 brought: plugins (core and community), themes, side conversations
 
 **Since then:** the phone plugins round (Flashcards and Rich code blocks on a phone, and Flashcards sync, sync protocol 3) is **built on `claude/upstream-0.6.0` and shipped**. With the owner's word ("if the run works and the review comes back ok, you can just ship"), the same commit was pushed to `claude/pensive-goldberg-7dty2m` (the server's image `:dev`) and to `side-tutor` (the Windows release), both plain fast-forwards. Both dry runs had passed on `7ad11e3`, the last code commit; the shipped commit adds only these lines. The sync part was reviewed in three passes and every finding fixed. The owner hasn't updated the server or the PC yet, and the owner's iPhone hasn't seen it. The plan is `docs/phone-plugins-plan.md`; what was built is in `docs/cloud-sync.md` ("Plugins on a phone" under "Phone layouts", and "Flashcards sync"). It changes decisions 10 and 17 below, as noted there.
 
+**Since then, the performance round** (long sessions lagging): an audit, then step 1 of its recommendations and the off-screen rule, built on `claude/upstream-0.6.0` and not yet shipped to either release branch. No protocol or format change. The findings, the owner's decisions and what was built are in `docs/performance.md`.
+
 ## The owner's decisions
 
 | # | About | Decision |
@@ -249,4 +251,19 @@ Protocol 2 means both sides must be updated, or sync pauses (nothing is discarde
   - **Added by the touch selection fix** (Highlight, then Ask on a phone and a tablet; `docs/side-tutor.md`):
     - `components/selection-actions.ts`: a touch or pen gesture no longer sets the "press under way" flag (iOS sends no `mouseup` after a press-and-hold selection, and the flag stuck); it reports once the selection has rested with no finger down, re-checks after a touch is cancelled, a tap and Android's `contextmenu`, and holds the toolbar through a press on it until its click; once shown it follows the selection (placed again at the next frame for each change, never hidden; hidden while the lesson scrolls and placed again once scrolling settles, with no settle wait); `onSelection` gets a second argument, `touch`. Mouse timing unchanged. All of it in a browser only (`touchSelectionHere`): in the desktop app every gesture is upstream's;
     - `components/selection-toolbar.tsx`: a touch selection is placed by `resolveTouchSelectionPosition` (`components/phone/touch-selection.ts`), opposite the system's Copy / Look Up box, inside the part of the lesson the top bar and the dock leave visible, with the bigger touch buttons (a `touch` prop on `SelectionToolbarButtons`), and measured from the shifted body while the iPhone keyboard is up (the layout effect's clamp too; unchanged for a mouse); on touch, finding no selection to show also stops the observer's following (`observer.cancel()`).
+  - **Added by the performance round** (long sessions; `docs/performance.md`):
+    - `src/core/compaction.ts`: `serializeForSummary` reads a learner message's text whatever its shape and writes `[drawing attached]` per picture, there and for a picture in a tool result (`DRAWING_MARKER`, `imageMarkers`); it imports `userFacingTextOf`;
+    - `src/server/compaction.ts`: preparing the summary moved inside `compact()`'s try; a catch on `kickCompaction`;
+    - `app/api/chats/[id]/route.ts`: `?only=coverage|settings|turns|stamp`, the record read once and handed to the helpers, `stamp` in the full answer, signatures left out of `messages`;
+    - `app/chat/[id]/page.tsx`: `initialStamp`, and `initialMessages` without signatures;
+    - `src/server/chats.ts`: re-exports `chatStamp`; `sessionCoverage` takes an already-read record; `src/server/index.ts` and `src/core/index.ts`: one export line each;
+    - `src/store/chats.ts`: `chatStamp`, and the stat-keyed summary cache in `listChats`;
+    - `src/store/jobs.ts`: the job-file-to-session map in `listJobs`; `src/server/jobs.ts`: the sweep's per-job `getChat` removed;
+    - `src/core/native-messages.ts`: the problem fold reads a per-history index (`ProblemIndex`, `problemIndexOf`); `src/core/math-delims.ts`: bounded caches around `transformMathDelimiters` and `repairMathForDisplay`;
+    - `components/chat.tsx`: `useSessionHeld`; the `initialStamp` prop; no state set for the same jobs, turns or pricing; `syncTurns` reads `?only=turns`; the catch-up asks for the stamp first; the growth-mute observer reads the entry's own size;
+    - `components/session-core.ts`, `session.ts`: `stamp` on the record, `rememberStamp`, `knownStamp`, `recordUnchanged`, `readUsage`, `canonicalNow`, `sameJsonValue`;
+    - `components/use-side-thread.ts`, `sidebar.tsx`: an equal list sets no state; `components/extraction-coverage.tsx`, `model-picker.tsx`: read their one field;
+    - `app/layout.tsx`: imports `offscreen.css`; the inline head script also sets `data-lh-offscreen="off"` for `?offscreen=off`;
+    - upstream's tests whose scripted server now answers `?only=settings`: `tests/stats-cache-interaction.test.tsx`, `stats-meter-interaction.test.tsx`, `model-catalog-setup.test.tsx`, `claude-code-context-ui.test.tsx`.
+    - The off-screen rule hangs on upstream's markup (`data-session-find-root`, `data-testid="user-message"`, the `is-assistant` class); `tests/offscreen-rule.test.ts` pins the rule and its switch.
   - The phone styling of Flashcards and Rich code blocks hangs on upstream's class names and markup from the fork's own stylesheets; `tests/phone-flashcards.test.ts`, `tests/phone-flashcards-structure.test.tsx` and `tests/phone-rich-code-blocks.test.tsx` fail when one of those names or structures changes upstream.
