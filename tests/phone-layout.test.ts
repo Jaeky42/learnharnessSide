@@ -309,6 +309,17 @@ describe("drag on the dock scrolls the lesson", async () => {
 		assert.equal(g(4000, GLIDE_QUIET_MS, 0, GLIDE_PULLED_BACK_PX), "again", "a rounding wobble isn't a scroll back up");
 		assert.equal(g(10, 0, 0, 500), "arrived", "arrived wins");
 	});
+	it("a glide in flight is re-aimed when the bottom moves away: more than a few px, at most every 100 ms, never once it has ended", async () => {
+		const { shouldRetarget, GLIDE_RETARGET_PX, GLIDE_RETARGET_MS, GLIDE_QUIET_MS } = await import("../components/phone/use-dock-touch-scroll.ts");
+		assert.equal(GLIDE_RETARGET_MS, 100);
+		const r = (bottom: number, aimed: number | null, sinceAimMs = GLIDE_RETARGET_MS, quietMs = 0) => shouldRetarget({ bottom, aimed, sinceAimMs, quietMs });
+		assert.equal(r(10000, 9000), true, "the lesson grew under it");
+		assert.equal(r(9000 + GLIDE_RETARGET_PX, 9000), false, "a few px");
+		assert.equal(r(9000, 9500), false, "the bottom came closer: the scroll ends there anyway");
+		assert.equal(r(10000, 9000, GLIDE_RETARGET_MS - 1), false, "not more often than every 100 ms");
+		assert.equal(r(10000, 9000, GLIDE_RETARGET_MS, GLIDE_QUIET_MS), false, "it has ended: the retry rule's case");
+		assert.equal(r(10000, null), false, "not started yet (the stop's hidden frame still to come)");
+	});
 	it("takes the throw from the last moments of the drag, not the last twitch", async () => {
 		const { releaseVelocity, FLING_MAX } = await import("../components/phone/use-dock-touch-scroll.ts");
 		// A steady flick down at 1px/ms, then a 3px twitch back 1ms later as the finger lifts.

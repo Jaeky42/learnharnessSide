@@ -47,8 +47,11 @@
  *     the lesson back; so does anything else that moves the lesson back up
  *     once the glide has gone down (the status bar's scroll to the top, "Show
  *     in the lesson");
- *   - ending short with nobody touching (the lesson grew under it) glides
- *     once more, at most GLIDE_RETRIES times; if the lesson still won't go
+ *   - the lesson growing under a glide in flight (a demo sizing itself as it
+ *     comes on screen) re-aims the same glide at the new bottom
+ *     (shouldRetarget), so it doesn't slow to a stop short of it;
+ *   - ending short with nobody touching glides once more, at most
+ *     GLIDE_RETRIES times; if the lesson still won't go
  *     down, the caller opens the question where it is, as a computer does (a
  *     net, so a tap is never lost).
  * At the bottom the tap opens the question at once, as on a computer. (The
@@ -236,6 +239,24 @@ export const GLIDE_RETRIES = 2;
  *  before something else has moved it back up. A glide only goes down, and
  *  the lesson growing under it doesn't move it up. */
 export const GLIDE_PULLED_BACK_PX = 8;
+/** The bottom has moved away under a glide in flight by more than this:
+ *  aim the same glide at the new bottom. */
+export const GLIDE_RETARGET_PX = 4;
+/** Re-aim a glide in flight at most this often. */
+export const GLIDE_RETARGET_MS = 100;
+
+/** Pure rule, exported for tests: re-aim a glide still in flight at the
+ *  bottom it should now reach? The lesson grew under it (a demo sizing itself
+ *  as it comes on screen): a smooth scroll aimed again keeps going, where one
+ *  left to end at the old bottom slows to a stop short of it and starts again
+ *  (stop-and-go). Only while it is moving (an ended glide is the retry rule's
+ *  case), when the bottom moved away by more than GLIDE_RETARGET_PX, and not
+ *  more often than every GLIDE_RETARGET_MS. `aimed` is null until the glide's
+ *  smooth scroll has started. */
+export function shouldRetarget(g: { bottom: number; aimed: number | null; sinceAimMs: number; quietMs: number }): boolean {
+	if (g.aimed === null || g.quietMs >= GLIDE_QUIET_MS) return false;
+	return g.bottom - g.aimed > GLIDE_RETARGET_PX && g.sinceAimMs >= GLIDE_RETARGET_MS;
+}
 
 export type GlideEnd = "arrived" | "stopped" | "gave-up";
 
@@ -344,9 +365,15 @@ export function useDockTouchScroll(rootRef: RefObject<HTMLElement | null>, trans
 		// smooth scroll, watched each frame only to know how it ends. Input from
 		// the learner ends it for good (stopGlide); ending short with nobody
 		// touching starts it once more, at most GLIDE_RETRIES times.
-		let glide: { frame: number; retries: number; top: number; movedAt: number; start: number; lowest: number } | null = null;
+		let glide: { frame: number; retries: number; top: number; movedAt: number; start: number; lowest: number; aimed: number | null; aimedAt: number } | null = null;
+		const bottom = () => transcript.scrollHeight - transcript.clientHeight;
 		const smoothToBottom = () => {
-			transcript.scrollTo({ top: transcript.scrollHeight - transcript.clientHeight, behavior: prefersReducedMotion() ? "auto" : "smooth" });
+			const to = bottom();
+			if (glide) {
+				glide.aimed = to;
+				glide.aimedAt = performance.now();
+			}
+			transcript.scrollTo({ top: to, behavior: prefersReducedMotion() ? "auto" : "smooth" });
 		};
 		const glideOnce = () => {
 			if (restore) glideAfterRestore = true;
@@ -372,7 +399,7 @@ export function useDockTouchScroll(rootRef: RefObject<HTMLElement | null>, trans
 			stopFling();
 			endGlide("stopped");
 			const top = transcript.scrollTop;
-			glide = { frame: 0, retries: 0, top, movedAt: performance.now(), start: top, lowest: top };
+			glide = { frame: 0, retries: 0, top, movedAt: performance.now(), start: top, lowest: top, aimed: null, aimedAt: 0 };
 			glideOnce();
 			const watch = () => {
 				if (!glide) return;
@@ -393,6 +420,10 @@ export function useDockTouchScroll(rootRef: RefObject<HTMLElement | null>, trans
 					glide.retries++;
 					glide.movedAt = t;
 					glideOnce();
+				} else if (shouldRetarget({ bottom: bottom(), aimed: glide.aimed, sinceAimMs: t - glide.aimedAt, quietMs: t - glide.movedAt })) {
+					// The same glide, aimed at the new bottom while it still moves:
+					// not one of the GLIDE_RETRIES.
+					smoothToBottom();
 				}
 				glide.frame = requestAnimationFrame(watch);
 			};

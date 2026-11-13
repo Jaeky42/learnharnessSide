@@ -76,6 +76,7 @@ let scrollPending = false;
 let smooth: { from: number; to: number; t0: number } | null = null;
 let momentum = 0; // px per frame, upwards
 let smoothRefused = false; // a browser that gives up on its smooth scroll at once
+let smoothShortBy = 0; // a browser whose next smooth scroll ends this far short of where it was aimed
 let momentumOutlivesStop = false; // a hidden frame that didn't catch Safari's momentum
 let smoothCalls = 0;
 function setTop(v: number) {
@@ -102,7 +103,8 @@ function fakeScroller(el: HTMLElement) {
 			value: ({ top: to, behavior }: { top: number; behavior?: string }) => {
 				if (behavior === "smooth") {
 					smoothCalls++;
-					smooth = smoothRefused || momentum ? null : { from: top, to, t0: clock };
+					smooth = smoothRefused || momentum ? null : { from: top, to: to - smoothShortBy, t0: clock };
+					smoothShortBy = 0;
 					return;
 				}
 				smooth = null;
@@ -305,6 +307,7 @@ async function mount({ teach = false, from = 4000 }: { teach?: boolean; from?: n
 	smooth = null;
 	momentum = 0;
 	smoothRefused = false;
+	smoothShortBy = 0;
 	momentumOutlivesStop = false;
 	smoothCalls = 0;
 	rafQueue = [];
@@ -366,6 +369,22 @@ async function run(frames: number) {
 /** The frames until the lesson first came within the fold machine's reach of the bottom. */
 const beforeArrival = (frames: { d: number; open: boolean }[]) => frames.slice(0, frames.findIndex((f) => f.d < EXPAND_DIST));
 const neverUp = (frames: { d: number }[]) => frames.every((f, i) => i === 0 || f.d <= frames[i - 1]!.d);
+/** The lesson's place per frame (scrollTop), from the run's frames. */
+const places = (frames: { d: number }[]) => frames.map((f) => scrollHeight - CLIENT_H - f.d);
+/** The longest run of frames in which the lesson didn't move, between its
+ *  first movement and its arrival. */
+function longestRest(frames: { d: number }[]) {
+	const at = places(frames);
+	const first = at.findIndex((y, i) => i > 0 && y !== at[i - 1]);
+	const arrive = frames.findIndex((f) => f.d < EXPAND_DIST);
+	let best = 0;
+	let run = 0;
+	for (let i = Math.max(1, first); i < (arrive < 0 ? at.length : arrive); i++) {
+		run = at[i] === at[i - 1] ? run + 1 : 0;
+		best = Math.max(best, run);
+	}
+	return best;
+}
 
 describe("a tap on the folded question glides down into it (touch screen)", () => {
 	it("at rest far up: one glide, folded on the way, open on arrival, and use-stick-to-bottom follows from there", async () => {
@@ -525,16 +544,42 @@ describe("a tap on the folded question glides down into it (touch screen)", () =
 		}
 	});
 
-	it("the lesson grew under the glide: it finishes once more, and opens on arrival", async () => {
+	it("the lesson grows under the glide in flight (a demo sizing itself): the same glide is aimed at the new bottom and goes on, no rest, no retry", async () => {
 		await mount();
 		await tapOn("bar");
-		await run(5);
+		const early = await run(5);
 		scrollHeight += 1500;
-		const frames = await run(120);
-		assert.equal(smoothCalls, 2, "one more glide");
+		const frames = [...early, ...(await run(120))];
+		assert.equal(smoothCalls, 2, "aimed once more, in flight");
+		assert.ok(longestRest(frames) <= 1, `never at rest on the way (${longestRest(frames)} still frames)`);
 		assert.equal(probe.expanded(), true);
 		assert.ok(distance() <= 2);
 		assert.ok(beforeArrival(frames).every((f) => !f.open));
+	});
+
+	it("a glide that ends short and rests (the browser stopped it): the retry rule glides once more, as before", async () => {
+		await mount();
+		smoothShortBy = 2000;
+		await tapOn("bar");
+		const frames = await run(150);
+		assert.equal(smoothCalls, 2, "one retry");
+		assert.ok(longestRest(frames) >= 8, "after it had rested");
+		assert.equal(probe.expanded(), true);
+		assert.ok(distance() <= 2);
+	});
+
+	it("a lesson growing every frame under the glide: re-aimed at most every 100 ms", async () => {
+		await mount({ from: 6000 });
+		await tapOn("bar");
+		await run(2);
+		const before = smoothCalls;
+		for (let i = 0; i < 30; i++) {
+			scrollHeight += 40;
+			await frame();
+		}
+		const aims = smoothCalls - before;
+		assert.ok(aims >= 2, `re-aimed (${aims} times)`);
+		assert.ok(aims <= Math.ceil((30 * 16) / 100), `but not more often than every 100 ms (${aims} times in 480 ms)`);
 	});
 
 	it("a browser that won't glide, with nobody touching: a couple more tries, never one per frame, then the net opens the question where it is and slides it down, as a computer does", async () => {
