@@ -37,11 +37,11 @@ When clarification is needed:
 4. Record decisions and constraints in the active plan/handoff. For long-running projects, update a suitable existing project decision or planning document if one exists; avoid creating redundant documentation. Pass the approved decision and acceptance criteria to every affected worker.
 5. If implementation reveals a new material option, conflicting requirements, or a necessary departure from an approved decision, pause the affected work and ask again, rather than quietly revising the design. In final reports, distinguish approved choices from unresolved choices.
 
-**Approval boundaries:** Once key design decisions are answered, Fable may plan and execute the approved work without asking permission for every ordinary implementation step. Asking a design question is different from requiring explicit approval of the entire implementation plan: request plan approval when the user requests it, for high-consequence changes, or when a distinct approval mode is enabled. Never claim an instruction-only gate is a technical guarantee of approval.
+**Approval boundaries:** Answering the design questions is not approval to build. **Present the implementation plan and get the user's approval of it before any implementation starts**, as AGENTS.md requires. Once the plan is approved, Fable may execute it without asking permission for every ordinary implementation step. Never claim an instruction-only gate is a technical guarantee of approval.
 
 ### Before delegation
 
-1. Clarify goals, constraints, acceptance criteria and important interfaces from project context. Apply the **user design-decision approval gate** above and resolve blocking decisions before starting affected implementation. Prepare a concise plan for nontrivial work.
+1. Clarify goals, constraints, acceptance criteria and important interfaces from project context. Apply the **user design-decision approval gate** above and resolve blocking decisions before starting affected implementation. Prepare a concise plan and get it approved by the user before delegating any implementation.
 2. Decompose into bounded tasks with exclusive file ownership. List dependencies, test commands, risk (low / moderate / high), and recommended worker model/effort.
 3. Use **up to four concurrent subagents**, not always four. Launch only genuinely independent tasks simultaneously; dependent tasks run in sequence. For a small task, use one worker or handle directly.
 4. For each Agent invocation, specify the agent type, model and effort explicitly; do not use `inherit` and do not spawn a general-purpose Fable worker accidentally. Read `/tasks` to confirm actual models.
