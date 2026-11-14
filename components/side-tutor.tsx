@@ -799,7 +799,7 @@ export function SideTutor({ chatId, messages, side, dictation, held = false, ope
 
 			{/* A highlighted passage waiting for its question (the lesson's Ask). */}
 			{passage && (
-				<div data-testid="side-tutor-passage" className={cn("flex items-center gap-2 border-t border-border px-2 pt-2", BAR_BG)}>
+				<div data-testid="side-tutor-passage" data-phone="tutor-typing" className={cn("flex items-center gap-2 border-t border-border px-2 pt-2", BAR_BG)}>
 					<Quote text={passage.text} className="min-w-0 flex-1" />
 					<button
 						type="button"
@@ -816,7 +816,7 @@ export function SideTutor({ chatId, messages, side, dictation, held = false, ope
 				</div>
 			)}
 
-			<div className={cn("flex items-end gap-2 p-2", !passage && "border-t border-border", BAR_BG)} style={TYPING_ROW_VARS}>
+			<div data-phone="tutor-typing" className={cn("flex items-end gap-2 p-2", !passage && "border-t border-border", BAR_BG)} style={TYPING_ROW_VARS}>
 				<textarea
 					ref={inputRef}
 					value={input}

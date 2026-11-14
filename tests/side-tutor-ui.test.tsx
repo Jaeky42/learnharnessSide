@@ -205,6 +205,8 @@ describe("the open window", () => {
 		assert.equal((panel.textContent ?? "").trim(), "TutorStuck on a term or a step? Ask here.");
 		const box = panel.querySelector("textarea") as HTMLElement;
 		assert.equal(box.getAttribute("placeholder"), "Ask a follow-up…");
+		// The typing row is one of the blocks a tap keeps the keyboard up in (keep-keyboard.ts).
+		assert.equal(box.closest("[data-phone='tutor-typing']")?.tagName, "DIV");
 		// Nothing can be deleted from a side conversation (owner's choice of upstream's rule).
 		assert.equal(panel.querySelector("[aria-label='Clear side questions']"), null);
 		assert.ok(panel.querySelector("[aria-label='Minimize the side tutor']"));
@@ -349,6 +351,7 @@ describe("the conversations (upstream's side conversations, in the fork's window
 		await ask();
 		const chip = host.querySelector("[data-testid='side-tutor-passage']") as HTMLElement;
 		assert.match(chip.textContent ?? "", /only get stretched/);
+		assert.equal(chip.getAttribute("data-phone"), "tutor-typing", "the waiting passage's row keeps the keyboard up like the typing row (keep-keyboard.ts)");
 		await act(async () => (chip.querySelector("[aria-label='Remove the passage']") as HTMLElement).click());
 		await settle(host);
 		assert.equal(host.querySelector("[data-testid='side-tutor-passage']"), null, "dropped");

@@ -23,21 +23,35 @@
  */
 
 import { useEffect, useState } from "react";
+import { isPhoneNow } from "@/components/phone/use-phone";
 
 /** The top bar's height and the bubble's size (app/phone.css), in px. */
-const TOP_BAR = 60;
+export const TOP_BAR = 60;
 export const BUBBLE_SIZE = 52;
 const GAP = 12;
 
 export type DockAnchor = { place: "above-dock"; top: number } | { place: "top" };
 
 /** Pure rule, exported for tests: the bubble needs its own height plus a gap
- *  on each side between the top bar and the dock. */
-export function dockAnchor(dockTop: number | null): DockAnchor {
+ *  on each side between the top bar and the dock. `topBar` is where the top
+ *  bar ends (topBarEnd). */
+export function dockAnchor(dockTop: number | null, topBar = TOP_BAR): DockAnchor {
 	if (dockTop === null) return { place: "top" };
 	const top = Math.round(dockTop - GAP - BUBBLE_SIZE);
-	if (top < TOP_BAR + GAP) return { place: "top" };
+	if (top < topBar + GAP) return { place: "top" };
 	return { place: "above-dock", top };
+}
+
+/** Pure rule, exported for tests: where the top bar ends, for dockAnchor. In
+ *  the phone layout it is measured: the bar is taller there by the clock
+ *  strip, and in the home-screen app by the room kept clear of iOS's blur
+ *  (--lh-safe-top in app/phone.css; 148 points on the owner's iPhone). With
+ *  the 60 px assumed, an opened question that reached the top bar left the
+ *  bubble "above the dock", on top of the top bar's buttons (owner's
+ *  screenshot of the home-screen app). Off the phone layout it stays the
+ *  60 px it always was, so nothing moves on a computer. */
+export function topBarEnd(phone: boolean, measuredBottom: number | null): number {
+	return phone && measuredBottom !== null && measuredBottom > 0 ? measuredBottom : TOP_BAR;
 }
 
 /** The bubble's place, plus the dock itself and the lesson's right edge
@@ -68,7 +82,9 @@ export function useDockAnchor(active: boolean): PlacedAnchor {
 			// becomes the frame.
 			const bodyTop = document.body.dataset.lhKeyboard !== undefined ? document.body.getBoundingClientRect().top : 0;
 			const box = dock?.getBoundingClientRect() ?? null;
-			const next: PlacedAnchor = { ...dockAnchor(box ? box.top - bodyTop : null), right: box ? Math.max(0, Math.round(window.innerWidth - box.right)) : 0, dock };
+			const bar = isPhoneNow() ? (document.querySelector<HTMLElement>('[data-phone="topbar"]')?.getBoundingClientRect() ?? null) : null;
+			const topBar = topBarEnd(bar !== null, bar ? bar.bottom - bodyTop : null);
+			const next: PlacedAnchor = { ...dockAnchor(box ? box.top - bodyTop : null, topBar), right: box ? Math.max(0, Math.round(window.innerWidth - box.right)) : 0, dock };
 			setAnchor((prev) => (same(prev, next) ? prev : next));
 		};
 		const schedule = () => {

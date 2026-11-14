@@ -120,6 +120,16 @@ function safeAreaTop(): number {
 /** How long the keyboard-closing override waits for Safari's new height. */
 export const CLOSING_MAX_MS = 1200;
 
+/** Pure rule, exported for tests: the text box the app believes has focus
+ *  has left the page. WebKit sends no blur or focusout for a focused element
+ *  that is removed (whatwg/html#1569), yet on the owner's iPhone the keyboard
+ *  closes at once then (Submit answer: a test page was told 0 of 2 times).
+ *  Without this the app sat squeezed above an empty band until Safari
+ *  reported the new height. */
+export function boxGone(typingEl: { isConnected: boolean } | null): boolean {
+	return typingEl !== null && !typingEl.isConnected;
+}
+
 /** Pure rule, exported for tests: does focusing this element bring up the
  *  on-screen keyboard? */
 export function typingTarget(el: { tagName: string; type?: string; isContentEditable?: boolean } | null): boolean {
@@ -181,11 +191,58 @@ export function PhoneViewport() {
 			return;
 		}
 		let typing = typingTarget(document.activeElement as HTMLElement | null);
+		/** The text box whose focusin set `typing`, watched for leaving the page. */
+		let typingEl: Element | null = typing ? document.activeElement : null;
 		let closing = false;
 		let closingTimer = 0;
+		/** The pending frame that takes the full height (see closeSoon). */
+		let closingFrame = 0;
 		const endClosing = () => {
 			closing = false;
 			window.clearTimeout(closingTimer);
+			window.cancelAnimationFrame(closingFrame);
+			closingFrame = 0;
+		};
+		/** The keyboard is closing: take the full height now, not when Safari
+		 *  reports it after the slide (layoutHeight), but one frame from now,
+		 *  not inside the focus change. A tap is delivered as mousedown,
+		 *  mouseup and click in one task; the mousedown takes the focus off
+		 *  the box, and with the full height taken right there the button
+		 *  under the finger dropped about 300 px before the mouseup, so the
+		 *  mouseup landed on the lesson and the click never reached the
+		 *  button. The frame comes after that task. On the owner's iPhone a
+		 *  test page delivered 0 of 5 taps with the step inside the focus
+		 *  change and 5 of 5 one frame later. A focusin on another text box
+		 *  before the frame (endClosing) cancels it. */
+		const closeSoon = () => {
+			window.cancelAnimationFrame(closingFrame);
+			closingFrame = window.requestAnimationFrame(() => {
+				closingFrame = 0;
+				closing = true;
+				window.clearTimeout(closingTimer);
+				closingTimer = window.setTimeout(() => {
+					closing = false;
+					sync();
+				}, CLOSING_MAX_MS);
+				sync();
+			});
+		};
+		/** Watches the focused box for leaving the page while `typing` (boxGone). */
+		const observer = typeof MutationObserver === "undefined" ? null : new MutationObserver(() => {
+			if (typing && boxGone(typingEl)) loseFocus();
+		});
+		const watch = () => {
+			observer?.disconnect();
+			if (typing) observer?.observe(document.body, { childList: true, subtree: true });
+		};
+		/** No text box has focus any more: a focusout to nothing, or the box
+		 *  was removed from the page (boxGone). */
+		const loseFocus = () => {
+			typing = false;
+			typingEl = null;
+			watch();
+			if (vv.height < window.innerHeight - 1) closeSoon();
+			sync();
 		};
 		const sync = () => {
 			const fit = viewportFit(vv);
@@ -226,24 +283,25 @@ export function PhoneViewport() {
 		};
 		// Synchronous, not on the next frame: these events arrive just before
 		// the browser paints, so following them at once keeps the app from
-		// showing one frame in the wrong place while the keyboard slides.
+		// showing one frame in the wrong place while the keyboard slides. Only
+		// the keyboard-closing step waits one frame (closeSoon), so the tap
+		// that took the focus is delivered first.
 		const onFocus = (e: FocusEvent) => {
 			// Focus moving straight to another text box keeps the keyboard up.
 			if (e.type === "focusout" && typingTarget(e.relatedTarget as HTMLElement | null)) return;
 			const next = e.type === "focusin" && typingTarget(e.target as HTMLElement | null);
-			if (next) endClosing();
-			if (next === typing) return;
-			typing = next;
-			if (!next && vv.height < window.innerHeight - 1) {
-				// The keyboard is closing: take the full height now, not when
-				// Safari reports it after the slide (layoutHeight).
-				closing = true;
-				window.clearTimeout(closingTimer);
-				closingTimer = window.setTimeout(() => {
-					closing = false;
-					sync();
-				}, CLOSING_MAX_MS);
+			if (next) {
+				endClosing();
+				// Also when the previous box left the page without a blur.
+				typingEl = e.target as Element;
 			}
+			if (next === typing) return;
+			if (!next) {
+				loseFocus();
+				return;
+			}
+			typing = true;
+			watch();
 			sync();
 		};
 		sync();
@@ -252,12 +310,14 @@ export function PhoneViewport() {
 		window.addEventListener("scroll", sync, { passive: true });
 		document.addEventListener("focusin", onFocus);
 		document.addEventListener("focusout", onFocus);
+		watch();
 		return () => {
 			vv.removeEventListener("resize", sync);
 			vv.removeEventListener("scroll", sync);
 			window.removeEventListener("scroll", sync);
 			document.removeEventListener("focusin", onFocus);
 			document.removeEventListener("focusout", onFocus);
+			observer?.disconnect();
 			endClosing();
 			clear();
 		};

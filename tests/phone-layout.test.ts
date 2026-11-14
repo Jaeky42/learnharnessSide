@@ -124,6 +124,22 @@ describe("phone rules", () => {
 		assert.deepEqual(dockAnchor(null), { place: "top" });
 	});
 
+	it("the bubble clears the phone's real top bar, which is taller in the home-screen app (owner's iPhone)", async () => {
+		const { topBarEnd, TOP_BAR } = await import("../components/phone/use-dock-anchor.ts");
+		// The home-screen app: the bar ends at 148 (60 + the 62-point clock strip + 26 for iOS's blur).
+		assert.equal(topBarEnd(true, 148), 148);
+		// An opened question that reaches the bar (the dock's top at 180): with 60 assumed the
+		// bubble sat at 116, on the bar's buttons; measured, it takes its place under the bar.
+		assert.deepEqual(dockAnchor(180), { place: "above-dock", top: 116 });
+		assert.deepEqual(dockAnchor(180, topBarEnd(true, 148)), { place: "top" });
+		assert.deepEqual(dockAnchor(744, topBarEnd(true, 148)), { place: "above-dock", top: 744 - 12 - BUBBLE_SIZE }, "a folded question: above the dock as before");
+		assert.deepEqual(dockAnchor(148 + 12 + BUBBLE_SIZE + 12, 148), { place: "above-dock", top: 160 });
+		// A Safari tab's bar is the 60 px it was assumed to be; off the phone layout nothing is measured.
+		assert.equal(topBarEnd(true, 60), TOP_BAR);
+		assert.equal(topBarEnd(false, 148), TOP_BAR, "a computer keeps the 60 px");
+		assert.equal(topBarEnd(true, null), TOP_BAR, "no top bar found");
+	});
+
 	it("the tutor sheet leaves its middle see-through, and sizes its typing row from the phone's 16px text", () => {
 		const sheet = /\[data-phone="tutor-sheet"\] \{([^}]*)\}/.exec(css)?.[1] ?? "";
 		// The window's parts paint themselves (the middle is darker and
@@ -239,6 +255,37 @@ describe("the bottom block with the keyboard up (owner's iPhone)", async () => {
 	});
 	it("hides the Tutor's bubble while the keyboard is up", () => {
 		assert.match(rule(`html:not(.lh-electron) body[data-lh-keyboard-up] [data-phone="tutor-bubble"]`), /display: none;/);
+	});
+});
+
+describe("the keyboard's closing step waits a frame, and a removed box counts as a lost focus", async () => {
+	const { boxGone } = await import("../components/phone/phone-viewport.tsx");
+	const src = readFileSync(path.join(root, "components/phone/phone-viewport.tsx"), "utf8");
+	// The effect's body, from its state to its clean-up.
+	const body = src.slice(src.indexOf("let typing = typingTarget"));
+	it("knows a box that left the page", () => {
+		assert.equal(boxGone({ isConnected: false }), true);
+		assert.equal(boxGone({ isConnected: true }), false);
+		assert.equal(boxGone(null), false);
+	});
+	it("takes the full height inside a requestAnimationFrame, not in the focus handler", () => {
+		const frame = body.slice(body.indexOf("requestAnimationFrame(() =>"));
+		assert.match(frame, /^requestAnimationFrame\(\(\) => \{\s+closingFrame = 0;\s+closing = true;/);
+		// closing is set to true in that one place only.
+		assert.equal(body.match(/closing = true;/g)?.length, 1);
+		const onFocus = body.slice(body.indexOf("const onFocus"), body.indexOf("\t\tsync();\n\t\tvv.addEventListener"));
+		assert.doesNotMatch(onFocus, /closing = true/);
+	});
+	it("cancels the pending frame when closing ends, and when the effect is cleaned up", () => {
+		const end = body.slice(body.indexOf("const endClosing"), body.indexOf("};", body.indexOf("const endClosing")));
+		assert.match(end, /window\.cancelAnimationFrame\(closingFrame\)/);
+		const cleanup = body.slice(body.indexOf("return () => {\n\t\t\tvv.removeEventListener"));
+		assert.match(cleanup, /endClosing\(\);/);
+		assert.match(cleanup, /observer\?\.disconnect\(\)/);
+	});
+	it("watches the focused box with a MutationObserver only while a box has focus", () => {
+		assert.match(body, /observer\?\.observe\(document\.body, \{ childList: true, subtree: true \}\)/);
+		assert.match(body, /if \(typing\) observer/);
 	});
 });
 

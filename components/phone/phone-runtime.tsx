@@ -8,11 +8,13 @@
  * the computer layout too), and never in the desktop app. So does the Drawing
  * Pad's palm rejection (pad-palm.ts, owner's iPad). Flashcards' touch rules
  * (press and hold on its rows, the rename ✕, a focused box above the
- * keyboard) do nothing off the phone layout.
+ * keyboard) do nothing off the phone layout. So does keeping the keyboard up
+ * for a tap beside the box being typed in (keep-keyboard.ts).
  */
 
 import { useEffect } from "react";
 import { installFlashcardsTouch } from "@/components/phone/flashcards-touch";
+import { installKeepKeyboard } from "@/components/phone/keep-keyboard";
 import { installLongPress } from "@/components/phone/long-press";
 import { PhoneViewport } from "@/components/phone/phone-viewport";
 import { installWindowLock } from "@/components/phone/window-lock";
@@ -23,5 +25,6 @@ export function PhoneRuntime() {
 	useEffect(() => installWindowLock(), []);
 	useEffect(() => installFlashcardsTouch(), []);
 	useEffect(() => installPadPalm(), []);
+	useEffect(() => installKeepKeyboard(), []);
 	return <PhoneViewport />;
 }
