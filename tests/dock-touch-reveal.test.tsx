@@ -78,6 +78,13 @@ let momentum = 0; // px per frame, upwards
 let smoothRefused = false; // a browser that gives up on its smooth scroll at once
 let smoothShortBy = 0; // a browser whose next smooth scroll ends this far short of where it was aimed
 let momentumOutlivesStop = false; // a hidden frame that didn't catch Safari's momentum
+// Scroll anchoring in the next frame: messages above the screen change height
+// by this much, and scrollTop moves with them. Chromium's smooth scroll keeps
+// to its own course (measured at iPhone size with the off-screen rule), so the
+// next frame puts scrollTop back on it; `anchorCarries` plays a browser whose
+// smooth scroll moves with the shift instead.
+let anchorNext = 0;
+let anchorCarries = false;
 let smoothCalls = 0;
 function setTop(v: number) {
 	const next = Math.max(0, Math.min(scrollHeight - CLIENT_H, v));
@@ -278,6 +285,16 @@ async function frame() {
 			setTop(smooth.from + (smooth.to - smooth.from) * e);
 			if (p >= 1) smooth = null;
 		}
+		if (anchorNext) {
+			scrollHeight += anchorNext;
+			top = Math.max(0, Math.min(scrollHeight - CLIENT_H, top + anchorNext));
+			if (anchorCarries && smooth) {
+				smooth.from += anchorNext;
+				smooth.to += anchorNext;
+			}
+			anchorNext = 0;
+			scrollPending = true;
+		}
 		if (scrollPending) {
 			scrollPending = false;
 			scroller.dispatchEvent(new dom.window.Event("scroll"));
@@ -309,6 +326,8 @@ async function mount({ teach = false, from = 4000 }: { teach?: boolean; from?: n
 	smoothRefused = false;
 	smoothShortBy = 0;
 	momentumOutlivesStop = false;
+	anchorNext = 0;
+	anchorCarries = false;
 	smoothCalls = 0;
 	rafQueue = [];
 	const host = dom.document.createElement("div");
@@ -660,6 +679,60 @@ describe("a tap on the folded question glides down into it (touch screen)", () =
 		assert.ok(at > COLLAPSE_DIST && Math.abs(distance() - at) <= 1, `left where it was put (${at} → ${distance()})`);
 		assert.equal(smoothCalls, 1, "no glide back down");
 		assert.equal(probe.expanded(), false, "folded, as after a learner's stop");
+	});
+
+	it("messages above the screen take their real height under the glide (scroll anchoring, the off-screen rule): the glide carries on, and the question opens on arrival", async () => {
+		// Chromium at iPhone size: +1,114 and +4,147 px (scrollTop up with them, then
+		// back on the smooth scroll's course a frame later), and a message that
+		// came out shorter; then the same with a smooth scroll that moves with
+		// the shift.
+		for (const carries of [false, true]) {
+			for (const shifts of [[1114], [4147, 1114], [-600], [1114, -600]]) {
+				const label = `${shifts.join(", ")} px${carries ? ", the smooth scroll moving with them" : ""}`;
+				await mount();
+				anchorCarries = carries;
+				await tapOn("bar");
+				const frames = await run(4);
+				for (const shift of shifts) {
+					anchorNext = shift;
+					frames.push(...(await run(3)));
+				}
+				frames.push(...(await run(200)));
+				assert.equal(probe.expanded(), true, `${label}: open in the end`);
+				assert.ok(distance() <= 2, `${label}: at the bottom (${distance()} px)`);
+				assert.ok(beforeArrival(frames).every((f) => !f.open), `${label}: folded on the way, opened on arrival`);
+				assert.ok(longestRest(frames) <= 1, `${label}: never at rest on the way (${longestRest(frames)} still frames)`);
+				// The lesson growing above the screen moves its bottom away from where
+				// a smooth scroll that keeps its course was aimed: one re-aim, in flight.
+				const grew = shifts.some((x) => x > 0);
+				assert.equal(smoothCalls, grew && !carries ? 2 : 1, `${label}: ${smoothCalls} smooth scrolls, no retry`);
+				await act(async () => root?.unmount());
+				root = null;
+				dom.document.body.innerHTML = "";
+			}
+		}
+	});
+
+	it("a real scroll back up under the glide still ends it, also when the lesson's height changes in the same frame", async () => {
+		// [the scroll up, the height's change in the same frame]
+		for (const [up, height] of [[800, 500], [800, -300], [800, 0]] as const) {
+			await mount();
+			await tapOn("bar");
+			await run(8);
+			await act(async () => {
+				scrollHeight += height;
+				scroller.scrollTop = top - up;
+			});
+			await run(4);
+			const at = distance();
+			await run(80);
+			assert.ok(at > COLLAPSE_DIST && Math.abs(distance() - at) <= 1, `${up} up, height ${height}: left where it was put (${at} → ${distance()})`);
+			assert.equal(smoothCalls, 1, `${up} up, height ${height}: no glide back down`);
+			assert.equal(probe.expanded(), false, `${up} up, height ${height}: folded`);
+			await act(async () => root?.unmount());
+			root = null;
+			dom.document.body.innerHTML = "";
+		}
 	});
 
 	it("with reduced motion it jumps, and opens", async () => {

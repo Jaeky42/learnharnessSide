@@ -309,6 +309,51 @@ describe("drag on the dock scrolls the lesson", async () => {
 		assert.equal(g(4000, GLIDE_QUIET_MS, 0, GLIDE_PULLED_BACK_PX), "again", "a rounding wobble isn't a scroll back up");
 		assert.equal(g(10, 0, 0, 500), "arrived", "arrived wins");
 	});
+	it("a glide tells the browser's own shifts (scroll anchoring) from a scroll back up", async () => {
+		const { anchoringShift, glideReach, glideStep, GLIDE_PULLED_BACK_PX } = await import("../components/phone/use-dock-touch-scroll.ts");
+		const f = (top: number, height: number) => ({ top, height });
+		// The rule for one frame.
+		assert.equal(anchoringShift(f(1000, 9000), f(700, 8700)), -300, "a fall with the height: the browser's");
+		assert.equal(anchoringShift(f(1000, 9000), f(900, 8700)), -100, "the glide's own 200 px down in the same frame stays a move down");
+		assert.equal(anchoringShift(f(1000, 9000), f(400, 8700)), -300, "a scroll up larger than the height's fall: the rest is a scroll");
+		assert.equal(anchoringShift(f(1000, 9000), f(700, 9000)), 0, "a fall with the height unchanged: a real scroll up");
+		assert.equal(anchoringShift(f(1000, 9000), f(700, 9500)), 0, "a fall while the lesson grows: a scroll");
+		assert.equal(anchoringShift(f(1000, 9000), f(1000, 8000)), 0, "the height falling alone (messages ahead): nothing");
+		assert.equal(anchoringShift(f(1000, 9000), f(2188, 10114)), 1114, "a rise with the height: that much is the browser's");
+		assert.equal(anchoringShift(f(1000, 9000), f(1500, 10114)), 500, "never more than the rise");
+		assert.equal(anchoringShift(f(1000, 9000), f(1500, 9000)), 0, "the glide's own move");
+		// Over frames, as measured in Chromium at iPhone size (run 12): a frame in
+		// which the lesson grew by 1,114 px above the screen and scrollTop jumped
+		// with it, then the smooth scroll back on its course with no growth.
+		const frames = [f(221658, 251184), f(222788, 251184), f(224976, 252298), f(224882, 252298), f(225850, 252298)];
+		let marks = { start: frames[0]!.top - 30000, lowest: frames[0]!.top };
+		let worst = 0;
+		for (let i = 1; i < frames.length; i++) {
+			marks = glideReach(marks, frames[i - 1]!, frames[i]!);
+			worst = Math.max(worst, marks.lowest - frames[i]!.top);
+		}
+		assert.ok(worst <= GLIDE_PULLED_BACK_PX, `never read as pulled back (${worst} px)`);
+		assert.equal(glideStep({ distance: 20000, quietMs: 0, retries: 0, pulledBack: worst }), "wait");
+		// The same frames without the rule: what ended 1 in 10 glides short.
+		assert.equal(Math.max(...frames.slice(0, 4).map((x) => x.top)) - frames[3]!.top, 94);
+		// A fall the browser makes moves both marks down; the glide then goes on.
+		marks = glideReach({ start: 1000, lowest: 5000 }, f(5000, 90000), f(4400, 89400));
+		assert.deepEqual(marks, { start: 400, lowest: 4400 });
+		// A real scroll up, the height unchanged: as before.
+		marks = glideReach({ start: 1000, lowest: 5000 }, f(5000, 90000), f(4200, 90000));
+		assert.deepEqual(marks, { start: 1000, lowest: 5000 }, "800 px pulled back");
+		// A scroll up larger than the height's fall: the rest counts.
+		marks = glideReach({ start: 1000, lowest: 5000 }, f(5000, 90000), f(4000, 89700));
+		assert.equal(marks.lowest - 4000, 700);
+		// The height falling ahead of the screen: nothing moves down.
+		assert.deepEqual(glideReach({ start: 1000, lowest: 5000 }, f(5000, 90000), f(5000, 88000)), { start: 1000, lowest: 5000 });
+		// A rise with the height, kept by the browser (no fall after it): the
+		// lowest point catches up as the glide goes on.
+		marks = glideReach({ start: 1000, lowest: 5000 }, f(5000, 90000), f(6500, 91000));
+		assert.equal(marks.lowest, 5500);
+		marks = glideReach(marks, f(6500, 91000), f(6800, 91000));
+		assert.equal(marks.lowest, 6800);
+	});
 	it("a glide in flight is re-aimed when the bottom moves away: once it has slowed, more than a few px, at most every 100 ms, never once it has ended", async () => {
 		const { shouldRetarget, glideSpeed, GLIDE_RETARGET_PX, GLIDE_RETARGET_MS, GLIDE_RETARGET_SLOW, GLIDE_QUIET_MS } = await import("../components/phone/use-dock-touch-scroll.ts");
 		assert.equal(GLIDE_RETARGET_MS, 100);

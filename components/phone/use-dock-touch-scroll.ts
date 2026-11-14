@@ -46,7 +46,10 @@
  *     scrolling key during the glide ends it where it is, and nothing pulls
  *     the lesson back; so does anything else that moves the lesson back up
  *     once the glide has gone down (the status bar's scroll to the top, "Show
- *     in the lesson");
+ *     in the lesson"). The browser's own shifts as messages above the screen
+ *     take their real height (scroll anchoring, with the off-screen rule) are
+ *     not taken for that (anchoringShift, glideReach): read as a scroll back
+ *     up, they ended 1 in 10 glides short at iPhone size in Chromium;
  *   - the lesson growing under a glide in flight (a demo sizing itself as it
  *     comes on screen) re-aims the same glide at the new bottom once it has
  *     slowed (shouldRetarget), so it eases out and in again without a rest,
@@ -297,6 +300,46 @@ export function glideStep(g: { distance: number; quietMs: number; retries: numbe
 	return g.retries < GLIDE_RETRIES ? "again" : "give-up";
 }
 
+export type GlideFrame = { top: number; height: number };
+
+/** Pure rule, exported for tests: how much of one frame's move of the lesson
+ *  (`prev` to `now`: its scrollTop and scrollHeight) is the browser keeping
+ *  the view still (scroll anchoring) rather than a scroll. Messages above the
+ *  screen that change height move the lesson's scrollTop by the same amount,
+ *  and the lesson's height with it (with the off-screen rule, a message the
+ *  glide passed takes its real height a frame later, above the screen).
+ *    > 0  scrollTop rose with the height: that much of the rise is the browser's;
+ *    < 0  scrollTop fell with the height: that much of the fall is the browser's;
+ *    0    anything else: a move with the height unchanged, or the height
+ *         changing alone (messages ahead of the screen), or the two moving
+ *         opposite ways, is a scroll as far as the glide can tell.
+ *  Never more than either move, so a scroll up larger than the height's fall
+ *  still counts for the rest. */
+export function anchoringShift(prev: GlideFrame, now: GlideFrame): number {
+	const dTop = now.top - prev.top;
+	const dHeight = now.height - prev.height;
+	if (dTop > 0 && dHeight > 0) return Math.min(dTop, dHeight);
+	if (dTop < 0 && dHeight < 0) return -Math.min(-dTop, -dHeight);
+	return 0;
+}
+
+/** Pure rule, exported for tests: the glide's start and the lowest point it has
+ *  taken the lesson to, after one more frame, with the browser's own shifts
+ *  (anchoringShift) left out, so they never read as the glide pulled back up
+ *  (glideStep's `pulledBack`), which ended it as a learner's stop:
+ *    - a fall that is the browser's moves both marks down with the lesson;
+ *    - a rise that is the browser's doesn't count as the glide going down. A
+ *      running smooth scroll (Chromium's, measured) keeps to its own course
+ *      and puts scrollTop back on it the next frame: scrollTop then falls,
+ *      with the height unchanged, from a place the glide never took it to. A
+ *      browser whose smooth scroll moves with the shift goes on from there,
+ *      and the lowest point catches up as it does. */
+export function glideReach(marks: { start: number; lowest: number }, prev: GlideFrame, now: GlideFrame): { start: number; lowest: number } {
+	const shift = anchoringShift(prev, now);
+	const fall = Math.min(0, shift);
+	return { start: marks.start + fall, lowest: Math.max(marks.lowest + fall, now.top - Math.max(0, shift)) };
+}
+
 function prefersReducedMotion(): boolean {
 	return typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
@@ -384,7 +427,8 @@ export function useDockTouchScroll(rootRef: RefObject<HTMLElement | null>, trans
 		// smooth scroll, watched each frame only to know how it ends. Input from
 		// the learner ends it for good (stopGlide); ending short with nobody
 		// touching starts it once more, at most GLIDE_RETRIES times.
-		let glide: { frame: number; retries: number; top: number; movedAt: number; start: number; lowest: number; aimed: number | null; aimedAt: number; samples: { t: number; top: number }[] } | null = null;
+		// `last` is the previous watched frame's scrollTop and height (glideReach).
+		let glide: { frame: number; retries: number; top: number; movedAt: number; start: number; lowest: number; last: GlideFrame; aimed: number | null; aimedAt: number; samples: { t: number; top: number }[] } | null = null;
 		const bottom = () => transcript.scrollHeight - transcript.clientHeight;
 		const smoothToBottom = () => {
 			const to = bottom();
@@ -418,19 +462,25 @@ export function useDockTouchScroll(rootRef: RefObject<HTMLElement | null>, trans
 			stopFling();
 			endGlide("stopped");
 			const top = transcript.scrollTop;
-			glide = { frame: 0, retries: 0, top, movedAt: performance.now(), start: top, lowest: top, aimed: null, aimedAt: 0, samples: [] };
+			glide = { frame: 0, retries: 0, top, movedAt: performance.now(), start: top, lowest: top, last: { top, height: transcript.scrollHeight }, aimed: null, aimedAt: 0, samples: [] };
 			glideOnce();
 			const watch = () => {
 				if (!glide) return;
 				const t = performance.now();
 				const now = transcript.scrollTop;
+				const here = { top: now, height: transcript.scrollHeight };
 				glide.samples.push({ t, top: now });
 				if (glide.samples.length > 3) glide.samples.shift();
 				if (now !== glide.top) {
 					glide.top = now;
 					glide.movedAt = t;
 				}
-				glide.lowest = Math.max(glide.lowest, now);
+				// The browser keeping the view still as messages above the screen
+				// take their real height (the off-screen rule) is not a scroll up.
+				const reach = glideReach(glide, glide.last, here);
+				glide.start = reach.start;
+				glide.lowest = reach.lowest;
+				glide.last = here;
 				const pulledBack = glide.lowest > glide.start + GLIDE_PULLED_BACK_PX ? glide.lowest - now : 0;
 				const step = glideStep({ distance: distance(), quietMs: t - glide.movedAt, retries: glide.retries, pulledBack });
 				if (step !== "wait" && step !== "again") {
