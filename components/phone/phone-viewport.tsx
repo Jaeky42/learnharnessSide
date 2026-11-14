@@ -37,7 +37,6 @@
  */
 
 import { useEffect, useLayoutEffect } from "react";
-import { hideKeyboardDebug, keyboardDebugOn, noteKeyboardDebugWord, showKeyboardDebug } from "@/components/phone/keyboard-debug";
 import { isBrowserNow, useIsPhone } from "@/components/phone/use-phone";
 
 /** Pure rule, exported for tests: what to apply for a visual viewport. */
@@ -310,18 +309,12 @@ export function PhoneViewport() {
 				body.style.removeProperty("--lh-vv-top");
 				delete body.dataset.lhKeyboard;
 			}
-			// TEMPORARY: the readout of what this phone reports (keyboard-debug.ts).
-			if (keyboardDebugOn()) showKeyboardDebug({ inner: `${window.innerWidth}x${window.innerHeight}`, visible: `${fit.height} top ${fit.top}`, full: full.height, screen: `${window.screen.width}x${window.screen.height}`, client: document.documentElement.clientHeight, scrollY: Math.round(window.scrollY), standalone, typing, closing, bySize: keyboardBySize, byDrop: keyboardByDrop(typing, full.height, fit.height), marker: body.dataset.lhKeyboardUp !== undefined, gap, bleed });
 		};
 		// Synchronous, not on the next frame: these events arrive just before
 		// the browser paints, so following them at once keeps the app from
 		// showing one frame in the wrong place while the keyboard slides. Only
 		// the keyboard-closing step waits one frame (closeSoon), so the tap
 		// that took the focus is delivered first.
-		// TEMPORARY: "kbdebug" typed into any text box shows the readout.
-		const onDebugInput = () => {
-			if (noteKeyboardDebugWord(document.activeElement)) sync();
-		};
 		const onFocus = (e: FocusEvent) => {
 			// Focus moving straight to another text box keeps the keyboard up.
 			if (e.type === "focusout" && typingTarget(e.relatedTarget as HTMLElement | null)) return;
@@ -346,7 +339,6 @@ export function PhoneViewport() {
 		window.addEventListener("scroll", sync, { passive: true });
 		document.addEventListener("focusin", onFocus);
 		document.addEventListener("focusout", onFocus);
-		document.addEventListener("input", onDebugInput);
 		watch();
 		return () => {
 			vv.removeEventListener("resize", sync);
@@ -354,8 +346,6 @@ export function PhoneViewport() {
 			window.removeEventListener("scroll", sync);
 			document.removeEventListener("focusin", onFocus);
 			document.removeEventListener("focusout", onFocus);
-			document.removeEventListener("input", onDebugInput);
-			hideKeyboardDebug();
 			observer?.disconnect();
 			endClosing();
 			clear();

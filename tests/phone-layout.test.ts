@@ -253,13 +253,6 @@ describe("the bottom block with the keyboard up (owner's iPhone)", async () => {
 		const src = readFileSync(path.join(root, "components/phone/phone-viewport.tsx"), "utf8");
 		assert.match(src, /const keyboardShown = keyboardBySize \|\| keyboardByDrop\(typing, full\.height, fit\.height\);\s+if \(keyboardMarker\(keyboardShown, closing\)\)/);
 	});
-	it("has a readout for the owner's iPhone, off until the word is typed (temporary)", async () => {
-		const { keyboardDebugWord } = await import("../components/phone/keyboard-debug.ts");
-		assert.equal(keyboardDebugWord(" kbdebug "), true);
-		assert.equal(keyboardDebugWord("Kbdebug off"), false);
-		assert.equal(keyboardDebugWord("kbdebug please"), null);
-		assert.equal(keyboardDebugWord("because the debt is deferred"), null);
-	});
 	it("drops the home bar's room under the lesson's bottom block and the Tutor's sheet", () => {
 		assert.match(rule(`html:not(.lh-electron) [data-phone="dock"]`), /padding-bottom: calc\(0\.75rem \+ env\(safe-area-inset-bottom, 0px\)\)/, "keyboard down: as it was");
 		assert.match(rule(`html:not(.lh-electron) body[data-lh-keyboard-up] [data-phone="dock"]`), /padding-bottom: 0\.75rem;/, "a browser tab keeps its spacing");
