@@ -165,7 +165,11 @@ Five things the plan had left open, or that came out differently than the plan s
   - **State:** built on `claude/upstream-0.6.0`, not shipped to either branch (the owner's word: no push yet; another change is to follow). Not yet confirmed on the owner's iPhone.
   - **Tests:** `tests/dock-touch-reveal.test.tsx` (the scripted lesson: opens after coming back down, a push at the end by finger and by wheel, never by itself, a tap or a sideways drag doesn't count; the old test for a stopped glide is rewritten to the new rule), `tests/push-at-end.test.ts` (the pure rules).
   - **Only the owner's iPhone can show:** how the opening feels when Safari's own momentum carries the lesson into its end (the question opens and `use-stick-to-bottom` slides the lesson down as the dock grows), and whether 24 px is the right push.
-  - **Checked:** (to be filled in from the browser run)
+  - **Checked** by an independent verifier on a production build in Chromium, each case 3 times from a fresh page load, all passing:
+    - **iPhone size, real touch through CDP:** closed after 4 s with no input; one swipe on the lesson, on the stats row and on the Open bar itself each opened it, the lesson ending 0–1 px from its bottom; a tap, a sideways swipe and a small swipe the other way left it closed; scrolled up 904–1,578 px and back down by swipes, it opened on arrival with no fold in any frame after it; a tap on Open whose glide was stopped by a touch (still closed, 810–1,273 px up) opened once scrolled down by hand; Open left alone from 1,897–4,979 px up still glided and opened on arrival; Open at the bottom still opened at once; a prediction still loaded open, folded when scrolled up and reopened at the bottom.
+    - **A computer, 1280 × 800, the wheel:** closed after 4 s with no input; one 120 px wheel step over the lesson, and over the dock's bar, opened it; wheeled up 800 px and back down, it opened on arrival; wheeled up 60 px and back (never 96 px away), it stayed closed on arrival and the next wheel step opened it; a prediction as before.
+    - Typecheck clean, lint with its one existing warning, and the seven related test files passing one at a time.
+    - **Not checked:** Safari on a real iPhone or iPad, the Windows app, a real mouse's wheel steps (the run sent exact 120 px steps), and the thresholds at their exact boundaries in a browser (the unit tests pin those).
 
 ### The Drawing Pad, as tried on a computer (nothing of upstream's changed)
 
