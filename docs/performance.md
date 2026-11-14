@@ -2,7 +2,7 @@
 
 The owner's report: the app lags when a session gets long, on the Windows app, the iPhone and the iPad. What lags: scrolling a long lesson, opening one, and coming back to the app after a while. Not reported: typing, a choppy stream, or a wait after Send. Later added: lessons where Drawing Pad pictures were sent to the teacher are worse.
 
-**State:** step 1, the off-screen rule, the fix for jumps under it and the glide's rule are built on `claude/upstream-0.6.0` and pushed there. Not shipped to either release branch (that needs the owner's word, as always). No sync protocol change and no stored format change: the protocol stays 3, the chat format 2. Change a decision recorded here only with the owner's approval.
+**State:** step 1, the off-screen rule, the fix for jumps under it and the glide's rule are built on `claude/upstream-0.6.0` and **shipped**. With the owner's word ("ship"), the same commit was pushed to `claude/pensive-goldberg-7dty2m` (the server's image `:dev`) and to `side-tutor` (the Windows release), both plain fast-forwards from `1915f9c`. Both dry runs had passed on `d74d622`; the shipped commit adds only these lines. No sync protocol change and no stored format change: the protocol stays 3, the chat format 2, so the order of updating the server and the PC doesn't matter and nothing pauses. The owner hasn't updated either yet, and no real device has seen it: the things only the owner's iPhone and iPad can show are under "Known faults with the rule on". The server's image before this update is the per-commit tag of `1915f9c`. Change a decision recorded here only with the owner's approval.
 
 ## What the audit found
 
