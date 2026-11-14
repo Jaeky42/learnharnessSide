@@ -276,6 +276,12 @@
 	html:not(.lh-electron) [data-phone="topbar"] [data-testid="phase-chip"] {
 		display: none;
 	}
+	/* The chains view has no session-list button on a phone (owner's ask);
+	   its count gets the room. The button is upstream's SidebarToggle, the
+	   top bar's first child (components/top-bar.tsx, components/sidebar.tsx). */
+	html:not(.lh-electron) [data-testid="chain-table"] > [data-phone="topbar"] > .sidebar-motion {
+		display: none;
+	}
 
 	/* ── Dock and footer row ───────────────────────────────────────── */
 	html:not(.lh-electron) [data-phone="dock"] {
