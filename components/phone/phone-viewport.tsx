@@ -37,6 +37,7 @@
  */
 
 import { useEffect, useLayoutEffect } from "react";
+import { hideKeyboardDebug, keyboardDebugOn, noteKeyboardDebugWord, showKeyboardDebug } from "@/components/phone/keyboard-debug";
 import { isBrowserNow, useIsPhone } from "@/components/phone/use-phone";
 
 /** Pure rule, exported for tests: what to apply for a visual viewport. */
@@ -89,6 +90,31 @@ export function layoutHeight(visible: number, innerHeight: number, closing: bool
  *  has its full height (layoutHeight), and the home bar's room with it. */
 export function keyboardMarker(keyboardBySize: boolean, closing: boolean): boolean {
 	return keyboardBySize && !closing;
+}
+
+/** How much shorter than its full height the visible area must be to count
+ *  as the keyboard (keyboardUp's own 120 px). */
+export const KEYBOARD_MIN_DROP = 120;
+
+/** Pure rule, exported for tests: the tallest visible area seen at this width
+ *  (keyboardByDrop). A new width (the phone turned, a window resized) starts
+ *  again. */
+export function fullVisible(prev: { width: number; height: number } | null, width: number, height: number): { width: number; height: number } {
+	return !prev || prev.width !== width ? { width, height } : { width, height: Math.max(prev.height, height) };
+}
+
+/** Pure rule, exported for tests: the keyboard is up, told WITHOUT
+ *  window.innerHeight: a text box has the focus and the visible area is much
+ *  shorter than the tallest it has been at this width. keyboardUp compares
+ *  the visible height with innerHeight, and on the owner's iPhone that
+ *  comparison stays under its 120 px with the keyboard up (the first build of
+ *  data-lh-keyboard-up never came on there: the bottom block and the Tutor's
+ *  bubble stayed as they were, in the home-screen app and in a Safari tab),
+ *  although the visible height itself had dropped by more than 300. The focus
+ *  is asked for too, so a browser window made shorter isn't taken for a
+ *  keyboard. */
+export function keyboardByDrop(typing: boolean, full: number, visible: number): boolean {
+	return typing && full - visible > KEYBOARD_MIN_DROP;
 }
 
 /** Pure rule, exported for tests: how much taller the app should be than
@@ -195,6 +221,8 @@ export function PhoneViewport() {
 		let typingEl: Element | null = typing ? document.activeElement : null;
 		let closing = false;
 		let closingTimer = 0;
+		/** The tallest visible area seen at this width (keyboardByDrop). */
+		let full: { width: number; height: number } | null = null;
 		/** The pending frame that takes the full height (see closeSoon). */
 		let closingFrame = 0;
 		const endClosing = () => {
@@ -259,7 +287,9 @@ export function PhoneViewport() {
 			const keyboardBySize = keyboardUp(fit, window.innerHeight);
 			const gap = keyboardBySize && !closing ? 0 : standaloneGap({ standalone, innerWidth: window.innerWidth, innerHeight: window.innerHeight, screenWidth: window.screen.width, screenHeight: window.screen.height, safeTop: standalone ? safeAreaTop() : 0 });
 			root.style.setProperty("--lh-vvh", `${layoutHeight(fit.height, window.innerHeight, closing) + gap}px`);
-			if (keyboardMarker(keyboardBySize, closing)) body.dataset.lhKeyboardUp = "";
+			full = fullVisible(full, window.innerWidth, fit.height);
+			const keyboardShown = keyboardBySize || keyboardByDrop(typing, full.height, fit.height);
+			if (keyboardMarker(keyboardShown, closing)) body.dataset.lhKeyboardUp = "";
 			else delete body.dataset.lhKeyboardUp;
 			const bleed = bleedFor({ userAgent: navigator.userAgent, standalone, keyboard: keyboardUp(fit, window.innerHeight, typing) });
 			if (bleed > 0) {
@@ -280,12 +310,18 @@ export function PhoneViewport() {
 				body.style.removeProperty("--lh-vv-top");
 				delete body.dataset.lhKeyboard;
 			}
+			// TEMPORARY: the readout of what this phone reports (keyboard-debug.ts).
+			if (keyboardDebugOn()) showKeyboardDebug({ inner: `${window.innerWidth}x${window.innerHeight}`, visible: `${fit.height} top ${fit.top}`, full: full.height, screen: `${window.screen.width}x${window.screen.height}`, client: document.documentElement.clientHeight, scrollY: Math.round(window.scrollY), standalone, typing, closing, bySize: keyboardBySize, byDrop: keyboardByDrop(typing, full.height, fit.height), marker: body.dataset.lhKeyboardUp !== undefined, gap, bleed });
 		};
 		// Synchronous, not on the next frame: these events arrive just before
 		// the browser paints, so following them at once keeps the app from
 		// showing one frame in the wrong place while the keyboard slides. Only
 		// the keyboard-closing step waits one frame (closeSoon), so the tap
 		// that took the focus is delivered first.
+		// TEMPORARY: "kbdebug" typed into any text box shows the readout.
+		const onDebugInput = () => {
+			if (noteKeyboardDebugWord(document.activeElement)) sync();
+		};
 		const onFocus = (e: FocusEvent) => {
 			// Focus moving straight to another text box keeps the keyboard up.
 			if (e.type === "focusout" && typingTarget(e.relatedTarget as HTMLElement | null)) return;
@@ -310,6 +346,7 @@ export function PhoneViewport() {
 		window.addEventListener("scroll", sync, { passive: true });
 		document.addEventListener("focusin", onFocus);
 		document.addEventListener("focusout", onFocus);
+		document.addEventListener("input", onDebugInput);
 		watch();
 		return () => {
 			vv.removeEventListener("resize", sync);
@@ -317,6 +354,8 @@ export function PhoneViewport() {
 			window.removeEventListener("scroll", sync);
 			document.removeEventListener("focusin", onFocus);
 			document.removeEventListener("focusout", onFocus);
+			document.removeEventListener("input", onDebugInput);
+			hideKeyboardDebug();
 			observer?.disconnect();
 			endClosing();
 			clear();

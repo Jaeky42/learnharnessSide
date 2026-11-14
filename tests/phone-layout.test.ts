@@ -236,11 +236,34 @@ describe("the bottom block with the keyboard up (owner's iPhone)", async () => {
 		assert.equal(keyboardMarker(keyboardUp({ height: iphone, top: 0 }, iphone), false), false, "keyboard down, or a box focused before the keyboard arrives");
 		assert.equal(keyboardMarker(keyboardUp({ height: 517, top: 0 }, iphone), true), false, "closing: the app already has its full height");
 		const src = readFileSync(path.join(root, "components/phone/phone-viewport.tsx"), "utf8");
-		assert.match(src, /if \(keyboardMarker\(keyboardBySize, closing\)\) body\.dataset\.lhKeyboardUp = "";\s+else delete body\.dataset\.lhKeyboardUp;/);
+		assert.match(src, /if \(keyboardMarker\(keyboardShown, closing\)\) body\.dataset\.lhKeyboardUp = "";\s+else delete body\.dataset\.lhKeyboardUp;/);
+	});
+	it("is told the keyboard without innerHeight: a focused box and a visible area much shorter than its tallest (owner's iPhone)", async () => {
+		const { keyboardByDrop, fullVisible, KEYBOARD_MIN_DROP } = await import("../components/phone/phone-viewport.tsx");
+		// The owner's iPhone, home-screen app: 894 visible with the keyboard down, about 566 with it up,
+		// while innerHeight stays within keyboardUp's 120 px of the visible height.
+		assert.equal(keyboardUp({ height: 566, top: 0 }, 628), false, "the comparison with innerHeight misses it");
+		let full = fullVisible(null, 440, 894);
+		full = fullVisible(full, 440, 566);
+		assert.deepEqual(full, { width: 440, height: 894 }, "the tallest seen is kept");
+		assert.equal(keyboardByDrop(true, full.height, 566), true);
+		assert.equal(keyboardByDrop(false, full.height, 566), false, "no text box has the focus: a window made shorter isn't a keyboard");
+		assert.equal(keyboardByDrop(true, full.height, 894 - KEYBOARD_MIN_DROP), false, "Safari's toolbar growing isn't one either");
+		assert.deepEqual(fullVisible(full, 956, 440), { width: 956, height: 440 }, "a new width starts again");
+		const src = readFileSync(path.join(root, "components/phone/phone-viewport.tsx"), "utf8");
+		assert.match(src, /const keyboardShown = keyboardBySize \|\| keyboardByDrop\(typing, full\.height, fit\.height\);\s+if \(keyboardMarker\(keyboardShown, closing\)\)/);
+	});
+	it("has a readout for the owner's iPhone, off until the word is typed (temporary)", async () => {
+		const { keyboardDebugWord } = await import("../components/phone/keyboard-debug.ts");
+		assert.equal(keyboardDebugWord(" kbdebug "), true);
+		assert.equal(keyboardDebugWord("Kbdebug off"), false);
+		assert.equal(keyboardDebugWord("kbdebug please"), null);
+		assert.equal(keyboardDebugWord("because the debt is deferred"), null);
 	});
 	it("drops the home bar's room under the lesson's bottom block and the Tutor's sheet", () => {
 		assert.match(rule(`html:not(.lh-electron) [data-phone="dock"]`), /padding-bottom: calc\(0\.75rem \+ env\(safe-area-inset-bottom, 0px\)\)/, "keyboard down: as it was");
-		assert.match(rule(`html:not(.lh-electron) body[data-lh-keyboard-up] [data-phone="dock"]`), /padding-bottom: 0\.5rem;/);
+		assert.match(rule(`html:not(.lh-electron) body[data-lh-keyboard-up] [data-phone="dock"]`), /padding-bottom: 0\.75rem;/, "a browser tab keeps its spacing");
+		assert.match(rule(`html:not(.lh-electron) body[data-lh-standalone][data-lh-keyboard-up] [data-phone="dock"]`), /padding-bottom: 0;/, "the home-screen app: down to where the iPhone ends the visible area");
 		const sheet = rule(`html:not(.lh-electron) body[data-lh-keyboard-up] [data-phone="tutor-sheet"]`);
 		assert.match(sheet, /padding-bottom: 0;/);
 		assert.doesNotMatch(sheet, /safe-area-inset-bottom/, "no home-bar strip painted under the typing row");

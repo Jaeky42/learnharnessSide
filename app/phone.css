@@ -288,9 +288,17 @@
 	/* While the keyboard is up (body[data-lh-keyboard-up], set by
 	   components/phone/phone-viewport.tsx) the bottom block sits just above
 	   it: the room kept for the home bar is under the keyboard anyway, and it
-	   left 46 points empty above the keyboard (owner's iPhone). */
+	   left 46 points empty above the keyboard (owner's iPhone). In a browser
+	   tab it keeps its 0.75rem (the owner: "it fits perfectly there"; Safari
+	   shows the address above the keyboard). In the home-screen app nothing
+	   is kept: the iPhone itself ends the visible area 12 points above the
+	   keyboard's bar (owner's screenshots), so the bottom row sits as far
+	   above that bar as it sits above Safari's address in a tab. */
 	html:not(.lh-electron) body[data-lh-keyboard-up] [data-phone="dock"] {
-		padding-bottom: 0.5rem;
+		padding-bottom: 0.75rem;
+	}
+	html:not(.lh-electron) body[data-lh-standalone][data-lh-keyboard-up] [data-phone="dock"] {
+		padding-bottom: 0;
 	}
 	/* "Thinking while reading" steps aside while the cursor is in the
 	   question's own box ("Your thinking" / "Your answer"), so the question
