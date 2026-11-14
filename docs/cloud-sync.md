@@ -244,7 +244,21 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 **Screens**
 
 - **Session list:** a drawer that slides in from the left over the lesson, with the rest dimmed. It covers 85% of the width, at most 20rem.
-  - A phone always starts with it closed. It closes on picking a session, a tap on the dimmed area, or ✕.
+  - A phone always starts with it closed. It closes on picking a session, a tap on the dimmed area, ✕, or a swipe left on the drawer.
+  - **A swipe left on the drawer closes it** (owner's ask: "kinda like how you can swipe the tutor away"). Built on the session branch `claude/confident-shannon-htmvtb`; **not shipped** to either branch, and not yet tried on the owner's iPhone.
+    - **Where it starts (owner's decision):** anywhere on the drawer itself. **Not on the dimmed area**: a swipe there does nothing and a tap closes, as before. The owner first picked "anywhere, the dim too", then changed it: "i don't want swiping on the dim to close it".
+    - **Phone only** (owner's decision). On a tablet and a computer the session list is a column, not a drawer, and nothing is installed there.
+    - **Sideways or up-and-down is decided on the first movement** (the iPhone's rule, "Touch and typing" below): more sideways than vertical and to the left is a drag, whose moves are prevented from then on; anything else is left alone for that touch, so the list scrolls as before.
+    - **The drawer follows the finger** to the left, never right of its resting place. The dim fades with it (its opacity is 1 minus the share of the drawer's width it has moved).
+    - **Letting go** (the Tutor sheet's numbers): past a quarter of the drawer's width, or after a quick flick left (faster than 0.5 px/ms over the finger's last 80 ms, with more than 12 px moved), it slides away and the drawer closes; otherwise it springs back in 200 ms.
+    - **The slide:** only `transform` and the dim's `opacity` move; `max(130, 200 × the share of the width still to travel)` ms, the Tutor's easing. The drawer counts as open until it is off screen, so the dim stays and fades; then it closes.
+    - **Left alone:** a touch that starts in the search box; a press and hold on a row, which opens its menu (if it fires during a drag, the drawer springs back first). A second finger or a cancelled touch springs back.
+    - **A swipe never opens the row under the finger:** the touch's end is prevented, and a click that still follows within 400 ms is swallowed.
+    - **At once:** with reduced motion the drawer still follows the finger, and the close or the spring back has no slide.
+    - **Unchanged:** opening, ✕, the tap on the dim and picking a session, which close with the drawer's own 200 ms CSS slide. **Not built:** a swipe from the left edge to open it (Safari's own "back" swipe is on that edge).
+    - **In the browser** (iPhone size, real touch through CDP; the drawer 320 px wide): 120 px into a drag the drawer sat at −120 px with the dim at 0.625; let go there, it closed with no inline style left; a 48 px swipe with the finger stopped sprang back; a swipe on the dim, an up-and-down drag, a first move to the right and a touch from the search box moved nothing; a swipe that began on a session row never opened it, closing or springing back; press and hold still opened the row's menu; opening again and a second swipe worked; at 1280 px a mouse drag did nothing. **Not run there:** the quick flick (the sandbox delivered touch events 35 to 100 ms apart, too slow to be one); it rests on the unit tests.
+    - **Only the owner's iPhone can show** the feel of the drag, the flick, and whether a slightly diagonal scroll of the list ever pulls the drawer.
+    - `components/phone/sidebar-swipe.ts` (the rules and the touch driver); `components/sidebar.tsx` hooks it to the drawer and the dim. Tests: `tests/sidebar-swipe.test.ts`.
   - It doesn't read or write the desktop's remembered open/closed setting.
   - Its divider line sits on the drawer itself, so it runs the full height through the safe-area and bleed padding (owner's ask).
   - **Full height (owner's ask after the real-phone check):** the drawer's colour and the dim should run from the very top of the screen to the very bottom, with the controls still below the clock.
