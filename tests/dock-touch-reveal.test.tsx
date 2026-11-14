@@ -85,6 +85,11 @@ let momentumOutlivesStop = false; // a hidden frame that didn't catch Safari's m
 // smooth scroll moves with the shift instead.
 let anchorNext = 0;
 let anchorCarries = false;
+// Frames after the shift before the smooth scroll puts scrollTop back on its
+// course (Chromium: 0, or 1 after a long frame); meanwhile it moves on from the
+// shifted place.
+let anchorLag = 0;
+let anchorLagLeft = 0;
 let smoothCalls = 0;
 function setTop(v: number) {
 	const next = Math.max(0, Math.min(scrollHeight - CLIENT_H, v));
@@ -279,6 +284,9 @@ async function frame() {
 		if (momentum) {
 			setTop(top - momentum);
 			momentum = momentum * 0.97 < 1 ? 0 : momentum * 0.97;
+		} else if (smooth && anchorLagLeft > 0) {
+			anchorLagLeft--;
+			setTop(top + 50);
 		} else if (smooth) {
 			const p = Math.min(1, (clock - smooth.t0) / SMOOTH_MS);
 			const e = 1 - (1 - p) ** 3;
@@ -293,6 +301,7 @@ async function frame() {
 				smooth.to += anchorNext;
 			}
 			anchorNext = 0;
+			anchorLagLeft = anchorLag;
 			scrollPending = true;
 		}
 		if (scrollPending) {
@@ -328,6 +337,8 @@ async function mount({ teach = false, from = 4000 }: { teach?: boolean; from?: n
 	momentumOutlivesStop = false;
 	anchorNext = 0;
 	anchorCarries = false;
+	anchorLag = 0;
+	anchorLagLeft = 0;
 	smoothCalls = 0;
 	rafQueue = [];
 	const host = dom.document.createElement("div");
@@ -684,13 +695,15 @@ describe("a tap on the folded question glides down into it (touch screen)", () =
 	it("messages above the screen take their real height under the glide (scroll anchoring, the off-screen rule): the glide carries on, and the question opens on arrival", async () => {
 		// Chromium at iPhone size: +1,114 and +4,147 px (scrollTop up with them, then
 		// back on the smooth scroll's course a frame later), and a message that
-		// came out shorter; then the same with a smooth scroll that moves with
-		// the shift.
-		for (const carries of [false, true]) {
+		// came out shorter; the same with the smooth scroll back on its course
+		// only the second frame after (rule off, a demo sizing itself, after a
+		// 33 ms frame); and with a smooth scroll that moves with the shift.
+		for (const [carries, lag] of [[false, 0], [false, 1], [true, 0]] as const) {
 			for (const shifts of [[1114], [4147, 1114], [-600], [1114, -600]]) {
-				const label = `${shifts.join(", ")} px${carries ? ", the smooth scroll moving with them" : ""}`;
+				const label = `${shifts.join(", ")} px${carries ? ", the smooth scroll moving with them" : lag ? `, back on course ${lag + 1} frames later` : ""}`;
 				await mount();
 				anchorCarries = carries;
+				anchorLag = lag;
 				await tapOn("bar");
 				const frames = await run(4);
 				for (const shift of shifts) {
@@ -733,6 +746,25 @@ describe("a tap on the folded question glides down into it (touch screen)", () =
 			root = null;
 			dom.document.body.innerHTML = "";
 		}
+	});
+
+	it("a real scroll back up right after the browser's own shift, smaller than it: the lesson stops dead, and that still ends the glide", async () => {
+		await mount({ from: 8000 });
+		await tapOn("bar");
+		await run(6);
+		anchorNext = 4000;
+		await run(1);
+		// "Show in the lesson" a frame later: an instant scroll, which also
+		// cancels the smooth scroll.
+		await act(async () => {
+			scroller.scrollTop = top - 3000;
+		});
+		await run(4);
+		const at = distance();
+		await run(80);
+		assert.ok(at > COLLAPSE_DIST && Math.abs(distance() - at) <= 1, `left where it was put (${at} → ${distance()})`);
+		assert.equal(smoothCalls, 1, "no glide back down");
+		assert.equal(probe.expanded(), false, "folded");
 	});
 
 	it("with reduced motion it jumps, and opens", async () => {

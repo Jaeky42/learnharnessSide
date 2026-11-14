@@ -310,7 +310,7 @@ describe("drag on the dock scrolls the lesson", async () => {
 		assert.equal(g(10, 0, 0, 500), "arrived", "arrived wins");
 	});
 	it("a glide tells the browser's own shifts (scroll anchoring) from a scroll back up", async () => {
-		const { anchoringShift, glideReach, glideStep, GLIDE_PULLED_BACK_PX } = await import("../components/phone/use-dock-touch-scroll.ts");
+		const { anchoringShift, glideReach, glideStep, GLIDE_PULLED_BACK_PX, GLIDE_SHIFT_MS } = await import("../components/phone/use-dock-touch-scroll.ts");
 		const f = (top: number, height: number) => ({ top, height });
 		// The rule for one frame.
 		assert.equal(anchoringShift(f(1000, 9000), f(700, 8700)), -300, "a fall with the height: the browser's");
@@ -322,37 +322,76 @@ describe("drag on the dock scrolls the lesson", async () => {
 		assert.equal(anchoringShift(f(1000, 9000), f(2188, 10114)), 1114, "a rise with the height: that much is the browser's");
 		assert.equal(anchoringShift(f(1000, 9000), f(1500, 10114)), 500, "never more than the rise");
 		assert.equal(anchoringShift(f(1000, 9000), f(1500, 9000)), 0, "the glide's own move");
-		// Over frames, as measured in Chromium at iPhone size (run 12): a frame in
-		// which the lesson grew by 1,114 px above the screen and scrollTop jumped
-		// with it, then the smooth scroll back on its course with no growth.
-		const frames = [f(221658, 251184), f(222788, 251184), f(224976, 252298), f(224882, 252298), f(225850, 252298)];
-		let marks = { start: frames[0]!.top - 30000, lowest: frames[0]!.top };
-		let worst = 0;
-		for (let i = 1; i < frames.length; i++) {
-			marks = glideReach(marks, frames[i - 1]!, frames[i]!);
-			worst = Math.max(worst, marks.lowest - frames[i]!.top);
+		// Over frames, as measured in Chromium at iPhone size: a frame in which the
+		// lesson grew by 1,114 or 4,147 px above the screen and scrollTop jumped with
+		// it, then the smooth scroll back on its course with no growth: the next
+		// frame (rule on, run 12), or the second after a 33 ms frame (rule off,
+		// run 4, a demo sizing itself).
+		const walk = (frames: { t: number; top: number; height: number }[]) => {
+			let marks = { start: frames[0]!.top - 30000, lowest: frames[0]!.top, credit: 0, creditAt: 0, taken: 0 };
+			let worst = 0;
+			for (let i = 1; i < frames.length; i++) {
+				marks = glideReach(marks, frames[i - 1]!, frames[i]!, frames[i]!.t);
+				worst = Math.max(worst, marks.lowest - frames[i]!.top);
+			}
+			return { marks, worst };
+		};
+		const ft = (t: number, top: number, height: number) => ({ t, top, height });
+		const run12 = [ft(1011, 221658, 251184), ft(1027, 222788, 251184), ft(1044, 224976, 252298), ft(1061, 224882, 252298), ft(1077, 225850, 252298)];
+		const run4 = [ft(1489, 266917, 270006), ft(1506, 267146, 270006), ft(1522, 268467, 271120), ft(1555, 268814, 271120), ft(1572, 267841, 271120), ft(1589, 267963, 271120), ft(1605, 268064, 271120)];
+		const run14 = [ft(851, 194760, 242457), ft(868, 196541, 242457), ft(885, 202374, 246604), ft(901, 199821, 246604), ft(918, 201333, 246604)];
+		for (const [name, frames, without] of [["run 12", run12, 94], ["run 4", run4, 973], ["run 14", run14, 2553]] as const) {
+			const { worst } = walk([...frames]);
+			assert.ok(worst <= GLIDE_PULLED_BACK_PX, `${name}: never read as pulled back (${worst} px)`);
+			assert.equal(glideStep({ distance: 20000, quietMs: 0, retries: 0, pulledBack: worst }), "wait");
+			// The same frames without the rule: what ended about 1 glide in 10 short.
+			let lowest = frames[0]!.top;
+			let pulled = 0;
+			for (const x of frames) {
+				lowest = Math.max(lowest, x.top);
+				pulled = Math.max(pulled, lowest - x.top);
+			}
+			assert.equal(pulled, without, name);
 		}
-		assert.ok(worst <= GLIDE_PULLED_BACK_PX, `never read as pulled back (${worst} px)`);
-		assert.equal(glideStep({ distance: 20000, quietMs: 0, retries: 0, pulledBack: worst }), "wait");
-		// The same frames without the rule: what ended 1 in 10 glides short.
-		assert.equal(Math.max(...frames.slice(0, 4).map((x) => x.top)) - frames[3]!.top, 94);
+		const m = (start: number, lowest: number, credit = 0, creditAt = 0, taken = 0) => ({ start, lowest, credit, creditAt, taken });
 		// A fall the browser makes moves both marks down; the glide then goes on.
-		marks = glideReach({ start: 1000, lowest: 5000 }, f(5000, 90000), f(4400, 89400));
-		assert.deepEqual(marks, { start: 400, lowest: 4400 });
+		assert.deepEqual(glideReach(m(1000, 5000), f(5000, 90000), f(4400, 89400), 16), m(400, 4400));
 		// A real scroll up, the height unchanged: as before.
-		marks = glideReach({ start: 1000, lowest: 5000 }, f(5000, 90000), f(4200, 90000));
-		assert.deepEqual(marks, { start: 1000, lowest: 5000 }, "800 px pulled back");
+		assert.deepEqual(glideReach(m(1000, 5000), f(5000, 90000), f(4200, 90000), 16), m(1000, 5000), "800 px pulled back");
 		// A scroll up larger than the height's fall: the rest counts.
-		marks = glideReach({ start: 1000, lowest: 5000 }, f(5000, 90000), f(4000, 89700));
-		assert.equal(marks.lowest - 4000, 700);
+		assert.equal(glideReach(m(1000, 5000), f(5000, 90000), f(4000, 89700), 16).lowest - 4000, 700);
 		// The height falling ahead of the screen: nothing moves down.
-		assert.deepEqual(glideReach({ start: 1000, lowest: 5000 }, f(5000, 90000), f(5000, 88000)), { start: 1000, lowest: 5000 });
+		assert.deepEqual(glideReach(m(1000, 5000), f(5000, 90000), f(5000, 88000), 16), m(1000, 5000));
 		// A rise with the height, kept by the browser (no fall after it): the
-		// lowest point catches up as the glide goes on.
-		marks = glideReach({ start: 1000, lowest: 5000 }, f(5000, 90000), f(6500, 91000));
-		assert.equal(marks.lowest, 5500);
-		marks = glideReach(marks, f(6500, 91000), f(6800, 91000));
-		assert.equal(marks.lowest, 6800);
+		// lowest point catches up once the credit has run out.
+		let marks = glideReach(m(1000, 5000), f(5000, 90000), f(6500, 91000), 16);
+		assert.deepEqual(marks, m(1000, 5500, 1000, 16));
+		marks = glideReach(marks, f(6500, 91000), f(6800, 91000), 32);
+		assert.equal(marks.lowest, 5800, "still within the credit");
+		marks = glideReach(marks, f(6800, 91000), f(7000, 91000), 16 + GLIDE_SHIFT_MS + 1);
+		assert.equal(marks.lowest, 7000, "the credit has run out");
+		// A fall larger than the credit, the height unchanged: the rest counts.
+		marks = glideReach(m(1000, 5000), f(5000, 90000), f(6500, 91000), 16);
+		marks = glideReach(marks, f(6500, 91000), f(4500, 91000), 32);
+		assert.equal(marks.credit, 0);
+		assert.equal(marks.lowest - 4500, 1000, "1,000 px up beyond the 1,000 px the browser had added");
+		// A fall the credit covered, then a frame with no motion at all: not the
+		// smooth scroll back on its course (it goes on) but a scroll that
+		// cancelled it ("Show in the lesson"): it counts after all.
+		marks = glideReach(m(1000, 5000), f(5000, 90000), f(9000, 94000), 16);
+		marks = glideReach(marks, f(9000, 94000), f(6000, 94000), 32);
+		assert.ok(marks.lowest - 6000 <= 0, "3,000 px up within the 4,000 px credit: not yet");
+		assert.equal(marks.taken, 3000);
+		marks = glideReach(marks, f(6000, 94000), f(6000, 94000), 48);
+		assert.equal(marks.lowest - 6000, 3000, "then still: pulled back");
+		assert.equal(glideStep({ distance: 20000, quietMs: 16, retries: 0, pulledBack: marks.lowest - 6000 }), "interrupted");
+		// The smooth scroll back on its course goes on moving: nothing counts.
+		marks = glideReach(m(1000, 5000), f(5000, 90000), f(9000, 94000), 16);
+		marks = glideReach(marks, f(9000, 94000), f(6000, 94000), 32);
+		marks = glideReach(marks, f(6000, 94000), f(6400, 94000), 48);
+		assert.equal(marks.lowest, 6400);
+		assert.equal(marks.taken, 0);
+		assert.equal(marks.credit, 0, "the first fall after the rise ends the credit");
 	});
 	it("a glide in flight is re-aimed when the bottom moves away: once it has slowed, more than a few px, at most every 100 ms, never once it has ended", async () => {
 		const { shouldRetarget, glideSpeed, GLIDE_RETARGET_PX, GLIDE_RETARGET_MS, GLIDE_RETARGET_SLOW, GLIDE_QUIET_MS } = await import("../components/phone/use-dock-touch-scroll.ts");
