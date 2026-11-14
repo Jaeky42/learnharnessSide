@@ -2,7 +2,7 @@
 
 The owner's report: the app lags when a session gets long, on the Windows app, the iPhone and the iPad. What lags: scrolling a long lesson, opening one, and coming back to the app after a while. Not reported: typing, a choppy stream, or a wait after Send. Later added: lessons where Drawing Pad pictures were sent to the teacher are worse.
 
-**State:** step 1, the off-screen rule and the fix for jumps under it are built on `claude/upstream-0.6.0` and pushed there. Not shipped to either release branch (that needs the owner's word, as always). No sync protocol change and no stored format change: the protocol stays 3, the chat format 2. Change a decision recorded here only with the owner's approval.
+**State:** step 1, the off-screen rule, the fix for jumps under it and the glide's rule are built on `claude/upstream-0.6.0` and pushed there. Not shipped to either release branch (that needs the owner's word, as always). No sync protocol change and no stored format change: the protocol stays 3, the chat format 2. Change a decision recorded here only with the owner's approval.
 
 ## What the audit found
 
@@ -72,7 +72,8 @@ Measured on a production build in headless Chromium, against synthetic sessions 
 #### Known faults with the rule on
 
 - **Scroll anchoring is what makes the rule comfortable.** When a message above the screen takes its real height, Chromium moves the scroll position so the view stays still. With anchoring switched off (a stand-in for a browser without it), scrolling up through never-drawn messages gave 226 layout shifts on a computer (largest 797 px) and 274 at iPhone size, against 1 and 8 with the rule off. Whether the owner's Safari anchors could not be confirmed from here.
-- **The fork's glide to the bottom** (touch: a tap on the folded question from far up) took an anchoring correction for the learner stopping it: 4 of 40 runs at iPhone size stopped 12.7k–23.5k px short, the question still folded; 0 of 20 with the rule off. The owner chose to fix the glide's rule; see "A tap on the folded question ends at the bottom, open" in `docs/cloud-sync.md`.
+- **The fork's glide to the bottom** (touch: a tap on the folded question from far up) took the browser's shift for the learner stopping it: 4 of 40 runs at iPhone size stopped 12.7k–23.5k px short, the question still folded. **Fixed** (owner's choice): the glide's rule now tells the two apart, and 60 of 60 glides arrived with the rule on. The rule, its numbers and its limits are item 6 under "A tap on the folded question ends at the bottom, open" in `docs/cloud-sync.md`.
+  - **The glide is slower with the rule on:** a median of 3.5 s against 2.1 s off, from 9,400 px up, because the bottom keeps moving as messages take their real height and the glide is aimed again twice.
 - **The computer's slide to the bottom** (upstream's `use-stick-to-bottom`): 2 of 50 runs stopped far short in the first two rounds, 0 of 100 in the third; 0 with the rule off throughout. Read from the library: its guard against taking a resize for the learner's scroll is reset by comparing values, so two equal resize differences in a row let the next correction count as a scroll up. Not changed: it is upstream's dependency.
 - **Only the owner's devices can show** whether Safari anchors, how Safari's own Find and selection treat skipped messages (a WebKit report says its Find doesn't search them), how the scrollbar behaves, and how the slide to the bottom feels.
 
@@ -82,6 +83,7 @@ Measured on a production build in headless Chromium, against synthetic sessions 
 - **The off-screen rule is narrower than the one the audit measured** (which was every direct child of the transcript). Its gain was measured again; see "Measured".
 - **The jump fix does more than the plan's sentence** ("draw the target message, measure, check once a frame later"): it also draws the skipped messages around the target, and waits for the layout to settle (up to 20 frames) before its one check. Both came from the browser runs.
 - **700 px, not 1,000 px, for the assistant's messages on a phone** (above). The plan named 1,000.
+- **The glide's rule is shaped differently from the description the owner approved** ("a shift that comes together with the lesson's height changing by the same amount"). Recorded frame by frame, the shift is a rise, and what ended the glide was the smooth scroll's return from it a frame or two later, with the height unchanged. So the rule has a 100 ms allowance after a rise and a "stopped dead" check; the intent is the same. The owner has been told.
 - **No diagram cache.** One was built and removed after review: mermaid queues renders but applies its configuration at once, so a quick theme switch could leave a chart drawn in the wrong theme in the cache. `components/mermaid-render.ts` is upstream's, unchanged.
 - **Whole parsed sessions are not kept in the server's memory between requests.** It would save the most parsing, but any code that modifies a session it was handed would corrupt the shared copy.
 - **`?only=stamp` reads the session once on the server.** It saves the download and the page's work, not the server's parse.
@@ -142,6 +144,7 @@ In a browser, after the build (headless Chromium, software rendering, a producti
 - The route, the stamp, signatures, the caches and the sweep: `tests/chat-browser-route.test.ts`, `tests/chat-job-caches.test.ts`.
 - The page's stamp rule and the catch-up: `tests/session-stamp.test.ts`; no re-render for the same data: `tests/refetch-unchanged.test.tsx`; the sync status selectors: `tests/cloud-state-selectors.test.tsx`.
 - Rendering: `tests/active-problem-index.test.ts` (against a copy of the old logic), `tests/math-delims-cache.test.ts`.
+- The glide and the browser's shift (the rules, and scripted lessons that play the shift and the smooth scroll's return): `tests/phone-layout.test.ts`, `tests/dock-touch-reveal.test.tsx`.
 - The off-screen rule, its estimates and its switch: `tests/offscreen-rule.test.ts`; jumps into a skipped message (a scripted lesson whose passages measure as zeros until drawn; the one check; the learner's input, on the dock too; the selectors kept equal to the stylesheet's): `tests/offscreen-target.test.ts`.
 - Notes: a 300-note vault compared with the per-link loop, in `tests/notes-core.test.ts`.
 
