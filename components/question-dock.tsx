@@ -172,7 +172,9 @@ export function QuestionDock({
 					}
 				/>
 			)}
-			<div className={expanded ? "dock-variant" : "invisible h-0 overflow-hidden"}>
+			{/* FORK (scroll into a check): data-dock-open-form lets the dock measure
+			    the open form while folded (components/check-blank-space.ts). */}
+			<div data-dock-open-form="" className={expanded ? "dock-variant" : "invisible h-0 overflow-hidden"}>
 				<QuestionDockForm
 					viewReader={viewReader}
 					toolName={toolName}

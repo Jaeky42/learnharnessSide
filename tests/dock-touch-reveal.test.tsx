@@ -16,7 +16,7 @@
  *     a frame with its scrolling hidden (overflow-y: hidden) stops it.
  */
 
-import React, { act, useCallback, useEffect, useRef, useState } from "react";
+import React, { act, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 (globalThis as Record<string, unknown>).React = React;
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
@@ -47,7 +47,23 @@ Object.assign(dom.window, {
 });
 Object.defineProperty(globalThis, "navigator", { configurable: true, get: () => ({ userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile/15E148 Safari/604.1" }) });
 Object.defineProperty(performance, "now", { configurable: true, value: () => clock });
-class NoResize { observe() {} disconnect() {} }
+/** ResizeObserver: never fires by itself. `contentResized()` plays the one
+ *  on use-stick-to-bottom's content (the spacer under a waiting check). */
+type Observed = { cb: (entries: unknown[]) => void; targets: Element[] };
+let observers: Observed[] = [];
+class NoResize {
+	o: Observed;
+	constructor(cb: (entries: unknown[]) => void) {
+		this.o = { cb, targets: [] };
+		observers.push(this.o);
+	}
+	observe(t: Element) { this.o.targets.push(t); }
+	disconnect() { observers = observers.filter((o) => o !== this.o); }
+}
+let contentEl: Element | null = null;
+function contentResized(target: Element | null = contentEl) {
+	for (const o of [...observers]) for (const t of o.targets) if (t === target) o.cb([{ contentRect: { height: t === contentEl ? scrollHeight : CLIENT_H }, target: t }]);
+}
 Object.assign(globalThis, {
 	window: dom.window, document: dom.document, HTMLElement: dom.window.HTMLElement, Element: dom.window.Element,
 	IS_REACT_ACT_ENVIRONMENT: true,
@@ -61,12 +77,38 @@ Object.assign(globalThis, {
 
 const { useStickToBottom } = await import("use-stick-to-bottom");
 const { useDockTouchScroll, keyScrollsLesson, GLIDE_RETRIES } = await import("../components/phone/use-dock-touch-scroll.ts");
+const { backToRest, blankSpaceExtra, bottomTarget, checkOpensOnScroll, createCheckSpace, noteCheckPlace, offerCheckSpace, resetCheckSpace, restingTarget } = await import("../components/check-blank-space.ts");
 
 // DockOverlay's thresholds (components/chat.tsx).
 const COLLAPSE_DIST = 96;
 const EXPAND_DIST = 16;
-const CLIENT_H = 600;
+let CLIENT_H = 600; // a test may make the viewport taller
 const SMOOTH_MS = 500;
+const GRADIENT_H = 96;
+// The scripted dock under a teach check (SCROLL INTO A CHECK): the block folded
+// (the bar and the reading-thinking field), the open check as measured from its
+// hidden form, and the open check as it really lays out (`openActual`).
+const FOLDED_BLOCK = 130;
+const OPEN_BLOCK = 430;
+const COMPOSER_BLOCK = 112;
+let openMeasured = OPEN_BLOCK;
+let openActual = OPEN_BLOCK;
+/** The lesson's text; under a teach check the scroller is the text plus the spacer. */
+let textH = 0;
+/** The spacer as laid out. With `deferSpacer` an offer only reaches it at
+ *  commitSpacer() (React renders the reserve a moment after it is offered). */
+let spacerDom = 0;
+let deferSpacer = false;
+let pendingSpacer: number | null = null;
+function commitSpacer() {
+	if (pendingSpacer === null) return;
+	spacerDom = pendingSpacer;
+	pendingSpacer = null;
+	scrollHeight = textH + spacerDom;
+	contentResized();
+}
+/** chat.tsx's resize and growth mutes, played only where a test asks (Date.now, as there). */
+let mutes = false;
 
 /** The lesson's scroller: a scripted box (see the top of this file). */
 let scroller: HTMLElement;
@@ -135,13 +177,19 @@ type Probe = {
 	slides: number;
 	options: number;
 	revealNow: () => void;
+	reserve: () => number;
+	extra: () => number;
+	stampGeometry: () => void;
+	offerNow: () => void;
 };
 let probe: Probe;
 
 /** chat.tsx's wiring around the dock, copied. `teach`: a teach check waiting
  *  behind its Open invitation (requiresReveal). */
-function Harness({ teach = false }: { teach?: boolean }) {
-	const stick = useStickToBottom({ initial: "instant", resize: "smooth" });
+function Harness({ teach = false, question = "q1" }: { teach?: boolean; question?: string | null }) {
+	// SCROLL INTO A CHECK: chat.tsx sets the same function on the context's
+	// targetScrollTop; the hook reads it through its first options either way.
+	const stick = useStickToBottom({ initial: "instant", resize: "smooth", targetScrollTop: (target) => (blankSpaceRef.current ? restingTarget(target, checkSpaceRef.current.extra) : target) });
 	const { scrollToBottom: libraryScrollToBottom, stopScroll, state: stickState, isAtBottom } = stick;
 	const scrollToBottom = () => {
 		probe.slides++;
@@ -153,6 +201,68 @@ function Harness({ teach = false }: { teach?: boolean }) {
 	const [expanded, setExpanded] = useState(false);
 	const [revealed, setRevealed] = useState(false);
 	const revealPending = teach && !revealed;
+	// SCROLL INTO A CHECK (chat.tsx's DockOverlay, copied): the blank space, the
+	// resting point, and the arrival that opens it.
+	const blankSpace = revealPending && !expanded && question !== null;
+	const blankSpaceRef = useRef(blankSpace);
+	blankSpaceRef.current = blankSpace;
+	const checkSpaceRef = useRef(createCheckSpace());
+	const pendingRef = useRef(question !== null);
+	pendingRef.current = question !== null;
+	const prevQuestionRef = useRef(question);
+	if (question !== prevQuestionRef.current) {
+		prevQuestionRef.current = question;
+		resetCheckSpace(checkSpaceRef.current);
+		if (question !== null) {
+			setExpanded(false);
+			setRevealed(false);
+		}
+	}
+	const geometryAtRef = useRef(0);
+	const reserveRef = useRef(0);
+	const endCheckSpace = () => {
+		blankSpaceRef.current = false;
+		checkSpaceRef.current.extra = 0;
+	};
+	// chat.tsx's lookAtCheck: the rest from the spacer as laid out.
+	const lookAtCheckRef = useRef<(settle: boolean) => void>(() => {});
+	lookAtCheckRef.current = (settle) => {
+		const el = stick.scrollRef.current, s = checkSpaceRef.current;
+		if (!el || !blankSpaceRef.current || expandedRef.current) return;
+		const rest = restingTarget(bottomTarget(el), blankSpaceExtra(spacerDom, FOLDED_BLOCK, GRADIENT_H));
+		if (settle && backToRest(s, el.scrollTop, rest)) stick.state.scrollTop = rest;
+		noteCheckPlace(s, el.scrollTop, el.scrollHeight - el.clientHeight - el.scrollTop, EXPAND_DIST, rest);
+	};
+	const noteCheckOffer = (extra: number | null) => {
+		const s = checkSpaceRef.current;
+		if (extra === null) { s.extra = 0; return; }
+		offerCheckSpace(s, extra);
+		lookAtCheckRef.current(true);
+		requestAnimationFrame(() => lookAtCheckRef.current(true));
+	};
+	useEffect(() => {
+		const el = stick.scrollRef.current;
+		if (!el || !contentEl) return;
+		const ro = new ResizeObserver(() => lookAtCheckRef.current(true));
+		ro.observe(contentEl);
+		ro.observe(el);
+		return () => ro.disconnect();
+	}, [stick.scrollRef]);
+	/** chat.tsx's offer, over the scripted spacer: the scroller is the text plus
+	 *  the reserve, and use-stick-to-bottom hears its content resize. */
+	const offer = (blockH: number) => {
+		const open = blankSpaceRef.current ? openMeasured : null;
+		const next = Math.max(blockH, open ?? 0) + GRADIENT_H;
+		noteCheckOffer(open === null ? null : blankSpaceExtra(Math.max(reserveRef.current, next), blockH, GRADIENT_H));
+		if (next <= reserveRef.current + 0.5 && pendingRef.current) return;
+		if (pendingRef.current && next > reserveRef.current + 1) geometryAtRef.current = Date.now();
+		reserveRef.current = next;
+		pendingSpacer = next;
+		if (!deferSpacer) commitSpacer();
+	};
+	useLayoutEffect(() => {
+		if (teach) offer(question === null ? COMPOSER_BLOCK : expanded ? openActual : FOLDED_BLOCK);
+	});
 	const expandedRef = useRef(expanded);
 	expandedRef.current = expanded;
 	const revealedRef = useRef(revealed);
@@ -199,11 +309,12 @@ function Harness({ teach = false }: { teach?: boolean }) {
 	const openOnArrivalRef = useRef(false);
 	const openAtOnce = (reveal: boolean) => {
 		if (reveal) setRevealed(true);
+		if (reveal) endCheckSpace();
 		setExpanded(true);
 		void suppressFoldDuringReveal();
 	};
 	const openDock = (reveal: boolean) => {
-		if (!atBottomRef.current) {
+		if (!atBottomRef.current || (reveal && blankSpaceRef.current && checkSpaceRef.current.extra > 0)) {
 			if (stickState.animation) stopScroll();
 			if (dockTouch.glideToBottom()) {
 				openOnArrivalRef.current = reveal;
@@ -212,11 +323,12 @@ function Harness({ teach = false }: { teach?: boolean }) {
 		}
 		openAtOnce(reveal);
 	};
-	const arriveAtBottomRef = useRef(() => {});
-	arriveAtBottomRef.current = () => {
+	const arriveAtBottomRef = useRef<(intoCheck?: boolean) => void>(() => {});
+	arriveAtBottomRef.current = (intoCheck = false) => {
 		if (teach && !revealedRef.current) {
-			if (!openOnArrivalRef.current) return;
+			if (!openOnArrivalRef.current && !intoCheck) return;
 			setRevealed(true);
+			endCheckSpace();
 		}
 		openOnArrivalRef.current = false;
 		setExpanded(true);
@@ -233,21 +345,46 @@ function Harness({ teach = false }: { teach?: boolean }) {
 			setExpanded(true);
 			void suppressFoldDuringReveal();
 		},
+		reserve: () => reserveRef.current,
+		extra: () => checkSpaceRef.current.extra,
+		stampGeometry: () => { geometryAtRef.current = Date.now(); },
+		offerNow: () => offer(FOLDED_BLOCK),
 	};
 	useEffect(() => {
 		const el = stick.scrollRef.current;
 		if (!el) return;
+		let recheck: ReturnType<typeof setTimeout> | undefined;
+		const recheckAfterMutes = () => {
+			clearTimeout(recheck);
+			const wait = geometryAtRef.current + 400 - Date.now();
+			recheck = setTimeout(() => {
+				if (!pendingRef.current || !blankSpaceRef.current || expandedRef.current) return;
+				if (Date.now() - geometryAtRef.current < 400) { recheckAfterMutes(); return; }
+				const d = el.scrollHeight - el.clientHeight - el.scrollTop;
+				if (checkOpensOnScroll(checkSpaceRef.current, d, EXPAND_DIST)) arriveAtBottomRef.current(true);
+			}, Math.max(wait, 0) + 1);
+		};
 		const onScroll = () => {
+			if (!pendingRef.current) return;
+			const waiting = blankSpaceRef.current;
+			if (waiting) lookAtCheckRef.current(false);
+			const intoCheck = waiting && !expandedRef.current && checkOpensOnScroll(checkSpaceRef.current, el.scrollHeight - el.clientHeight - el.scrollTop, EXPAND_DIST);
+			if (mutes && Date.now() - geometryAtRef.current < 400) { if (intoCheck) recheckAfterMutes(); return; }
 			const d = el.scrollHeight - el.clientHeight - el.scrollTop;
 			if (expandedRef.current) {
 				if (d > COLLAPSE_DIST && !expandIntentRef.current && !atBottomRef.current) setExpanded(false);
 			} else if (d < EXPAND_DIST) {
-				arriveAtBottomRef.current();
+				arriveAtBottomRef.current(intoCheck);
 			}
 		};
 		el.addEventListener("scroll", onScroll, { passive: true });
-		return () => el.removeEventListener("scroll", onScroll);
+		return () => { el.removeEventListener("scroll", onScroll); clearTimeout(recheck); };
 	}, [stick.scrollRef]);
+	const stickContentRef = stick.contentRef;
+	const contentRef = useCallback((el: HTMLDivElement | null) => {
+		contentEl = el;
+		stickContentRef(el);
+	}, [stickContentRef]);
 	const stickScrollRef = stick.scrollRef;
 	const scrollRef = useCallback((el: HTMLDivElement | null) => {
 		if (el) fakeScroller(el);
@@ -256,7 +393,7 @@ function Harness({ teach = false }: { teach?: boolean }) {
 	return (
 		<div>
 			<div id="lesson" ref={scrollRef} data-overflow="auto">
-				<div ref={stick.contentRef} />
+				<div ref={contentRef} />
 			</div>
 			<div ref={blockRef} id="dock">
 				<p id="pad">The dock around the question</p>
@@ -327,8 +464,12 @@ const $ = (id: string) => dom.document.getElementById(id)!;
 
 let root: Root | null = null;
 async function mount({ teach = false, from = 4000 }: { teach?: boolean; from?: number } = {}) {
-	probe = { expanded: () => false, revealed: () => false, intent: () => false, atBottom: () => false, slides: 0, options: 0, revealNow: () => {} };
+	probe = { expanded: () => false, revealed: () => false, intent: () => false, atBottom: () => false, slides: 0, options: 0, revealNow: () => {}, reserve: () => 0, extra: () => 0, stampGeometry: () => {}, offerNow: () => {} };
 	scrollHeight = 10000;
+	// Under a teach check the lesson is its text plus the open check's blank space.
+	textH = 10000 - OPEN_BLOCK - GRADIENT_H;
+	openMeasured = OPEN_BLOCK;
+	openActual = OPEN_BLOCK;
 	top = 0;
 	smooth = null;
 	momentum = 0;
@@ -345,10 +486,11 @@ async function mount({ teach = false, from = 4000 }: { teach?: boolean; from?: n
 	dom.document.body.appendChild(host);
 	root = createRoot(host);
 	await act(async () => root!.render(<Harness teach={teach} />));
-	// The lesson starts at its bottom; the learner has scrolled up from there
-	// (use-stick-to-bottom takes the scroll up as leaving the bottom).
+	// The lesson starts at its bottom (a waiting teach check: at the end of its
+	// text, as use-stick-to-bottom puts it); the learner has scrolled up from
+	// there (use-stick-to-bottom takes the scroll up as leaving the bottom).
 	await act(async () => {
-		scroller.scrollTop = scrollHeight;
+		scroller.scrollTop = teach ? scrollHeight - 1 - CLIENT_H - (spacerDom - FOLDED_BLOCK - GRADIENT_H) : scrollHeight;
 	});
 	await frame();
 	await act(async () => {
@@ -369,6 +511,13 @@ afterEach(async () => {
 	dom.document.body.innerHTML = "";
 	touchScreen = true;
 	reduceMotion = false;
+	mutes = false;
+	CLIENT_H = 600;
+	spacerDom = 0;
+	deferSpacer = false;
+	pendingSpacer = null;
+	observers = [];
+	contentEl = null;
 });
 
 /** A tap: touchstart, touchend, then Safari's own click (unless the touchend
@@ -789,7 +938,7 @@ describe("a tap on the folded question glides down into it (touch screen)", () =
 		assert.ok(distance() <= 2);
 	});
 
-	it("a teach check's glide stopped by the learner: the invitation stays, and reaching the bottom later doesn't open it", async () => {
+	it("a teach check's glide stopped by the learner: the invitation stays, and scrolling on down to the bottom by hand opens it then (SCROLL INTO A CHECK)", async () => {
 		await mount({ teach: true });
 		await tapOn("open");
 		await run(6);
@@ -797,13 +946,16 @@ describe("a tap on the folded question glides down into it (touch screen)", () =
 			touch("touchstart", $("lesson"));
 			touch("touchend", $("lesson"));
 		});
+		await run(20);
+		assert.equal(probe.revealed(), false, "stopped: still waiting");
+		assert.equal(probe.expanded(), false);
+		assert.ok($("open"));
 		await act(async () => {
 			scroller.scrollTop = scrollHeight;
 		});
 		await run(20);
-		assert.equal(probe.revealed(), false);
-		assert.equal(probe.expanded(), false);
-		assert.ok($("open"));
+		assert.equal(probe.revealed(), true, "the learner scrolled into it");
+		assert.equal(probe.expanded(), true);
 	});
 
 	it("on a computer: the click opens at once and slides, as before", async () => {
@@ -895,5 +1047,311 @@ describe("which keys stop a glide", () => {
 		assert.equal(keyScrollsLesson("PageUp", box, lesson, doc), false, "a text box keeps its keys");
 		assert.equal(keyScrollsLesson("PageUp", $("pad"), lesson, doc), false, "outside the lesson (the dock)");
 		assert.equal(keyScrollsLesson("a", doc.body, lesson, doc), false);
+	});
+});
+
+describe("scroll into a check: a waiting check has its blank space, rests at the end of the text, and opens when the learner scrolls into it", () => {
+	const EXTRA = OPEN_BLOCK - FOLDED_BLOCK;
+	const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+	/** A fresh page: use-stick-to-bottom places the lesson by itself. */
+	async function mountRest({ question = "q1" as string | null, text = 10000 - OPEN_BLOCK - GRADIENT_H } = {}) {
+		probe = { expanded: () => false, revealed: () => false, intent: () => false, atBottom: () => false, slides: 0, options: 0, revealNow: () => {}, reserve: () => 0, extra: () => 0, stampGeometry: () => {}, offerNow: () => {} };
+		textH = text;
+		scrollHeight = text;
+		openMeasured = OPEN_BLOCK;
+		openActual = OPEN_BLOCK;
+		top = 0;
+		smooth = null;
+		momentum = 0;
+		smoothRefused = false;
+		smoothShortBy = 0;
+		momentumOutlivesStop = false;
+		anchorNext = 0;
+		anchorCarries = false;
+		anchorLag = 0;
+		anchorLagLeft = 0;
+		smoothCalls = 0;
+		rafQueue = [];
+		const host = dom.document.createElement("div");
+		dom.document.body.appendChild(host);
+		root = createRoot(host);
+		await act(async () => root!.render(<Harness teach question={question} />));
+		await run(40);
+	}
+	/** The learner's own scroll down, `step` px a frame, until the bottom. */
+	async function scrollDown(step = 30, untilD = 0) {
+		const frames: { d: number; open: boolean; reserve: number }[] = [];
+		for (let i = 0; i < 400 && distance() > untilD; i++) {
+			await act(async () => {
+				scroller.scrollTop = top + step;
+			});
+			await frame();
+			frames.push({ d: distance(), open: probe.expanded(), reserve: probe.reserve() });
+		}
+		return frames;
+	}
+	/** The end of the text: the bar right under the last line (use-stick-to-bottom's target is 1 px short of the bottom). */
+	const textEnd = () => scrollHeight - 1 - CLIENT_H - EXTRA;
+
+	it("on load: folded behind Open, with the open check's blank space already under it, the lesson resting at the end of the text", async () => {
+		await mountRest();
+		assert.equal(probe.expanded(), false);
+		assert.equal(probe.revealed(), false);
+		assert.equal(probe.reserve(), OPEN_BLOCK + GRADIENT_H, "the reserve is the open check's");
+		assert.equal(probe.extra(), EXTRA);
+		assert.ok(Math.abs(top - textEnd()) <= 1, `resting at the end of the text (${top} vs ${textEnd()})`);
+		assert.equal(probe.atBottom(), true, "counts as at the bottom: no jump-to-bottom disc");
+		const frames = await run(120);
+		assert.ok(frames.every((f) => !f.open), "never opens by itself");
+		assert.ok(Math.abs(top - textEnd()) <= 1);
+	});
+
+	it("a check arriving while the lesson follows the teacher: it rests at the end of the text, folded", async () => {
+		await mountRest({ question: null });
+		const followed = distance();
+		assert.ok(followed <= 2, "following at the bottom");
+		await act(async () => root!.render(<Harness teach question="q2" />));
+		const frames = await run(120);
+		assert.ok(frames.every((f) => !f.open), "folded all the while");
+		assert.equal(probe.reserve(), OPEN_BLOCK + GRADIENT_H);
+		assert.ok(Math.abs(top - textEnd()) <= 1, `at the end of the text (${top} vs ${textEnd()})`);
+		assert.ok(frames.every((f) => f.d >= EXTRA - 2), "never into the blank space");
+	});
+
+	it("scrolling down through the blank space opens and reveals it on arrival, with no change of the reserve, and it stays open", async () => {
+		await mountRest();
+		const reserve = probe.reserve();
+		const frames = await scrollDown(30);
+		const opened = frames.findIndex((f) => f.open);
+		assert.ok(opened >= 0, "opened");
+		assert.ok(frames[opened]!.d < EXPAND_DIST, `on arrival (${frames[opened]!.d} px)`);
+		assert.ok(frames.slice(0, opened).every((f) => !f.open), "folded on the way");
+		assert.equal(probe.revealed(), true, "counts as opened");
+		const after = await run(150);
+		assert.ok(after.every((f) => f.open), "never folds again");
+		assert.equal(probe.reserve(), reserve, "the reserve didn't change at the open");
+		assert.ok(distance() <= 2);
+		// Then it is a question like any other: scrolling up folds it, back down opens it.
+		for (let i = 0; i < 8; i++) {
+			await act(async () => {
+				scroller.scrollTop = top - 50;
+			});
+			await frame();
+		}
+		assert.equal(probe.expanded(), false, "folded by scrolling up");
+		await scrollDown(40);
+		await run(5);
+		assert.equal(probe.expanded(), true, "open again at the bottom");
+	});
+
+	it("an open check 40 px taller than measured: the reserve grows by that and slides; it never folds", async () => {
+		await mountRest();
+		openActual = OPEN_BLOCK + 40;
+		await scrollDown(30);
+		const after = await run(200);
+		assert.ok(after.every((f) => f.open), "never folds");
+		assert.equal(probe.reserve(), OPEN_BLOCK + 40 + GRADIENT_H);
+		assert.ok(distance() <= 2, `at the bottom (${distance()} px)`);
+	});
+
+	it("the finger still on the screen when it arrives (one long slow swipe that ends at the bottom): it opens and stays open", async () => {
+		await mountRest();
+		await act(async () => {
+			touch("touchstart", $("lesson"), 500);
+		});
+		const frames = await scrollDown(8);
+		assert.ok(frames.some((f) => f.open), "opened on arrival");
+		// The finger rests, wobbles a little, then lifts.
+		const held = await run(30);
+		await act(async () => {
+			scroller.scrollTop = top - 4;
+		});
+		held.push(...(await run(10)));
+		await act(async () => {
+			touch("touchend", $("lesson"), 500);
+		});
+		held.push(...(await run(60)));
+		assert.ok(held.every((f) => f.open), "never closed again");
+		assert.equal(probe.reserve(), OPEN_BLOCK + GRADIENT_H);
+	});
+
+	it("never opens with no input, also once the mutes are over and when its form grows while it waits", async () => {
+		mutes = true;
+		await mountRest();
+		await sleep(450);
+		let frames = await run(40);
+		openMeasured = OPEN_BLOCK + 60; // late math: the form taller
+		await act(async () => root!.render(<Harness teach question="q1" />));
+		frames = [...frames, ...(await run(40))];
+		await sleep(450);
+		frames = [...frames, ...(await run(40))];
+		assert.ok(frames.every((f) => !f.open));
+		assert.equal(probe.revealed(), false);
+		assert.equal(probe.reserve(), OPEN_BLOCK + 60 + GRADIENT_H, "the blank space followed the form");
+		assert.ok(Math.abs(distance() - (EXTRA + 60) - 1) <= 1, `still at the end of the text (${distance()} px from the bottom)`);
+	});
+
+	it("messages under a resting lesson drawn shorter than estimated (the off-screen rule): back to the end of the text, not into the blank space", async () => {
+		await mountRest();
+		await act(async () => {
+			textH -= 400;
+			scrollHeight -= 400;
+			setTop(top); // the browser keeps scrollTop where it can
+			contentResized();
+		});
+		const frames = await run(30);
+		assert.ok(Math.abs(top - textEnd()) <= 1, `at the end of the text (${top} vs ${textEnd()})`);
+		assert.ok(frames.every((f) => !f.open));
+		assert.equal(probe.atBottom(), true, "still following");
+		// Scroll anchoring with it (Chromium at iPhone size, on load): a message
+		// above grows by 545 px and scrollTop moves with it, the ones below come
+		// out 332 px shorter.
+		await act(async () => {
+			textH += 213;
+			scrollHeight += 213;
+			setTop(top + 545);
+			contentResized();
+		});
+		const anchored = await run(30);
+		assert.ok(Math.abs(top - textEnd()) <= 1, `anchoring: at the end of the text (${top} vs ${textEnd()})`);
+		assert.ok(anchored.every((f) => !f.open));
+		// A learner who has scrolled into the blank space is left there.
+		await scrollDown(30, 150);
+		const at = top;
+		await act(async () => {
+			textH -= 100;
+			scrollHeight -= 100;
+			setTop(top);
+			contentResized();
+		});
+		await run(10);
+		assert.equal(top, Math.min(at, scrollHeight - CLIENT_H), "not pulled back up");
+		assert.equal(probe.expanded(), false);
+	});
+
+	/** Where the end of the text puts the lesson, from the spacer as laid out. */
+	const restNow = () => scrollHeight - 1 - CLIENT_H - (spacerDom - FOLDED_BLOCK - GRADIENT_H);
+	/** The viewport 300 px taller, in the browser's order (Chromium at iPhone
+	 *  size): the window's resize event offers the reserve (the open check's cap
+	 *  rose with the column: +222) before React has rendered it, the frame's
+	 *  animation frames, the scroller's ResizeObserver, then the spacer. */
+	async function taller() {
+		deferSpacer = true;
+		await act(async () => {
+			CLIENT_H += 300;
+			openMeasured += 222;
+			setTop(top);
+			probe.offerNow();
+		});
+		await frame();
+		await act(async () => contentResized(scroller));
+		await act(async () => commitSpacer());
+		deferSpacer = false;
+		return run(30);
+	}
+
+	it("the viewport 300 px taller while it rests: back at the end of the text, folded", async () => {
+		await mountRest();
+		assert.ok(Math.abs(top - restNow()) <= 1);
+		const frames = await taller();
+		assert.equal(spacerDom, OPEN_BLOCK + 222 + GRADIENT_H, "the blank space followed the taller cap");
+		assert.ok(Math.abs(top - restNow()) <= 1, `at the end of the text (${top} vs ${restNow()})`);
+		assert.ok(Math.abs(distance() - (EXTRA + 222) - 1) <= 1, `d = the new blank space (${distance()})`);
+		assert.ok(frames.every((f) => !f.open));
+	});
+
+	it("the viewport 300 px taller while the learner is 150 px into the blank space: left where it is, folded", async () => {
+		await mountRest();
+		await scrollDown(10, EXTRA + 1 - 150);
+		const at = top;
+		const frames = await taller();
+		// The browser clamps it to the shorter scroll range; nothing else moves it.
+		assert.equal(top, Math.min(at, textH + OPEN_BLOCK + GRADIENT_H - CLIENT_H), "not moved back to the rest");
+		assert.ok(top > restNow() + 100);
+		assert.ok(frames.every((f) => !f.open));
+	});
+
+	it("the reserve growing while it rests, rendered a moment after it was offered: still at the end of the text", async () => {
+		await mountRest();
+		deferSpacer = true;
+		await act(async () => {
+			openMeasured += 80;
+			probe.offerNow();
+		});
+		await frame();
+		await act(async () => commitSpacer());
+		deferSpacer = false;
+		const frames = await run(30);
+		assert.ok(Math.abs(top - restNow()) <= 1, `at the end of the text (${top} vs ${restNow()})`);
+		assert.equal(spacerDom, OPEN_BLOCK + 80 + GRADIENT_H);
+		assert.ok(frames.every((f) => !f.open));
+	});
+
+	it("a lesson too short to scroll: it never opens by itself, and stays behind Open", async () => {
+		await mountRest({ text: 50 });
+		assert.ok(scrollHeight <= CLIENT_H, "nothing to scroll");
+		await act(async () => {
+			scroller.scrollTop = 1000;
+		});
+		const frames = await run(60);
+		assert.ok(frames.every((f) => !f.open));
+		assert.ok($("open"));
+	});
+
+	it("a geometry change that clamps the lesson to its bottom (the keyboard closing, the lesson shrinking) doesn't open it: that moves it up", async () => {
+		await mountRest();
+		await scrollDown(30, 150);
+		assert.equal(probe.expanded(), false);
+		await act(async () => {
+			scrollHeight -= 200;
+			setTop(top);
+		});
+		const frames = await run(30);
+		assert.ok(distance() < EXPAND_DIST, "at the bottom now");
+		assert.ok(frames.every((f) => !f.open), "but not opened");
+	});
+
+	it("an arrival during a resize mute isn't swallowed: it opens once the mute is over", async () => {
+		mutes = true;
+		await mountRest();
+		await sleep(450);
+		await scrollDown(30, 40);
+		probe.stampGeometry();
+		await scrollDown(30);
+		await run(2);
+		assert.equal(probe.expanded(), false, "muted");
+		await sleep(450);
+		await run(2);
+		assert.equal(probe.expanded(), true, "opened after the mute");
+		assert.equal(probe.revealed(), true);
+	});
+
+	it("a tap on Open at rest (touch): one glide to the real bottom, folded on the way, open on arrival", async () => {
+		await mountRest();
+		const reserve = probe.reserve();
+		await tapOn("open");
+		const frames = await run(80);
+		assert.ok(beforeArrival(frames).length > 3, "it glided");
+		assert.ok(beforeArrival(frames).every((f) => !f.open));
+		assert.equal(probe.revealed(), true);
+		assert.equal(probe.expanded(), true);
+		assert.ok(distance() <= 2, `at the real bottom (${distance()} px)`);
+		assert.equal(smoothCalls, 1);
+		assert.equal(probe.reserve(), reserve);
+		assert.ok((await run(100)).every((f) => f.open));
+	});
+
+	it("a click on Open at rest on a computer: open at once, slid to the real bottom, never folds", async () => {
+		touchScreen = false;
+		await mountRest();
+		await act(async () => {
+			($("open") as HTMLButtonElement).click();
+		});
+		assert.equal(probe.expanded(), true);
+		assert.equal(probe.revealed(), true);
+		const frames = await run(200);
+		assert.ok(frames.every((f) => f.open));
+		assert.equal(smoothCalls, 0);
+		assert.ok(distance() <= 2, `at the real bottom (${distance()} px)`);
 	});
 });

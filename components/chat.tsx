@@ -42,6 +42,8 @@ import { clearOpeningPrompt, readOpeningPromptEntry, stashOpeningPrompt, OPENING
 import { forwardDockWheel, useDockHeight } from "@/components/dock-height";
 import { useDockTouchScroll } from "@/components/phone/use-dock-touch-scroll";
 import { createDockMorph } from "@/components/dock-morph";
+// FORK (scroll into a check)
+import { OPEN_FORM_ATTR, backToRest, blankSpaceExtra, bottomTarget, checkOpensOnScroll, createCheckSpace, measureOpenCheck, noteCheckPlace, offerCheckSpace, resetCheckSpace, restingTarget } from "@/components/check-blank-space";
 import { QueuedSteersBody, type QueuedSteerLine } from "@/components/queued-steers";
 import { DictationBar, finishDictation, joinDictation, useDictation, type Dictation } from "@/components/dictation";
 import { useFieldCycle } from "@/components/field-cycle";
@@ -2555,7 +2557,9 @@ export function DockOverlay({
 	setupCta?: React.ReactNode;
 }) {
 	const controller = useOptionalInteractionLayers();
-	const { isAtBottom, scrollToBottom, scrollRef, stopScroll, state: stickState } = useStickToBottomContext();
+	// FORK (scroll into a check): the context object too, for its targetScrollTop.
+	const stickContext = useStickToBottomContext();
+	const { isAtBottom, scrollToBottom, scrollRef, stopScroll, state: stickState } = stickContext;
 	// Render-fresh bottom state (flicker round): the arrival block below reads
 	// it DURING RENDER — the same value the after-paint effect used to read a
 	// frame too late. Assigned per render like the other refs below.
@@ -2572,6 +2576,13 @@ export function DockOverlay({
 	const revealPending = requiresReveal && !revealed;
 
 	const pendingId = pluginQuestion ? pluginQuestionOccurrenceKey(pluginQuestion.occurrence) : unreadablePlugin ? "unreadable-plugin-question" : pending?.key ?? null;
+	// FORK (scroll into a check): a native check waiting folded keeps the blank
+	// space the open check will need, the lesson rests at the end of its text,
+	// and scrolling on down to the real bottom opens it (components/check-blank-space.ts).
+	const blankSpace = revealPending && !expanded && !!pending && !pluginQuestion && !unreadablePlugin;
+	const blankSpaceRef = useRef(blankSpace);
+	blankSpaceRef.current = blankSpace;
+	const checkSpaceRef = useRef(createCheckSpace());
 	const readingInputRef = useRef<HTMLDivElement>(null);
 	const ownsDock = !!pending || !!pluginQuestion || unreadablePlugin || !!practice;
 	const initialPendingRef = useRef(pendingId);
@@ -2593,6 +2604,7 @@ export function DockOverlay({
 	if (pendingId !== prevPendingIdRef.current) {
 		const wasQuestion = prevPendingIdRef.current !== null;
 		prevPendingIdRef.current = pendingId;
+		resetCheckSpace(checkSpaceRef.current); // FORK (scroll into a check)
 		if (pendingId && requiresReveal) {
 			const arrival = revealArrival(wasQuestion);
 			setExpanded(arrival.expanded);
@@ -2709,9 +2721,72 @@ export function DockOverlay({
 	// The reserve grows immediately, but never shrinks while a question or
 	// practice problem owns the dock: shrinking flow space could pin a nearby
 	// learner back to the bottom. Composer mode may give space back.
+	// FORK (scroll into a check): the open check's block height, measured from
+	// its form, mounted and laid out while folded (QuestionDock).
+	const openCheckHeightRef = useRef<() => number | null>(() => null);
+	openCheckHeightRef.current = () => {
+		const column = scrollRef.current, block = blockRef.current, viewport = viewportRef.current, body = bodyRef.current, content = contentRef.current;
+		return column && block && viewport && body && content ? measureOpenCheck({ column, block, viewport, body, content }) : null;
+	};
+	// FORK (scroll into a check): a look at where the waiting check's lesson is.
+	// The resting point is the end of the text as the page is laid out now (the
+	// spacer in the DOM, not the reserve just offered, which may not have
+	// rendered yet). `settle`: at a change of the geometry (an offer, a resize),
+	// a lesson that was at rest at the previous look and is now past the rest
+	// goes back to it (backToRest), through use-stick-to-bottom's own setter so
+	// it isn't read as the learner leaving. A scroll event only looks.
+	const lookAtCheckRef = useRef<(settle: boolean) => void>(() => {});
+	lookAtCheckRef.current = (settle) => {
+		const el = scrollRef.current, block = blockRef.current, s = checkSpaceRef.current;
+		if (!el || !block || !blankSpaceRef.current || expandedRef.current) return;
+		const spacer = el.querySelector<HTMLElement>('[data-testid="dock-spacer"]');
+		const rest = restingTarget(bottomTarget(el), blankSpaceExtra(spacer ? spacer.getBoundingClientRect().height : reserveRef.current, block.getBoundingClientRect().height, GRADIENT_H));
+		if (settle && backToRest(s, el.scrollTop, rest)) stickState.scrollTop = rest;
+		noteCheckPlace(s, el.scrollTop, el.scrollHeight - el.clientHeight - el.scrollTop, EXPAND_DIST, rest);
+	};
+	// FORK (scroll into a check): the blank space is in place (or none, null);
+	// a look now and one a frame later (the away rule, and the rest kept).
+	const noteCheckOfferRef = useRef<(extra: number | null) => void>(() => {});
+	noteCheckOfferRef.current = (extra) => {
+		const s = checkSpaceRef.current;
+		if (extra === null) { s.extra = 0; return; }
+		offerCheckSpace(s, extra);
+		lookAtCheckRef.current(true);
+		requestAnimationFrame(() => lookAtCheckRef.current(true));
+	};
+	// FORK (scroll into a check): what is under a resting lesson got shorter, or
+	// the scroller taller: settle it at the end of the text.
+	useEffect(() => {
+		const el = scrollRef.current;
+		const content = el?.firstElementChild;
+		if (!el || !content) return;
+		const ro = new ResizeObserver(() => lookAtCheckRef.current(true));
+		ro.observe(content);
+		ro.observe(el);
+		return () => ro.disconnect();
+	}, [scrollRef]);
+	// FORK (scroll into a check): use-stick-to-bottom aims at the end of the
+	// text while a check waits, not at the real bottom (it only ever slides
+	// down, so a learner already in the blank space is never pulled back up).
+	useIsoLayoutEffect(() => {
+		stickContext.targetScrollTop = (target) => (blankSpaceRef.current ? restingTarget(target, checkSpaceRef.current.extra) : target);
+		return () => { stickContext.targetScrollTop = null; };
+	}, [stickContext]);
+	// FORK (scroll into a check): the check opened (scrolled into, or its Open):
+	// the blank space is the open check's own from this step on.
+	const endCheckSpace = () => {
+		blankSpaceRef.current = false;
+		checkSpaceRef.current.extra = 0;
+	};
+
 	const reserveRef = useRef(0);
 	const offer = useCallback((blockH: number) => {
-		const next = blockH + GRADIENT_H;
+		// FORK (scroll into a check): while a check waits, reserve the open
+		// check's height already, and keep what lies beyond the folded dock below
+		// the resting point.
+		const open = blankSpaceRef.current ? openCheckHeightRef.current() : null;
+		const next = Math.max(blockH, open ?? 0) + GRADIENT_H;
+		noteCheckOfferRef.current(open === null ? null : blankSpaceExtra(Math.max(reserveRef.current, next), blockH, GRADIENT_H));
 		if (next <= reserveRef.current + 0.5 && pendingRef.current) return;
 		// Stamp growth at the source, including child-only field resizes, so
 		// stick-to-bottom's catch-up is not mistaken for the learner leaving.
@@ -2855,11 +2930,14 @@ export function DockOverlay({
 	const openOnArrivalRef = useRef(false);
 	const openAtOnce = (reveal: boolean) => {
 		if (reveal) setRevealed(true); // the teach-check invitation was accepted (W5)
+		if (reveal) endCheckSpace(); // FORK (scroll into a check)
 		setExpanded(true);
 		void suppressFoldDuringReveal();
 	};
 	const openDock = (reveal: boolean) => {
-		if (!atBottomRef.current) {
+		// FORK (scroll into a check): resting at the end of the text, a waiting
+		// check isn't at the real bottom yet: on a touch screen it glides there too.
+		if (!atBottomRef.current || (reveal && blankSpaceRef.current && checkSpaceRef.current.extra > 0)) {
 			if (stickState.animation) stopScroll();
 			if (dockTouch.glideToBottom()) {
 				openOnArrivalRef.current = reveal;
@@ -2905,14 +2983,18 @@ export function DockOverlay({
 
 	// Reaching the bottom again re-opens the dock (the fold machine below; and
 	// the end of a touch screen's glide, should a mute have hidden the arrival).
-	const arriveAtBottomRef = useRef(() => {});
-	arriveAtBottomRef.current = () => {
+	// FORK (scroll into a check): `intoCheck`, the learner scrolled down through
+	// a waiting check's blank space to the real bottom.
+	const arriveAtBottomRef = useRef<(intoCheck?: boolean) => void>(() => {});
+	arriveAtBottomRef.current = (intoCheck = false) => {
 		// Teach checks stay collapsed until the learner opens them (W5): the
 		// at-bottom auto-expand would pop the form over the teaching. A glide
-		// started by their Open is that opening (TOUCH, fork).
+		// started by their Open is that opening (TOUCH, fork), and so is
+		// scrolling on down into its blank space (FORK, scroll into a check).
 		if (requiresRevealRef.current && !revealedRef.current) {
-			if (!openOnArrivalRef.current) return;
+			if (!openOnArrivalRef.current && !intoCheck) return;
 			setRevealed(true);
+			endCheckSpace(); // FORK (scroll into a check)
 		}
 		openOnArrivalRef.current = false;
 		setExpanded(true);
@@ -2921,16 +3003,34 @@ export function DockOverlay({
 	useEffect(() => {
 		const el = scrollRef.current;
 		if (!el) return;
+		// FORK (scroll into a check): the learner reached the bottom of a waiting
+		// check's blank space during a mute below: look again once it is over,
+		// so the arrival isn't swallowed (only for a waiting check).
+		let recheck = 0;
+		const recheckAfterMutes = () => {
+			window.clearTimeout(recheck);
+			const wait = Math.max(geometryAtRef.current, growthAtRef.current) + 400 - Date.now();
+			recheck = window.setTimeout(() => {
+				if (!pendingRef.current || !blankSpaceRef.current || expandedRef.current) return;
+				if (Date.now() - Math.max(geometryAtRef.current, growthAtRef.current) < 400) { recheckAfterMutes(); return; }
+				const d = el.scrollHeight - el.clientHeight - el.scrollTop;
+				if (checkOpensOnScroll(checkSpaceRef.current, d, EXPAND_DIST)) arriveAtBottomRef.current(true);
+			}, Math.max(wait, 0) + 1);
+		};
 		const onScroll = () => {
 			if (!pendingRef.current) return;
+			// FORK (scroll into a check): where the lesson is, also during the mutes.
+			const waiting = blankSpaceRef.current;
+			if (waiting) lookAtCheckRef.current(false);
+			const intoCheck = waiting && !expandedRef.current && checkOpensOnScroll(checkSpaceRef.current, el.scrollHeight - el.clientHeight - el.scrollTop, EXPAND_DIST);
 			// Resize mute (owner, resize round): a geometry change re-clamps
 			// scrollTop and the browser emits the clamp as a scroll event —
 			// reading the transient position folded the box to the bar for a
 			// flicker. Real scrolling resumes after the brief mute window.
-			if (Date.now() - geometryAtRef.current < 400) return;
+			if (Date.now() - geometryAtRef.current < 400) { if (intoCheck) recheckAfterMutes(); return; }
 			// Growth mute (owner round, 2026-10-05): the transcript growing
 			// under a live turn is not the learner leaving.
-			if (Date.now() - growthAtRef.current < 400) return;
+			if (Date.now() - growthAtRef.current < 400) { if (intoCheck) recheckAfterMutes(); return; }
 			const d = el.scrollHeight - el.clientHeight - el.scrollTop;
 			if (expandedRef.current) {
 				// INTENT-GATED FOLD (owner ruling, 2026-10-05): distance alone
@@ -2939,11 +3039,11 @@ export function DockOverlay({
 				// left the bottom.
 				if (d > COLLAPSE_DIST && !expandIntentRef.current && !atBottomRef.current) setExpanded(false);
 			} else if (d < EXPAND_DIST) {
-				arriveAtBottomRef.current();
+				arriveAtBottomRef.current(intoCheck);
 			}
 		};
 		el.addEventListener("scroll", onScroll, { passive: true });
-		return () => el.removeEventListener("scroll", onScroll);
+		return () => { el.removeEventListener("scroll", onScroll); window.clearTimeout(recheck); };
 	}, [scrollRef, scrollToBottom]);
 
 	// The settled block height (gradient excluded), offered to the spacer.
@@ -2953,6 +3053,22 @@ export function DockOverlay({
 		const b = blockRef.current;
 		if (b) offer(b.getBoundingClientRect().height);
 	};
+	// FORK (scroll into a check): the waiting check's form rewrapping (a width
+	// change, fonts, late math) measures its blank space again; the reserve
+	// only grows, as always while a question owns the dock.
+	const measureBlockRef = useRef(measureBlock);
+	measureBlockRef.current = measureBlock;
+	useIsoLayoutEffect(() => {
+		if (!blankSpace) return;
+		const form = contentRef.current?.querySelector(`[${OPEN_FORM_ATTR}]`)?.firstElementChild;
+		if (!form) return;
+		const ro = new ResizeObserver(() => {
+			if (blankSpaceRef.current && shellRef.current?.getAnimations().length === 0) measureBlockRef.current();
+		});
+		ro.observe(form);
+		for (const el of form.querySelectorAll("[data-dock-scroll-area] > *")) ro.observe(el);
+		return () => ro.disconnect();
+	}, [blankSpace, mode]);
 
 	// The opening variant of a session appears instantly — the fade/rise is
 	// reserved for mid-session transitions.
