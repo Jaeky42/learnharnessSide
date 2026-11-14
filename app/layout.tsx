@@ -60,8 +60,7 @@ export async function generateViewport(): Promise<Viewport> {
 	};
 }
 
-// Also (fork, app/offscreen.css): ?offscreen=off turns off skipping off-screen messages, for this load only.
-const ELECTRON_MARK = "try{var d=document.documentElement;if(navigator.userAgent.indexOf('Electron')!==-1)d.classList.add('lh-electron');if(/[?&]offscreen=off(&|$)/.test(location.search))d.setAttribute('data-lh-offscreen','off')}catch(e){}";
+const ELECTRON_MARK = "if(navigator.userAgent.indexOf('Electron')!==-1)document.documentElement.classList.add('lh-electron')";
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
 	// The theme is server-rendered — its class AND its color variables —

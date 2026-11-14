@@ -33,7 +33,7 @@ function setup({ rows: specs, off = false, browserApis = true }: {
 		? `<div data-testid="user-message" id="r${i}"><p>learner ${i}</p></div>`
 		: spec.kind === "assistant" ? `<div class="is-assistant" id="r${i}"><p>teacher ${i}</p></div>`
 		: `<div class="card" id="r${i}"><p>card ${i}</p></div>`).join("");
-	const { window, document } = parseHTML(`<html${off ? ' data-lh-offscreen="off"' : ""}><body><div id="main"><div data-session-find-root="">${html}</div></div></body></html>`);
+	const { window, document } = parseHTML(`<html><body><div id="main"><div data-session-find-root="">${html}</div></div></body></html>`);
 	const main = document.getElementById("main") as unknown as HTMLElement;
 	const rows: Row[] = specs.map((spec, i) => ({
 		el: document.getElementById(`r${i}`) as unknown as HTMLElement,
@@ -296,7 +296,7 @@ describe("a jump into a skipped message", () => {
 });
 
 describe("when it does nothing more than the plain jump", () => {
-	it("the rule is off: one placement, no attribute, no frame", () => {
+	it("a browser that doesn't apply the rule: one placement, no attribute, no frame", () => {
 		const env = lesson({ off: true });
 		const target = env.passage(5);
 		scrollSessionTarget(target, env.main, env.context);
@@ -337,15 +337,14 @@ describe("when it does nothing more than the plain jump", () => {
 
 describe("the helper and app/offscreen.css name the same messages", () => {
 	const css = readFileSync(path.resolve(import.meta.dirname, "../app/offscreen.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
-	const prefix = 'html:not([data-lh-offscreen="off"]) ';
 	const selectorLists = [...css.matchAll(/([^{}@]+)\{[^{}]*content-visibility:\s*(auto|visible)[^{}]*\}/g)]
 		.map((m) => ({ value: m[2], selectors: (m[1] ?? "").split(",").map((s) => s.trim()) }));
 	it("the skipped messages are exactly OFFSCREEN_BLOCK_SELECTORS", () => {
 		const auto = selectorLists.filter((l) => l.value === "auto").flatMap((l) => l.selectors);
-		assert.deepEqual(auto, OFFSCREEN_BLOCK_SELECTORS.map((s) => prefix + s));
+		assert.deepEqual(auto, [...OFFSCREEN_BLOCK_SELECTORS]);
 	});
 	it("the draw attribute makes exactly those visible", () => {
 		const visible = selectorLists.filter((l) => l.value === "visible").flatMap((l) => l.selectors);
-		assert.deepEqual(visible, OFFSCREEN_BLOCK_SELECTORS.map((s) => `${prefix}${s}[${DRAW_ATTRIBUTE}]`));
+		assert.deepEqual(visible, OFFSCREEN_BLOCK_SELECTORS.map((s) => `${s}[${DRAW_ATTRIBUTE}]`));
 	});
 });

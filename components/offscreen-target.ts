@@ -26,13 +26,13 @@
  * a style in the lesson changes (its MutationObserver), which cost about 270
  * ms per change in a 950-message lesson.
  *
- * Does nothing beyond the plain jump when the rule is off (`?offscreen=off`),
- * when no message near the passage is skipped, and where the page has no
- * computed styles or animation frames (the tests' DOMs).
+ * Does nothing beyond the plain jump when no message near the passage is
+ * skipped (also where the browser doesn't know the rule), and where the page
+ * has no computed styles or animation frames (the tests' DOMs).
  */
 
 /** The messages app/offscreen.css lets the browser skip. The same two
- *  selectors as the stylesheet, without its `html:not(…)` switch;
+ *  selectors as the stylesheet;
  *  tests/offscreen-target.test.ts keeps the two equal. */
 export const OFFSCREEN_BLOCK_SELECTORS = [
 	'[data-session-find-root] > [data-testid="user-message"]',
@@ -98,8 +98,7 @@ export function revealOffscreenTarget(target: Range | HTMLElement, main: HTMLEle
 	const view = doc?.defaultView as Win | null | undefined;
 	const row = element?.closest<HTMLElement>(ROW) ?? null;
 	if (!main || !view || !doc || !row || !main.contains(row)
-		|| typeof view.getComputedStyle !== "function" || typeof view.requestAnimationFrame !== "function"
-		|| doc.documentElement.getAttribute("data-lh-offscreen") === "off") {
+		|| typeof view.getComputedStyle !== "function" || typeof view.requestAnimationFrame !== "function") {
 		place();
 		return;
 	}
