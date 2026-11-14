@@ -172,7 +172,7 @@ export function flingStep(v: number, frames = 1): number {
 	return Math.abs(next) < 0.5 ? 0 : next;
 }
 
-function scrollersUnder(target: EventTarget | null, root: HTMLElement): ScrollBox[] {
+export function scrollersUnder(target: EventTarget | null, root: HTMLElement): ScrollBox[] {
 	const out: ScrollBox[] = [];
 	for (let n = target as HTMLElement | null; n && n !== root; n = n.parentElement) {
 		if (!(n instanceof HTMLElement)) continue;
@@ -181,7 +181,7 @@ function scrollersUnder(target: EventTarget | null, root: HTMLElement): ScrollBo
 	return out;
 }
 
-function leaveAlone(target: EventTarget | null): boolean {
+export function leaveAlone(target: EventTarget | null): boolean {
 	return target instanceof Element && !!target.closest('textarea, input, select, [contenteditable="true"], .cm-editor');
 }
 

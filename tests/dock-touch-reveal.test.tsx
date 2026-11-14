@@ -61,6 +61,7 @@ Object.assign(globalThis, {
 
 const { useStickToBottom } = await import("use-stick-to-bottom");
 const { useDockTouchScroll, keyScrollsLesson, GLIDE_RETRIES } = await import("../components/phone/use-dock-touch-scroll.ts");
+const { usePushAtEnd, PUSH_GRACE_MS } = await import("../components/push-at-end.ts");
 
 // DockOverlay's thresholds (components/chat.tsx).
 const COLLAPSE_DIST = 96;
@@ -139,8 +140,9 @@ type Probe = {
 let probe: Probe;
 
 /** chat.tsx's wiring around the dock, copied. `teach`: a teach check waiting
- *  behind its Open invitation (requiresReveal). */
-function Harness({ teach = false }: { teach?: boolean }) {
+ *  behind its Open invitation (requiresReveal). `qkey`: the question's key
+ *  (chat.tsx's pendingId and mode); a new one lands as a fresh teach check. */
+function Harness({ teach = false, qkey = "q1" }: { teach?: boolean; qkey?: string }) {
 	const stick = useStickToBottom({ initial: "instant", resize: "smooth" });
 	const { scrollToBottom: libraryScrollToBottom, stopScroll, state: stickState, isAtBottom } = stick;
 	const scrollToBottom = () => {
@@ -159,6 +161,16 @@ function Harness({ teach = false }: { teach?: boolean }) {
 	revealedRef.current = revealed;
 	const atBottomRef = useRef(isAtBottom);
 	atBottomRef.current = isAtBottom;
+	// FORK (scroll opens a check): left the bottom since this question arrived.
+	const prevKeyRef = useRef(qkey);
+	const leftBottomRef = useRef(false);
+	if (qkey !== prevKeyRef.current) {
+		prevKeyRef.current = qkey;
+		leftBottomRef.current = false;
+		// revealArrival(false): a fresh check lands folded, behind its Open.
+		setExpanded(false);
+		setRevealed(false);
+	}
 	const expandIntentRef = useRef(false);
 	const intentTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 	const dockTouch = useDockTouchScroll(blockRef, stick.scrollRef, {
@@ -215,7 +227,7 @@ function Harness({ teach = false }: { teach?: boolean }) {
 	const arriveAtBottomRef = useRef(() => {});
 	arriveAtBottomRef.current = () => {
 		if (teach && !revealedRef.current) {
-			if (!openOnArrivalRef.current) return;
+			if (!openOnArrivalRef.current && !leftBottomRef.current) return;
 			setRevealed(true);
 		}
 		openOnArrivalRef.current = false;
@@ -241,6 +253,8 @@ function Harness({ teach = false }: { teach?: boolean }) {
 			const d = el.scrollHeight - el.clientHeight - el.scrollTop;
 			if (expandedRef.current) {
 				if (d > COLLAPSE_DIST && !expandIntentRef.current && !atBottomRef.current) setExpanded(false);
+			} else if (d > COLLAPSE_DIST && !atBottomRef.current) {
+				leftBottomRef.current = true;
 			} else if (d < EXPAND_DIST) {
 				arriveAtBottomRef.current();
 			}
@@ -248,6 +262,13 @@ function Harness({ teach = false }: { teach?: boolean }) {
 		el.addEventListener("scroll", onScroll, { passive: true });
 		return () => el.removeEventListener("scroll", onScroll);
 	}, [stick.scrollRef]);
+	usePushAtEnd(blockRef, stick.scrollRef, {
+		armed: !expanded,
+		armKey: qkey,
+		onPush: () => {
+			if (!expandedRef.current) openAtOnce(teach);
+		},
+	});
 	const stickScrollRef = stick.scrollRef;
 	const scrollRef = useCallback((el: HTMLDivElement | null) => {
 		if (el) fakeScroller(el);
@@ -260,6 +281,7 @@ function Harness({ teach = false }: { teach?: boolean }) {
 			</div>
 			<div ref={blockRef} id="dock">
 				<p id="pad">The dock around the question</p>
+				<textarea id="field" defaultValue="a text box in the dock" />
 				{!expanded && (revealPending
 					? <button id="open" type="button" onClick={() => openDock(true)}>Open</button>
 					: <button id="bar" type="button" onClick={() => openDock(false)}>Answer</button>)}
@@ -314,9 +336,9 @@ async function frame() {
 		await new Promise((r) => setTimeout(r, 2));
 	});
 }
-function touch(type: string, target: Element, y = 300, timeStamp = clock) {
+function touch(type: string, target: Element, y = 300, timeStamp = clock, x = 100) {
 	const e = new dom.window.Event(type, { bubbles: true, cancelable: true });
-	Object.assign(e, { touches: type === "touchend" ? [] : [{ clientX: 100, clientY: y }] });
+	Object.assign(e, { touches: type === "touchend" ? [] : [{ clientX: x, clientY: y }] });
 	Object.defineProperty(e, "timeStamp", { value: timeStamp });
 	// A touch on the lesson itself stops its momentum, as on an iPhone.
 	if (type === "touchstart" && target === scroller) momentum = 0;
@@ -789,7 +811,7 @@ describe("a tap on the folded question glides down into it (touch screen)", () =
 		assert.ok(distance() <= 2);
 	});
 
-	it("a teach check's glide stopped by the learner: the invitation stays, and reaching the bottom later doesn't open it", async () => {
+	it("a teach check's glide stopped by the learner: the invitation stays, and reaching the bottom later by hand opens it (scroll opens a check)", async () => {
 		await mount({ teach: true });
 		await tapOn("open");
 		await run(6);
@@ -797,13 +819,16 @@ describe("a tap on the folded question glides down into it (touch screen)", () =
 			touch("touchstart", $("lesson"));
 			touch("touchend", $("lesson"));
 		});
+		await run(4);
+		assert.equal(probe.revealed(), false, "stopped: the invitation stays");
+		assert.equal(probe.expanded(), false);
+		assert.ok($("open"));
 		await act(async () => {
 			scroller.scrollTop = scrollHeight;
 		});
 		await run(20);
-		assert.equal(probe.revealed(), false);
-		assert.equal(probe.expanded(), false);
-		assert.ok($("open"));
+		assert.equal(probe.revealed(), true);
+		assert.equal(probe.expanded(), true);
 	});
 
 	it("on a computer: the click opens at once and slides, as before", async () => {
@@ -895,5 +920,168 @@ describe("which keys stop a glide", () => {
 		assert.equal(keyScrollsLesson("PageUp", box, lesson, doc), false, "a text box keeps its keys");
 		assert.equal(keyScrollsLesson("PageUp", $("pad"), lesson, doc), false, "outside the lesson (the dock)");
 		assert.equal(keyScrollsLesson("a", doc.body, lesson, doc), false);
+	});
+});
+
+/** A wheel event on `target` (deltaMode 0: px). */
+async function wheel(target: Element, deltaY: number, { deltaMode = 0, ctrlKey = false } = {}) {
+	await act(async () => {
+		const e = new dom.window.Event("wheel", { bubbles: true, cancelable: true });
+		Object.assign(e, { deltaY, deltaMode, ctrlKey });
+		target.dispatchEvent(e);
+	});
+}
+/** A one-finger drag on `target`: `moves` are [dx, dy] steps from the start, one per frame. */
+async function drag(target: Element, moves: [number, number][], { x = 100, y = 400 } = {}) {
+	await act(async () => {
+		touch("touchstart", target, y, clock, x);
+	});
+	for (const [dx, dy] of moves) {
+		await act(async () => {
+			touch("touchmove", target, y + dy, clock, x + dx);
+		});
+		await frame();
+	}
+	await act(async () => {
+		touch("touchend", target, y, clock, x);
+	});
+	await frame();
+}
+/** Frames until the push's grace is over. */
+const pastGrace = () => run(Math.ceil(PUSH_GRACE_MS / 16) + 1);
+/** The learner scrolls by hand (up is negative), in two steps, as mount
+ *  does: use-stick-to-bottom has taken the first as leaving the bottom by the
+ *  time the fold machine reads the second. */
+async function scrollByHand(dy: number) {
+	await act(async () => {
+		scroller.scrollTop = top + dy - Math.sign(dy) * 30;
+	});
+	await frame();
+	await act(async () => {
+		scroller.scrollTop = top + Math.sign(dy) * 30;
+	});
+	await run(10);
+}
+async function toBottom() {
+	await act(async () => {
+		scroller.scrollTop = scrollHeight;
+	});
+	await run(10);
+}
+const closed = (label: string) => {
+	assert.equal(probe.expanded(), false, `${label}: still folded`);
+	assert.equal(probe.revealed(), false, `${label}: the invitation stays`);
+};
+const opened = (label: string) => {
+	assert.equal(probe.expanded(), true, `${label}: open`);
+	assert.equal(probe.revealed(), true, `${label}: revealed`);
+};
+
+describe("scrolling down opens a check, like any question (owner's ask)", () => {
+	it("a check never tapped: scrolled up past the fold distance and back to the bottom by hand, it opens, revealed", async () => {
+		await mount({ teach: true, from: 0 });
+		closed("at the bottom after mount");
+		await scrollByHand(-300);
+		closed("scrolled up");
+		await toBottom();
+		opened("back at the bottom");
+	});
+
+	it("the same after a session opened far up: reaching the bottom opens it", async () => {
+		await mount({ teach: true });
+		await toBottom();
+		opened("reached the bottom");
+	});
+
+	it("scrolled up less than the fold distance and back: it stays closed; then a finger push at the end opens it (on the lesson)", async () => {
+		await mount({ teach: true, from: 0 });
+		await scrollByHand(-80);
+		await toBottom();
+		closed("back from 80 px up");
+		await pastGrace();
+		await drag($("lesson"), [[0, -10], [0, -20], [0, -30]]);
+		opened("pushed on the lesson");
+	});
+
+	it("the same push on the dock opens it", async () => {
+		await mount({ teach: true, from: 0 });
+		await scrollByHand(-80);
+		await toBottom();
+		closed("back from 80 px up");
+		await pastGrace();
+		await drag($("pad"), [[0, -10], [0, -20], [0, -30]]);
+		opened("pushed on the dock");
+	});
+
+	it("at the bottom right after mount: scroll events, a tap, a drag the other way, a sideways drag and a drag from a text box leave it closed", async () => {
+		await mount({ teach: true, from: 0 });
+		for (let i = 0; i < 3; i++) {
+			await act(async () => {
+				scroller.dispatchEvent(new dom.window.Event("scroll"));
+			});
+			await frame();
+		}
+		closed("scroll events at the bottom");
+		await pastGrace();
+		await drag($("lesson"), []);
+		await drag($("pad"), []);
+		closed("a tap");
+		await drag($("lesson"), [[0, 20], [0, 40], [0, 60]]);
+		closed("a drag the other way");
+		await drag($("lesson"), [[30, -5], [40, -25], [45, -50]]);
+		closed("a sideways drag");
+		await drag($("field"), [[0, -10], [0, -30], [0, -50]]);
+		closed("a drag from a text box");
+		// A drag first one way, then a little back: the way down starts again.
+		await drag($("lesson"), [[0, -15], [0, 0], [0, -15]]);
+		closed("15 px, back, 15 px");
+	});
+
+	it("a wheel of 100 px down at the end opens it, after the grace; wheel events inside the grace don't, nor carry over", async () => {
+		await mount({ teach: true, from: 0 });
+		await wheel($("lesson"), 150);
+		closed("a wheel inside the grace");
+		await pastGrace();
+		await wheel($("lesson"), 50);
+		closed("50 px");
+		await wheel($("lesson"), 60);
+		opened("110 px in one go");
+	});
+
+	it("a wheel on the dock counts too; a pinch (ctrlKey) and a wheel up don't", async () => {
+		await mount({ teach: true, from: 0 });
+		await pastGrace();
+		await wheel($("pad"), 200, { ctrlKey: true });
+		closed("a pinch");
+		await wheel($("pad"), -200);
+		closed("a wheel up");
+		await wheel($("pad"), 120);
+		opened("a wheel down on the dock");
+	});
+
+	it("never while the dock is inert (a held session)", async () => {
+		await mount({ teach: true, from: 0 });
+		await pastGrace();
+		$("dock").parentElement!.setAttribute("inert", "");
+		await wheel($("lesson"), 300);
+		await drag($("lesson"), [[0, -10], [0, -30], [0, -50]]);
+		closed("inert");
+	});
+
+	it("a new check that lands while the lesson is at its bottom stays closed, even after the last one was opened by scrolling", async () => {
+		await mount({ teach: true });
+		await toBottom();
+		opened("the first check");
+		await act(async () => root!.render(<Harness teach qkey="q2" />));
+		await run(4);
+		closed("the new check");
+		for (let i = 0; i < 3; i++) {
+			await act(async () => {
+				scroller.dispatchEvent(new dom.window.Event("scroll"));
+			});
+			await frame();
+		}
+		await wheel($("lesson"), 300);
+		closed("scroll events and a wheel inside the grace");
 	});
 });
