@@ -595,6 +595,12 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 
 - **The desktop** keeps updating itself from this fork's releases, as now.
 - **The server updates automatically, nightly at 4 am** (the server's system time zone). A systemd timer (`deploy/install-update-timer.sh`) runs `deploy/update.sh`: `docker compose pull`, then `up -d`, which restarts only what changed. It catches up after downtime. `/data` (the vault included) lives on a volume and isn't touched.
+- **Updating the server from a phone: an iPhone Shortcut, no button in the app** (owner's choice of three, asked after the scroll-opens-check ship). The app runs in a container and can't restart itself, so an "Update now" button needs a way to the host.
+  - **Chosen:** a Shortcut on the owner's iPhone (Apple's "Run Script Over SSH" action) that logs in to the server and starts `deploy/update.sh` in the background. Nothing in the app or in `deploy/` changes. The owner has a set-up guide (an Artifact page); the steps follow Apple's action and weren't tried on an iPhone, the server command was tested with a stand-in script.
+    - The command it runs: `cd ~/learnharnessSide/deploy && { setsid nohup ./update.sh > ~/lh-update.log 2>&1 < /dev/null & echo "Update started. The site is back in a minute or two."; }`. It answers at once and the update goes on by itself, so a dropped connection can't stop it halfway; its output is in `lh-update.log` in that user's home folder.
+    - With a password login the password is kept in the Shortcut. With a key, the guide's line for `~/.ssh/authorized_keys` carries `restrict,command="…"`, so that key can only start the update.
+  - **Not chosen:** a button in Settings that leaves a request file in a folder shared with the host, where a systemd watcher runs the same script (the recommendation: the app could only ever ask for that one script; it needs one set-up command on the host); and a helper container with Docker access (third-party software with full control of the host, one step away from the app's agents).
+  - An update that changes files under `deploy/` still needs `git pull` on the server first, by hand.
 - **Version rule:**
   - The desktop and server exchange a sync protocol version on every sync.
   - If they don't match, sync **pauses**: the desktop keeps working locally and shows "Update the server to continue syncing".
