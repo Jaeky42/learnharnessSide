@@ -11,7 +11,11 @@
  *                  shells and overlays from it;
  *   --lh-vv-top    how far Safari panned the view; while the keyboard is up
  *                  the body moves down by that much (data-lh-keyboard), so
- *                  the app's top edge sits at the top of the screen.
+ *                  the app's top edge sits at the top of the screen;
+ *   data-lh-keyboard-up  on the body while the keyboard covers the bottom of
+ *                  the screen (keyboardMarker). app/phone.css drops the room
+ *                  kept for the home bar there, which the keyboard covers
+ *                  anyway, and hides the Tutor's bubble (owner's asks).
  *
  * Android shrinks the layout itself (interactive-widget=resizes-content in
  * the root layout's viewport), so there both values stay neutral.
@@ -77,6 +81,14 @@ export function keyboardUp(fit: { height: number; top: number }, innerHeight: nu
  *  the bottom behind the keyboard and is revealed as it slides away. */
 export function layoutHeight(visible: number, innerHeight: number, closing: boolean): number {
 	return closing ? Math.max(visible, innerHeight) : visible;
+}
+
+/** Pure rule, exported for tests: is the body marked data-lh-keyboard-up?
+ *  While the keyboard is up by its SIZE (not by focus alone, which comes
+ *  before the keyboard does), and not while it closes: the app then already
+ *  has its full height (layoutHeight), and the home bar's room with it. */
+export function keyboardMarker(keyboardBySize: boolean, closing: boolean): boolean {
+	return keyboardBySize && !closing;
 }
 
 /** Pure rule, exported for tests: how much taller the app should be than
@@ -157,6 +169,7 @@ export function PhoneViewport() {
 			root.style.removeProperty("--lh-vvh");
 			body.style.removeProperty("--lh-vv-top");
 			delete body.dataset.lhKeyboard;
+			delete body.dataset.lhKeyboardUp;
 			if (body.dataset.lhBleed !== undefined) {
 				delete body.dataset.lhBleed;
 				body.style.removeProperty("--lh-bleed");
@@ -189,6 +202,8 @@ export function PhoneViewport() {
 			const keyboardBySize = keyboardUp(fit, window.innerHeight);
 			const gap = keyboardBySize && !closing ? 0 : standaloneGap({ standalone, innerWidth: window.innerWidth, innerHeight: window.innerHeight, screenWidth: window.screen.width, screenHeight: window.screen.height, safeTop: standalone ? safeAreaTop() : 0 });
 			root.style.setProperty("--lh-vvh", `${layoutHeight(fit.height, window.innerHeight, closing) + gap}px`);
+			if (keyboardMarker(keyboardBySize, closing)) body.dataset.lhKeyboardUp = "";
+			else delete body.dataset.lhKeyboardUp;
 			const bleed = bleedFor({ userAgent: navigator.userAgent, standalone, keyboard: keyboardUp(fit, window.innerHeight, typing) });
 			if (bleed > 0) {
 				body.dataset.lhBleed = "";

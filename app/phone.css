@@ -285,6 +285,20 @@
 		padding-left: max(0.75rem, env(safe-area-inset-left, 0px));
 		padding-right: max(0.75rem, env(safe-area-inset-right, 0px));
 	}
+	/* While the keyboard is up (body[data-lh-keyboard-up], set by
+	   components/phone/phone-viewport.tsx) the bottom block sits just above
+	   it: the room kept for the home bar is under the keyboard anyway, and it
+	   left 46 points empty above the keyboard (owner's iPhone). */
+	html:not(.lh-electron) body[data-lh-keyboard-up] [data-phone="dock"] {
+		padding-bottom: 0.5rem;
+	}
+	/* "Thinking while reading" steps aside while the cursor is in the
+	   question's own box ("Your thinking" / "Your answer"), so the question
+	   gets its room (owner's ask). It stays mounted: what was typed in it is
+	   kept and still rides the answer. */
+	html:not(.lh-electron) [data-phone="dock"] [data-testid="reading-thinking-field"]:has(~ [data-attachment-composer] :is([data-testid="thinking-field"], [data-testid="answer-field"]) :focus) {
+		display: none;
+	}
 	html:not(.lh-electron) [data-phone="stats"] {
 		gap: 0.5rem;
 		padding-left: 0.25rem;
@@ -349,6 +363,13 @@
 		line-height: 1;
 	}
 
+	/* No bubble while the keyboard is up (owner's choice): the question block
+	   then reaches the top bar, and the bubble sat on the top bar's buttons.
+	   It is back the moment the keyboard closes. */
+	html:not(.lh-electron) body[data-lh-keyboard-up] [data-phone="tutor-bubble"] {
+		display: none;
+	}
+
 	/* ── Side tutor: bottom sheet ──────────────────────────────────────
 	   Anchored from the top (an iPhone keyboard covers the bottom edge),
 	   covering the lower three quarters of the visible height. */
@@ -380,6 +401,12 @@
 		padding-left: env(safe-area-inset-left, 0px);
 		padding-right: env(safe-area-inset-right, 0px);
 		animation: lh-phone-in-up 200ms ease;
+	}
+	/* Keyboard up: no home-bar strip under the typing row (it left 34 points
+	   empty above the keyboard), so the sheet paints only its handle strip. */
+	html:not(.lh-electron) body[data-lh-keyboard-up] [data-phone="tutor-sheet"] {
+		padding-bottom: 0;
+		background: linear-gradient(var(--lh-tutor-bar), var(--lh-tutor-bar)) top / 100% 0.75rem no-repeat;
 	}
 	html:not(.lh-electron) [data-phone="tutor-sheet"]::before {
 		content: "";

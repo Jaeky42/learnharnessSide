@@ -206,6 +206,42 @@ describe("the app follows the visible area when the iPhone keyboard is up", asyn
 	});
 });
 
+describe("the bottom block with the keyboard up (owner's iPhone)", async () => {
+	const { keyboardMarker, keyboardUp } = await import("../components/phone/phone-viewport.tsx");
+	const css = readCss("app/phone.css");
+	const rule = (selector: string) => {
+		const at = css.indexOf(`${selector} {`);
+		assert.notEqual(at, -1, `no rule for ${selector}`);
+		return css.slice(at, css.indexOf("}", at));
+	};
+	it("marks the body while the keyboard is up by its size, not by focus alone, and not while it closes", () => {
+		const iphone = 894;
+		assert.equal(keyboardMarker(keyboardUp({ height: 517, top: 0 }, iphone), false), true, "keyboard up");
+		assert.equal(keyboardMarker(keyboardUp({ height: iphone, top: 0 }, iphone), false), false, "keyboard down, or a box focused before the keyboard arrives");
+		assert.equal(keyboardMarker(keyboardUp({ height: 517, top: 0 }, iphone), true), false, "closing: the app already has its full height");
+		const src = readFileSync(path.join(root, "components/phone/phone-viewport.tsx"), "utf8");
+		assert.match(src, /if \(keyboardMarker\(keyboardBySize, closing\)\) body\.dataset\.lhKeyboardUp = "";\s+else delete body\.dataset\.lhKeyboardUp;/);
+	});
+	it("drops the home bar's room under the lesson's bottom block and the Tutor's sheet", () => {
+		assert.match(rule(`html:not(.lh-electron) [data-phone="dock"]`), /padding-bottom: calc\(0\.75rem \+ env\(safe-area-inset-bottom, 0px\)\)/, "keyboard down: as it was");
+		assert.match(rule(`html:not(.lh-electron) body[data-lh-keyboard-up] [data-phone="dock"]`), /padding-bottom: 0\.5rem;/);
+		const sheet = rule(`html:not(.lh-electron) body[data-lh-keyboard-up] [data-phone="tutor-sheet"]`);
+		assert.match(sheet, /padding-bottom: 0;/);
+		assert.doesNotMatch(sheet, /safe-area-inset-bottom/, "no home-bar strip painted under the typing row");
+	});
+	it("hides Thinking while reading only while the cursor is in the question's own box", () => {
+		const selector = `html:not(.lh-electron) [data-phone="dock"] [data-testid="reading-thinking-field"]:has(~ [data-attachment-composer] :is([data-testid="thinking-field"], [data-testid="answer-field"]) :focus)`;
+		assert.match(rule(selector), /display: none;/);
+		// The names that rule hangs on, in upstream's files.
+		assert.match(readFileSync(path.join(root, "components/reading-thinking.tsx"), "utf8"), /data-testid="reading-thinking-field"/);
+		assert.match(readFileSync(path.join(root, "components/chat.tsx"), "utf8"), /data-attachment-composer=""/);
+		assert.match(readFileSync(path.join(root, "components/question-dock.tsx"), "utf8"), /data-testid=\{qd\.mode === "text" \? "answer-field" : "thinking-field"\}/);
+	});
+	it("hides the Tutor's bubble while the keyboard is up", () => {
+		assert.match(rule(`html:not(.lh-electron) body[data-lh-keyboard-up] [data-phone="tutor-bubble"]`), /display: none;/);
+	});
+});
+
 describe("Safari tab bleed", async () => {
 	const { bleedFor, keyboardUp, BLEED_PX } = await import("../components/phone/phone-viewport.tsx");
 	const safari = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1";
