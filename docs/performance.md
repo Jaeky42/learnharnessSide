@@ -136,6 +136,8 @@ In a browser, after the build (headless Chromium, software rendering, a producti
 - The graph layout off the request thread (0.35 s of blocked server per extraction batch at 300 concepts).
 - The activity feed's scan (every session, then every job file per session).
 
+**The owner's word after trying it: "the performance is fine, id only want changes that have zero behavior impact".** So nothing below is asked for, and anything from this list that changes what the app does or shows is off the table unless the owner raises it: opening with only the recent part, pictures decoded lazily (a picture could show a moment late), and the editor and the Tutor loaded on demand (a first opening could wait). With no visible change at all: the per-message component (a large edit of upstream's lesson screen), the sync upload's duplicate work, the graph layout off the request thread and the activity feed's scan (all three on the server).
+
 **Decisions still the owner's:** opening a long lesson with only its recent part; syncing only what changed (protocol 4, server first); letting a helper's progress lines wait before a sync (the 2-second rule); pictures as their own files and old history archived (a stored format that syncs); installing the touch helpers only while needed; serving pictures by address; which pictures the model keeps seeing.
 
 ## Tests
