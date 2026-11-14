@@ -26,6 +26,7 @@ import type { ChatListItem } from "@/src/core";
 import { kbdEventForAction } from "@/src/core";
 import { notifySettingsSaved } from "@/components/settings-signal";
 import { useIsPhone } from "@/components/phone/use-phone";
+import { useSidebarSwipe } from "@/components/phone/sidebar-swipe"; // PHONE (swipe the drawer away)
 import { PluginWidgets } from "@/components/plugins";
 import { PluginSidebarActions } from "@/components/plugin-chrome";
 import { HostContentRootContext, HostRouteLifetimeProvider } from "@/components/host-content-root";
@@ -430,6 +431,14 @@ function SessionsSidebar() {
 	const interactions = useInteractionLayers();
 	const { open, toggle } = useSidebar();
 	const phone = useIsPhone();
+	// PHONE (swipe the drawer away): a swipe left on the open drawer closes it. Only ever closes.
+	const drawerRef = useRef<HTMLElement | null>(null);
+	const dimRef = useRef<HTMLDivElement | null>(null);
+	const openRef = useRef(open);
+	openRef.current = open;
+	useSidebarSwipe(drawerRef, dimRef, phone && open, () => {
+		if (openRef.current) toggle();
+	});
 	// Cloud sync (Phase 6): which sessions another device holds. Empty where sync isn't in use.
 	const cloud = useCloud();
 	const [chats, setChats] = useState<ChatListItem[] | null>(null);
@@ -684,8 +693,9 @@ function SessionsSidebar() {
 		<>
 		{/* PHONE: the dimmed area beside the open drawer; a tap closes it.
 		    Unstyled (and so invisible) outside app/phone.css's media query. */}
-		{phone && open && <div data-phone="backdrop" aria-hidden="true" onClick={toggle} />}
+		{phone && open && <div ref={dimRef} data-phone="backdrop" aria-hidden="true" onClick={toggle} />}
 		<aside
+			ref={drawerRef} // PHONE (swipe the drawer away): the swipe's listeners go on this
 			// PHONE hook: app/phone.css turns this into a slide-over drawer.
 			data-phone="sidebar"
 			data-open={open}
