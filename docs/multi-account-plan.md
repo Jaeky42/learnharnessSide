@@ -1,6 +1,6 @@
 # Plan: accounts on one server (several people, one address)
 
-**Status: a draft for the owner to approve. Nothing is built, and the owner does not want it built yet**: the plan is written so a later session can build it quickly. Per `AGENTS.md`: that session reads this, asks the owner whatever is listed under "To ask the owner at build time", gets the plan approved as it then stands, and only then builds. Change a decision recorded here only with the owner's approval.
+**Status: approved by the owner** ("I agree with everything"), with one change: 4 recovery codes, where the draft said 8. **Nothing is built, and nothing is to be built until the owner says so** ("do not build anything"): the plan is written so a later session can build it quickly. Approving the plan is not the word to start. That session reads this, waits for the owner's word to build, asks the owner whatever is listed under "To ask the owner at build time", and builds the plan as written; anything that has to differ from it goes back to the owner first. Change a decision recorded here only with the owner's approval.
 
 ## What was asked
 
@@ -114,7 +114,7 @@ Asked one at a time, each with pictures of the options.
 
 ### Forgot password
 
-- **Recovery codes:** 8 codes shown once when the account is made, each working once. "New recovery codes" in Settings → Account (with the password) replaces them all.
+- **Recovery codes:** 4 codes (the owner's number; the draft proposed 8) shown once when the account is made, each working once. "New recovery codes" in Settings → Account (with the password) replaces them all.
 - **The owner's reset code:** Reset on the Accounts screen gives a code that works once, for 24 hours.
 - Either one, with a new password, at the sign-in page. As a password change does today, it signs out every device of that account and unpairs its desktop apps (the gateway tells the copy).
 - The owner's own account: recovery codes too, and `reset-password` on the server as the last way in.
@@ -152,12 +152,13 @@ Asked one at a time, each with pictures of the options.
 - At the first start with no accounts, the gateway prints a one-time setup code to its log, as the app does today. The owner enters it and chooses a name and a password. Every browser signs in once more; the paired PC is untouched.
 - Before it: a copy of the server's data by hand, as for the 0.6.0 update.
 
-## Smaller rules (proposed here, approved with the plan)
+## Smaller rules (proposed in the plan, approved with it)
 
 - **The cap** is 4 accounts, the owner's included, on a 4 GB server; a setting in `deploy/.env`. Paused accounts count; removed ones don't. At the cap, two idle copies leave about 2 GB for work in progress.
 - **Memory ceiling** 1 GB per copy; **swap** on the server 2 GB. Both are first values to tune on the real server.
 - **Names:** 3 to 20 characters of a–z, 0–9 and dash; told apart without regard to capitals; a short list is reserved (admin, owner, root, api, login, setup and the like). A removed account's name stays taken for its 30 days.
 - **Invite codes:** once, 7 days, at most as many waiting as there are free slots.
+- **The owner's reset code:** once, 24 hours. **Recovery codes:** 4 per account.
 - **One lockout** covers passwords, invite codes, reset codes and recovery codes.
 - **What signs a person out everywhere:** a password change, either reset, Pause and Remove.
 - **Browser storage** is shared by accounts that use the same browser (window positions and the like). Before building, list what the app keeps there; anything that holds a person's content (an unsent draft) is cleared at sign-out.
@@ -168,7 +169,7 @@ Asked one at a time, each with pictures of the options.
 ## To ask the owner at build time
 
 - **Every word on the new screens**, with a drawing of each: the sign-in page with a name, the invite page, the recovery-code page, the reset page, Settings → Accounts, the new parts of Settings → Account, the confirm boxes, and each refusal ("This server is full.", "This account is paused.", a wrong or used code, a taken name). The drawings shown with the questions are drafts, not approved wording.
-- **The four numbers above** (cap, memory ceiling, swap, helpers at once), once the real server has been watched with two copies.
+- **Whether the four numbers above still fit** (cap, memory ceiling, swap, helpers at once), once the real server has been watched with two copies. They are approved as first values.
 - **The download's file type** (zip is proposed).
 - **Whether a person is told** on the invite page that the owner can pause, reset and remove their account but can't open it from the site.
 - **Which branch feeds it**, and when the owner's server and the desktop app get it.

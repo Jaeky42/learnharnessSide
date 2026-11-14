@@ -534,7 +534,7 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
   - plus a tag per commit.
   - It never creates a GitHub Release, so it can't affect desktop updates.
   - The package is **public**. GitHub creates it private, so set it to public once in the package settings.
-- Multi-user hosting isn't built. The owner has since asked for a plan: several accounts at one address, one container per account behind a gateway. It is a draft, with the owner's decisions, in `docs/multi-account-plan.md`; nothing is built and it is not to be built until the owner says so.
+- Multi-user hosting isn't built. The owner has since asked for a plan: several accounts at one address, one container per account behind a gateway. The plan, with the owner's decisions, is `docs/multi-account-plan.md`: approved by the owner, nothing built, and not to be built until the owner says so.
 
 ### Updates
 
