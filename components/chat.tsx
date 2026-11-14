@@ -41,6 +41,7 @@ import { dockStateKey } from "@/components/dock-state-key";
 import { clearOpeningPrompt, readOpeningPromptEntry, stashOpeningPrompt, OPENING_PROMPT_FAILURE } from "@/components/opening-prompt";
 import { forwardDockWheel, useDockHeight } from "@/components/dock-height";
 import { useDockTouchScroll } from "@/components/phone/use-dock-touch-scroll";
+import { usePushAtEnd } from "@/components/push-at-end";
 import { createDockMorph } from "@/components/dock-morph";
 import { QueuedSteersBody, type QueuedSteerLine } from "@/components/queued-steers";
 import { DictationBar, finishDictation, joinDictation, useDictation, type Dictation } from "@/components/dictation";
@@ -2590,9 +2591,14 @@ export function DockOverlay({
 	// measures the bar, the reserve keeps the composer's height, and the
 	// only motion is the teaching text itself.
 	const prevPendingIdRef = useRef(pendingId);
+	// FORK (scroll opens a check): has the learner left the bottom (by the fold
+	// rule's own distance) since this question arrived? Coming back then opens
+	// a check too, as any question; one that never left stays closed.
+	const leftBottomRef = useRef(false);
 	if (pendingId !== prevPendingIdRef.current) {
 		const wasQuestion = prevPendingIdRef.current !== null;
 		prevPendingIdRef.current = pendingId;
+		leftBottomRef.current = false;
 		if (pendingId && requiresReveal) {
 			const arrival = revealArrival(wasQuestion);
 			setExpanded(arrival.expanded);
@@ -2868,6 +2874,16 @@ export function DockOverlay({
 		}
 		openAtOnce(reveal);
 	};
+	// FORK (scroll opens a check): at the lesson's end, one more push down (a
+	// finger, a wheel) opens a folded question, as a tap on Open does there
+	// (components/push-at-end.ts).
+	usePushAtEnd(blockRef, scrollRef, {
+		armed: ownsDock && !expanded,
+		armKey: mode,
+		onPush: () => {
+			if (pendingRef.current && !expandedRef.current) openAtOnce(requiresRevealRef.current);
+		},
+	});
 	const expandAndReveal = () => openDock(true);
 	const expandAndRevealRef = useRef(expandAndReveal);
 	expandAndRevealRef.current = expandAndReveal;
@@ -2910,8 +2926,9 @@ export function DockOverlay({
 		// Teach checks stay collapsed until the learner opens them (W5): the
 		// at-bottom auto-expand would pop the form over the teaching. A glide
 		// started by their Open is that opening (TOUCH, fork).
+		// FORK (scroll opens a check): so is coming back after leaving the bottom.
 		if (requiresRevealRef.current && !revealedRef.current) {
-			if (!openOnArrivalRef.current) return;
+			if (!openOnArrivalRef.current && !leftBottomRef.current) return;
 			setRevealed(true);
 		}
 		openOnArrivalRef.current = false;
@@ -2938,6 +2955,8 @@ export function DockOverlay({
 				// needs the distance AND stick-to-bottom agreeing the learner
 				// left the bottom.
 				if (d > COLLAPSE_DIST && !expandIntentRef.current && !atBottomRef.current) setExpanded(false);
+			} else if (d > COLLAPSE_DIST && !atBottomRef.current) {
+				leftBottomRef.current = true; // FORK (scroll opens a check)
 			} else if (d < EXPAND_DIST) {
 				arriveAtBottomRef.current();
 			}
