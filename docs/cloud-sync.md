@@ -534,7 +534,7 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
   - plus a tag per commit.
   - It never creates a GitHub Release, so it can't affect desktop updates.
   - The package is **public**. GitHub creates it private, so set it to public once in the package settings.
-- Multi-user hosting isn't planned. If it's ever wanted, the approach is one container per user on one VPS, with no changes to the single-user app.
+- Multi-user hosting isn't built. The owner has since asked for a plan: several accounts at one address, one container per account behind a gateway. It is a draft, with the owner's decisions, in `docs/multi-account-plan.md`; nothing is built and it is not to be built until the owner says so.
 
 ### Updates
 
@@ -544,7 +544,6 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
   - The desktop and server exchange a sync protocol version on every sync.
   - If they don't match, sync **pauses**: the desktop keeps working locally and shows "Update the server to continue syncing".
   - Releases that change a data format are marked, so they're never applied to only one side.
-- Multi-user hosting isn't planned. If it's ever wanted, the approach is one container per user on one VPS, with no changes to the single-user app.
 
 ## Phases
 
