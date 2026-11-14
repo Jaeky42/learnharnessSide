@@ -176,6 +176,8 @@ Asked one at a time, each with pictures of the options.
 
 ## Build order
 
+**The detailed steps are in `docs/multi-account-build.md`:** the contracts between the pieces (variables, headers, routes, file shapes), and for each slice what to ask the owner first, which files and functions, the tests, the run, and who can build what side by side. This section is the summary.
+
 Each slice ends with its tests, a run of real containers, and a commit. Risk is high throughout (sign-in, one person's data reaching another, rights over Docker): the implementer is the complex one, and each of slices 1 to 3 gets one independent deep review.
 
 0. **Proof first:** Caddy, a stand-in gateway and two copies in Docker. Shows: the gateway's answer picks the copy; a lesson stream, the events channel and a 26 MB upload pass untouched; a client-sent `X-LH-*` header is ignored. If it can't be made to hold, the gateway carries the requests itself and the rest of the plan stands.
