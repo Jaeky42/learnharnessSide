@@ -2,7 +2,7 @@
 
 The owner's report: the app lags when a session gets long, on the Windows app, the iPhone and the iPad. What lags: scrolling a long lesson, opening one, and coming back to the app after a while. Not reported: typing, a choppy stream, or a wait after Send. Later added: lessons where Drawing Pad pictures were sent to the teacher are worse.
 
-**State:** step 1 and the off-screen rule are built on `claude/upstream-0.6.0` and pushed there. Not shipped to either release branch (that needs the owner's word, as always). No sync protocol change and no stored format change: the protocol stays 3, the chat format 2. Change a decision recorded here only with the owner's approval.
+**State:** step 1, the off-screen rule and the fix for jumps under it are built on `claude/upstream-0.6.0` and pushed there. Not shipped to either release branch (that needs the owner's word, as always). No sync protocol change and no stored format change: the protocol stays 3, the chat format 2. Change a decision recorded here only with the owner's approval.
 
 ## What the audit found
 
@@ -49,16 +49,39 @@ Measured on a production build in headless Chromium, against synthetic sessions 
 
 ### The off-screen rule
 
-- `app/offscreen.css` (fork-owned, unlayered): `content-visibility: auto; contain-intrinsic-size: auto 600px` on the learner's rows and the assistant's messages directly in the transcript column (`[data-session-find-root] > [data-testid="user-message"]`, `> .is-assistant`). Every message stays loaded and in the page; only layout and painting of off-screen blocks is put off.
-- **Not** on phase dividers, cards and placeholders (a 600 px estimate would inflate the scrollbar), and the dock spacer is a sibling of the column.
+- `app/offscreen.css` (fork-owned, unlayered): `content-visibility: auto` on the learner's rows and the assistant's messages directly in the transcript column (`[data-session-find-root] > [data-testid="user-message"]`, `> .is-assistant`). Every message stays loaded and in the page; only layout and painting of off-screen blocks is put off.
+- **Size estimates per kind** (`contain-intrinsic-size: auto …`): 60 px for the learner's rows (100 px in the phone layout), 700 px for the assistant's messages on every width. They are the mean heights measured in the 950-message test lesson. A message drawn once keeps its real height ("auto").
+  - The first build had a flat 600 px for both: the scrollbar started 37% too long on a computer. With these: 4% too long on a computer, 32% too short at iPhone size.
+  - **Not 1,000 px for the assistant on a phone** (the plan's number, its mean there): with it a lesson opened 38 px short of its bottom at iPhone size, 3 of 3 loads; with 700 px, 0–1 px in 20 of 20.
+  - **Lower estimates don't help**: 44 / 140 px (below most real heights) was tried against the scroll faults below and did worse (the glide failed 14 of 30 at iPhone size; the scrollbar started 63–70% short).
+- **Not** on phase dividers, cards and placeholders (a message-sized estimate would inflate the scrollbar), and the dock spacer is a sibling of the column.
 - On by default on every device, the desktop app included.
-- **Temporary off switch** for the owner's trial: `?offscreen=off` in the address sets `data-lh-offscreen="off"` on `<html>` before the first paint, for that page load (the inline script in `app/layout.tsx`). To be removed once the owner is happy.
-- **Only the owner's devices can show** how Safari's own Find and selection treat skipped blocks, how the scrollbar behaves, and how the slide to the bottom feels.
+- **Temporary off switch** for the owner's trial: `?offscreen=off` in the address sets `data-lh-offscreen="off"` on `<html>` before the first paint, for that page load (the inline script in `app/layout.tsx`). It works only where there is an address bar (a browser tab), and isn't remembered. To be removed once the owner is happy.
+
+#### Jumps into a message that isn't drawn
+
+- **The fault** (found by the browser checks of the first build): inside a skipped message a passage measures as zeros (`Range.getBoundingClientRect()`), so upstream's `scrollSessionTarget` scrolled nowhere near it. The app's Find showed the match in 1 of 14 steps, the Tutor's "Show in the lesson" landed in 1 of 3 tries. A link to a message (the hash) was fine: the message's own box has its estimate.
+- **The fix** (owner's choice, over leaving the rule off by default and over removing it): `components/offscreen-target.ts`, called from one edited place in upstream's `components/session-navigation.tsx` (`scrollSessionTarget`; its loop moved into `placeSessionTarget`). Every jump goes through it: Find, citations and the Tutor's quotes, links to a message.
+  - Before the jump measures, the target's message gets `data-lh-draw`, which the stylesheet answers with `content-visibility: visible`. So do the skipped messages the jump brings on screen, and those up to two window heights above (the browser draws those by itself a few frames later, and without scroll anchoring their real heights would move the passage: about 440 px in the stand-in run).
+  - Once the passage and the lesson's height have been still for 3 frames (at least 4 frames, at most 20), the passage is measured again and put back **once** if it moved. Then the attribute comes off; with no frame for 1 s (a hidden tab) it comes off anyway.
+  - **Not after the learner's own input**: a wheel, a touch, a press or a scrolling key anywhere on the page, or another jump, cancels the check. It listens on the whole page because a wheel or a drag on the dock scrolls the lesson from script (the first version listened on the lesson only, and a wheel over the dock was undone 9 of 9 times).
+  - An attribute, not an inline style: Find re-reads every match when a style in the lesson changes, which cost two tasks of about 270 ms per step.
+  - It does nothing with the rule off, when no message near the passage is skipped, and in the tests' DOMs.
+- **Checked by a second analyst** (950 messages, a computer and iPhone size, rule on against off): Find 14 of 14 forward and backward, also stepping fast and typing a new search during a settle; the Tutor's quotes 3 of 3 from the bottom and from the top; links to a message at 16–17 px; no attribute left behind; opening at the bottom in 80 of 80 loads; a streamed reply followed the same on and off; with the rule off everything as before the fix. A citation jump wasn't run (the data has none).
+
+#### Known faults with the rule on
+
+- **Scroll anchoring is what makes the rule comfortable.** When a message above the screen takes its real height, Chromium moves the scroll position so the view stays still. With anchoring switched off (a stand-in for a browser without it), scrolling up through never-drawn messages gave 226 layout shifts on a computer (largest 797 px) and 274 at iPhone size, against 1 and 8 with the rule off. Whether the owner's Safari anchors could not be confirmed from here.
+- **The fork's glide to the bottom** (touch: a tap on the folded question from far up) took an anchoring correction for the learner stopping it: 4 of 40 runs at iPhone size stopped 12.7k–23.5k px short, the question still folded; 0 of 20 with the rule off. The owner chose to fix the glide's rule; see "A tap on the folded question ends at the bottom, open" in `docs/cloud-sync.md`.
+- **The computer's slide to the bottom** (upstream's `use-stick-to-bottom`): 2 of 50 runs stopped far short in the first two rounds, 0 of 100 in the third; 0 with the rule off throughout. Read from the library: its guard against taking a resize for the learner's scroll is reset by comparing values, so two equal resize differences in a row let the next correction count as a scroll up. Not changed: it is upstream's dependency.
+- **Only the owner's devices can show** whether Safari anchors, how Safari's own Find and selection treat skipped messages (a WebKit report says its Find doesn't search them), how the scrollbar behaves, and how the slide to the bottom feels.
 
 ## Rulings made while building (for the owner to review)
 
 - **A picture attached to a practice "thinking" note leaves no trace in a summary**, as before. The marker was decided for two places; this third one was left as it is.
 - **The off-screen rule is narrower than the one the audit measured** (which was every direct child of the transcript). Its gain was measured again; see "Measured".
+- **The jump fix does more than the plan's sentence** ("draw the target message, measure, check once a frame later"): it also draws the skipped messages around the target, and waits for the layout to settle (up to 20 frames) before its one check. Both came from the browser runs.
+- **700 px, not 1,000 px, for the assistant's messages on a phone** (above). The plan named 1,000.
 - **No diagram cache.** One was built and removed after review: mermaid queues renders but applies its configuration at once, so a quick theme switch could leave a chart drawn in the wrong theme in the cache. `components/mermaid-render.ts` is upstream's, unchanged.
 - **Whole parsed sessions are not kept in the server's memory between requests.** It would save the most parsing, but any code that modifies a session it was handed would corrupt the shared copy.
 - **`?only=stamp` reads the session once on the server.** It saves the download and the page's work, not the server's parse.
@@ -99,6 +122,7 @@ In a browser, after the build (headless Chromium, software rendering, a producti
 - **The off-screen rule** is what speeds up opening (style recalculation 2.16 s → 0.83 s) and ordinary scrolling (hit-testing down 94%). It adds layout, pre-paint and IntersectionObserver work while scrolling (layout at 4×: 58 → 481 ms per 60 steps) and two style recalculations a second at idle (20–250 ms per 45 s).
 - **Not changed by either:** the one hydration task at opening (14–16 s at 4×), and a lesson of 95 messages (no gain).
 - `?only=stamp` costs the server about half a full read (38 ms against 78 ms at 950 messages): it parses the file once.
+- **With the per-kind estimates and the jump fix** (a second analyst's runs, another day's machine load, so compare on with off, not with the table): opening 6.9 s on against 8.3 s off; 60 wheel steps at 4×: main thread 3.2 s against 4.7–5.8 s, hit-testing 0.13 s against 2.4–3.1 s. A Find step takes about 520 ms on against 490 ms off.
 - No run of the new build at 2,850 messages, and none with a real model.
 
 ## Not built (the audit's other recommendations)
@@ -118,7 +142,7 @@ In a browser, after the build (headless Chromium, software rendering, a producti
 - The route, the stamp, signatures, the caches and the sweep: `tests/chat-browser-route.test.ts`, `tests/chat-job-caches.test.ts`.
 - The page's stamp rule and the catch-up: `tests/session-stamp.test.ts`; no re-render for the same data: `tests/refetch-unchanged.test.tsx`; the sync status selectors: `tests/cloud-state-selectors.test.tsx`.
 - Rendering: `tests/active-problem-index.test.ts` (against a copy of the old logic), `tests/math-delims-cache.test.ts`.
-- The off-screen rule and its switch: `tests/offscreen-rule.test.ts`.
+- The off-screen rule, its estimates and its switch: `tests/offscreen-rule.test.ts`; jumps into a skipped message (a scripted lesson whose passages measure as zeros until drawn; the one check; the learner's input, on the dock too; the selectors kept equal to the stylesheet's): `tests/offscreen-target.test.ts`.
 - Notes: a 300-note vault compared with the per-link loop, in `tests/notes-core.test.ts`.
 
 ## Development notes

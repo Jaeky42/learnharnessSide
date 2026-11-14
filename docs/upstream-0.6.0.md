@@ -264,6 +264,7 @@ Protocol 2 means both sides must be updated, or sync pauses (nothing is discarde
     - `components/session-core.ts`, `session.ts`: `stamp` on the record, `rememberStamp`, `knownStamp`, `recordUnchanged`, `readUsage`, `canonicalNow`, `sameJsonValue`;
     - `components/use-side-thread.ts`, `sidebar.tsx`: an equal list sets no state; `components/extraction-coverage.tsx`, `model-picker.tsx`: read their one field;
     - `app/layout.tsx`: imports `offscreen.css`; the inline head script also sets `data-lh-offscreen="off"` for `?offscreen=off`;
+    - `components/session-navigation.tsx`: `scrollSessionTarget` hands its measuring and scrolling (now `placeSessionTarget`) to `revealOffscreenTarget` (`components/offscreen-target.ts`), so a jump into a message the off-screen rule skipped lands;
     - upstream's tests whose scripted server now answers `?only=settings`: `tests/stats-cache-interaction.test.tsx`, `stats-meter-interaction.test.tsx`, `model-catalog-setup.test.tsx`, `claude-code-context-ui.test.tsx`.
     - The off-screen rule hangs on upstream's markup (`data-session-find-root`, `data-testid="user-message"`, the `is-assistant` class); `tests/offscreen-rule.test.ts` pins the rule and its switch.
   - The phone styling of Flashcards and Rich code blocks hangs on upstream's class names and markup from the fork's own stylesheets; `tests/phone-flashcards.test.ts`, `tests/phone-flashcards-structure.test.tsx` and `tests/phone-rich-code-blocks.test.tsx` fail when one of those names or structures changes upstream.
