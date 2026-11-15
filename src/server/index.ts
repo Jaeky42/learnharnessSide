@@ -90,6 +90,8 @@ export {
 	signOutEverywhereResponse,
 	unpairAllResponse,
 } from "./server-auth.ts";
+// Multi-account: Download my data (a .zip of this copy's data folder).
+export { accountExportResponse } from "./account-export.ts";
 // Claude sign-in on the cloud server (side-tutor fork, cloud sync Phase 2).
 export { claudeLoginStatusResponse, claudeLoginControlResponse, claudeLoginOpenResponse } from "./claude-login-http.ts";
 export { obsidianStatusResponse, obsidianControlResponse } from "./obsidian-sync-http.ts";

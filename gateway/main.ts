@@ -1,0 +1,181 @@
+/**
+ * The gateway program (docs/multi-account-plan.md "The pieces"): accounts,
+ * sign-in sessions and `/gate`, which tells Caddy whose copy each request
+ * belongs to. Plain node:http, no Next, no dependencies; bundled into one
+ * file by scripts/build-gateway.mjs and started as `lh-gateway`. Only Caddy
+ * can reach it (the `front` network).
+ *
+ *   lh-gateway               serve (PORT, default 9000)
+ *   lh-gateway reset-owner   the owner's last way back in (next slice)
+ *
+ * At a start with no owner yet it prints a one-time setup code to its log,
+ * as the single-copy server does today.
+ */
+
+import http from "node:http";
+import { pathToFileURL } from "node:url";
+import { hasOwner, issueSetupCode } from "../src/core/accounts.ts";
+import { ConfigError, loadConfig, type GatewayConfig } from "./config.ts";
+import { createRelay, createUnpairer, type Relay, type Unpairer } from "./copies.ts";
+import { NO_STORE } from "./gate.ts";
+import { BASE_ROUTES, handleRequest, type RouteDeps, type RouteTable } from "./routes.ts";
+import { createStore, StateDamagedError, type GatewayStore } from "./state.ts";
+
+/** Every request body the gateway takes is small (sign-in, a pairing code). */
+export const BODY_LIMIT_BYTES = 16 * 1024;
+const HEADERS_TIMEOUT_MS = 10_000;
+const REQUEST_TIMEOUT_MS = 30_000;
+const KEEP_ALIVE_TIMEOUT_MS = 5_000;
+
+/** Today's lines (src/server/server-auth.ts `announceSetupCode`), the code fresh at every start while no owner exists. */
+export function announceSetupCode(store: GatewayStore, log: (line: string) => void = console.log): void {
+	try {
+		const code = store.update((state) => {
+			if (hasOwner(state)) return { state: null, result: null };
+			const issued = issueSetupCode(state);
+			return issued.ok ? { state: issued.state, result: issued.code } : { state: null, result: null };
+		});
+		if (code) {
+			log("[LearnHarness] No password is set yet.");
+			log(`[LearnHarness] Setup code: ${code}`);
+			log("[LearnHarness] Open the site, enter this code and choose a password.");
+		}
+	} catch (error) {
+		if (error instanceof StateDamagedError) log("[LearnHarness] The server login file is damaged. Run reset-password on the server.");
+		else log("[LearnHarness gateway] The state file couldn't be written.");
+	}
+}
+
+class TooLarge extends Error {}
+
+async function readLimited(req: http.IncomingMessage, limit: number): Promise<Buffer> {
+	const declared = Number(req.headers["content-length"] ?? "0");
+	if (Number.isFinite(declared) && declared > limit) throw new TooLarge();
+	const chunks: Buffer[] = [];
+	let size = 0;
+	for await (const chunk of req) {
+		size += (chunk as Buffer).length;
+		if (size > limit) throw new TooLarge();
+		chunks.push(chunk as Buffer);
+	}
+	return Buffer.concat(chunks);
+}
+
+function toHeaders(req: http.IncomingMessage): Headers {
+	const headers = new Headers();
+	for (let i = 0; i < req.rawHeaders.length; i += 2) {
+		try { headers.append(req.rawHeaders[i]!, req.rawHeaders[i + 1]!); } catch { /* a header fetch can't carry */ }
+	}
+	return headers;
+}
+
+async function send(res: http.ServerResponse, response: Response, head: boolean): Promise<void> {
+	const cookies = response.headers.getSetCookie();
+	for (const [name, value] of response.headers) {
+		if (name !== "set-cookie") res.setHeader(name, value);
+	}
+	if (cookies.length) res.setHeader("set-cookie", cookies);
+	res.statusCode = response.status;
+	const body = head || response.body === null ? null : Buffer.from(await response.arrayBuffer());
+	res.end(body ?? undefined);
+}
+
+/** The listener; `handle` is the route table's dispatcher. */
+export function createServer(handle: (request: Request) => Promise<Response>): http.Server {
+	const server = http.createServer((req, res) => {
+		void (async () => {
+			const head = req.method === "HEAD";
+			try {
+				const method = req.method ?? "GET";
+				const body = method === "GET" || method === "HEAD" ? undefined : await readLimited(req, BODY_LIMIT_BYTES);
+				// The path is the gateway's own: the request's Host never decides where it is routed.
+				const url = new URL(req.url ?? "/", "http://gateway.invalid");
+				const request = new Request(url, { method, headers: toHeaders(req), body: body && body.length ? new Uint8Array(body) : undefined });
+				await send(res, await handle(request), head);
+			} catch (error) {
+				const status = error instanceof TooLarge ? 413 : 400;
+				if (!res.headersSent) {
+					res.writeHead(status, { ...NO_STORE, "Content-Type": "application/json", Connection: "close" });
+					res.end(status === 413 ? JSON.stringify({ error: "Expected JSON." }) : undefined);
+				} else {
+					res.destroy();
+				}
+			}
+		})();
+	});
+	server.headersTimeout = HEADERS_TIMEOUT_MS;
+	server.requestTimeout = REQUEST_TIMEOUT_MS;
+	server.keepAliveTimeout = KEEP_ALIVE_TIMEOUT_MS;
+	return server;
+}
+
+export interface Gateway {
+	server: http.Server;
+	deps: RouteDeps;
+	stop(): Promise<void>;
+}
+
+/** Builds and starts the gateway (tests pass a stand-in relay and port 0). */
+export async function startGateway(config: GatewayConfig, options: { relay?: Relay; unpairer?: Unpairer; routes?: RouteTable; log?: (line: string) => void; now?: () => number; listen?: boolean } = {}): Promise<Gateway> {
+	const log = options.log ?? ((line: string) => console.log(line));
+	const store = createStore(config.stateFile);
+	const relay = options.relay ?? createRelay(config);
+	const unpairer = options.unpairer ?? createUnpairer({ store, relay, config, log });
+	const deps: RouteDeps = { store, config, relay, unpairer, now: options.now ?? Date.now, log };
+	announceSetupCode(store, log);
+	const stopRetries = unpairer.start();
+	const server = createServer((request) => handleRequest(request, deps, options.routes ?? BASE_ROUTES));
+	if (options.listen !== false) await new Promise<void>((resolve) => server.listen(config.port, resolve));
+	return {
+		server, deps,
+		stop: () => new Promise<void>((resolve) => {
+			stopRetries();
+			server.close(() => resolve());
+			server.closeIdleConnections?.();
+		}),
+	};
+}
+
+/** Sub-commands (`lh-gateway <name>`); the next slice fills reset-owner. */
+export const SUBCOMMANDS: Record<string, (args: string[]) => Promise<number>> = {
+	"reset-owner": async () => {
+		console.error("lh-gateway reset-owner: not available in this build.");
+		return 1;
+	},
+};
+
+export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
+	const [command, ...args] = argv;
+	if (command !== undefined) {
+		const run = Object.hasOwn(SUBCOMMANDS, command) ? SUBCOMMANDS[command] : undefined;
+		if (!run) {
+			console.error(`lh-gateway: unknown command. Commands: ${Object.keys(SUBCOMMANDS).join(", ")}.`);
+			return 2;
+		}
+		return run(args);
+	}
+	let config: GatewayConfig;
+	try {
+		config = loadConfig();
+	} catch (error) {
+		if (error instanceof ConfigError) {
+			console.error(`[LearnHarness gateway] Not started: ${error.message}`);
+			return 1;
+		}
+		throw error;
+	}
+	const gateway = await startGateway(config);
+	console.log(`[LearnHarness gateway] Listening on port ${config.port}.`);
+	const stop = () => {
+		void gateway.stop().then(() => process.exit(0));
+		setTimeout(() => process.exit(0), 10_000).unref();
+	};
+	process.once("SIGTERM", stop);
+	process.once("SIGINT", stop);
+	return new Promise<number>(() => { /* runs until a signal */ });
+}
+
+const entry = process.argv[1];
+if (entry && import.meta.url === pathToFileURL(entry).href) {
+	void main().then((code) => process.exit(code));
+}

@@ -103,6 +103,12 @@ export interface AccountRecord {
 	/** "host:3000" of the account's copy; null while the copy is being made. */
 	upstream: string | null;
 	gateSecret: string | null;
+	/**
+	 * Present (true) only while the copy still has to be told to unpair its
+	 * desktop apps (after a password change, a reset, Sign out everywhere,
+	 * Pause, Remove). Its sync requests get 503 until it is cleared.
+	 */
+	unpairPending?: true;
 }
 
 export interface GatewaySession extends SessionRecord {
@@ -179,11 +185,13 @@ function parseAccount(raw: unknown): AccountRecord {
 	if (raw.removedAt !== null && !isNum(raw.removedAt)) return bad("account");
 	if (raw.upstream !== null && !isStr(raw.upstream)) return bad("account");
 	if (raw.gateSecret !== null && !isStr(raw.gateSecret)) return bad("account");
+	if (raw.unpairPending !== undefined && raw.unpairPending !== true) return bad("account");
 	return {
 		id: raw.id, tag: raw.tag as string | null, name: raw.name, nameKey: raw.nameKey, password: parsePassword(raw.password),
 		recoveryCodes: [...(raw.recoveryCodes as string[])], role, state, createdAt: raw.createdAt,
 		lastSeenAt: raw.lastSeenAt as number | null, removedAt: raw.removedAt as number | null,
 		upstream: raw.upstream as string | null, gateSecret: raw.gateSecret as string | null,
+		...(raw.unpairPending === true ? { unpairPending: true as const } : {}),
 	};
 }
 
@@ -362,6 +370,15 @@ function withFailure(state: GatewayState, address: string, now: number): Gateway
 
 function withoutFailures(state: GatewayState, address: string): GatewayState {
 	return state.lockouts[address] ? { ...state, lockouts: clearFailures(shim(state), address).lockouts } : state;
+}
+
+/**
+ * A wrong attempt the gateway judges outside these rules (a pairing code of
+ * no copy's shape): recorded in the one lockout. `waitMs` > 0 when it tripped the pause.
+ */
+export function recordWrongAttempt(state: GatewayState, address: string, now: number): { state: GatewayState; waitMs: number } {
+	const next = withFailure(state, address, now);
+	return { state: next, waitMs: lockWait(next, address, now) };
 }
 
 function locked(state: GatewayState, wait: number): Fail<"locked"> {
@@ -819,6 +836,27 @@ export function eraseAccount(state: GatewayState, accountId: string): GatewaySta
 		sessions: state.sessions.filter((s) => s.accountId !== accountId),
 		resets: state.resets.filter((r) => r.accountId !== accountId),
 	};
+}
+
+// ─── Unpairing a copy's desktop apps ─────────────────────────────────────────
+
+/** Marks the account's copy as owing an unpair-all (idempotent; same object when nothing changes). */
+export function markUnpairPending(state: GatewayState, accountId: string): GatewayState {
+	const account = findAccount(state, accountId);
+	if (!account || account.unpairPending) return state;
+	return withAccount(state, { ...account, unpairPending: true });
+}
+
+/** The copy confirmed the unpair-all (same object when nothing changes). */
+export function clearUnpairPending(state: GatewayState, accountId: string): GatewayState {
+	const account = findAccount(state, accountId);
+	if (!account || !account.unpairPending) return state;
+	const { unpairPending: _done, ...rest } = account;
+	return withAccount(state, rest);
+}
+
+export function unpairPendingAccounts(state: GatewayState): AccountRecord[] {
+	return state.accounts.filter((a) => a.unpairPending === true);
 }
 
 // ─── Views ───────────────────────────────────────────────────────────────────
