@@ -9,8 +9,9 @@
  * Every POST checks the same-site rule itself. A damaged state file answers
  * 503 everywhere it is needed (the site closes; it is never read as empty).
  *
- * The next slices add /invite, /reset, recovery codes, delete-account and
- * /api/accounts: `handleRequest(request, deps, { ...BASE_ROUTES, ...more })`.
+ * The account lifecycle's routes (/invite, /reset, recovery codes,
+ * delete-account, /api/accounts) are in ./account-routes.ts and
+ * ./owner-routes.ts; ./main.ts serves them all (`ALL_ROUTES`).
  */
 
 import {
@@ -63,8 +64,8 @@ export interface RouteDeps {
 	log: (line: string) => void;
 }
 
-export type Handler = (request: Request, deps: RouteDeps) => Promise<Response>;
-export type RouteTable = Record<string, Partial<Record<"GET" | "POST", Handler>>>;
+export type Handler<D extends RouteDeps = RouteDeps> = (request: Request, deps: D) => Promise<Response>;
+export type RouteTable<D extends RouteDeps = RouteDeps> = Record<string, Partial<Record<"GET" | "POST", Handler<D>>>>;
 
 // ─── Cookies ─────────────────────────────────────────────────────────────────
 
@@ -87,8 +88,14 @@ export const signedOutCookies = (): string[] => [clearedSessionCookie(), cleared
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-export function json(body: unknown, status = 200, cookies: string[] = []): Response {
-	const headers = new Headers({ ...NO_STORE, "Content-Type": "application/json" });
+/**
+ * On every answer that starts or ends a sign-in: a shared browser must not
+ * show pages cached from the previous person's copy to the next one.
+ */
+export const CLEAR_SITE_CACHE: Record<string, string> = { "Clear-Site-Data": "\"cache\"" };
+
+export function json(body: unknown, status = 200, cookies: string[] = [], extra: Record<string, string> = {}): Response {
+	const headers = new Headers({ ...NO_STORE, "Content-Type": "application/json", ...extra });
 	for (const cookie of cookies) headers.append("Set-Cookie", cookie);
 	return new Response(JSON.stringify(body), { status, headers });
 }
@@ -136,10 +143,10 @@ export function currentSession(request: Request, state: GatewayState, now: numbe
 
 const lockedReply = (waitMs: number) => ({ status: 429, error: tooManyAttempts(waitMs) });
 
-type Outcome = { status: number; error: string; cookies?: string[] } | { status: 200; cookies: string[]; body?: Record<string, unknown> };
+type Outcome = { status: number; error: string; cookies?: string[] } | { status: 200; cookies: string[]; body?: Record<string, unknown>; clearSite?: true };
 
 const reply = (outcome: Outcome): Response =>
-	"error" in outcome ? json({ error: outcome.error }, outcome.status, outcome.cookies ?? []) : json(outcome.body ?? { ok: true }, 200, outcome.cookies);
+	"error" in outcome ? json({ error: outcome.error }, outcome.status, outcome.cookies ?? []) : json(outcome.body ?? { ok: true }, 200, outcome.cookies, outcome.clearSite ? CLEAR_SITE_CACHE : {});
 
 /** Runs a route body, closing the site on a damaged state file. */
 async function guarded(run: () => Promise<Response>): Promise<Response> {
@@ -205,7 +212,7 @@ export const setupRoute: Handler = (request, deps) => guarded(async () => {
 		const claimed = claimOwner(state, { code: body.code, name: body.name, password: body.password, upstream: deps.config.ownerUpstream, gateSecret: deps.config.ownerGateSecret }, address, now);
 		if (claimed.ok) {
 			const created = createAccountSession(claimed.state, claimed.account.id, label, now);
-			return { state: created.state, result: { status: 200, cookies: signedInCookies(created.token, claimed.account) } };
+			return { state: created.state, result: { status: 200, cookies: signedInCookies(created.token, claimed.account), clearSite: true } };
 		}
 		const keep = claimed.state === state ? null : claimed.state;
 		switch (claimed.code) {
@@ -237,7 +244,7 @@ export const loginRoute: Handler = (request, deps) => guarded(async () => {
 		if (result.ok) {
 			const old = resolveSession(state, previous, now) ?? null;
 			const next = old && old.session.id !== result.session.id ? removeSession(result.state, old.session.id) : result.state;
-			return { state: next, result: { status: 200, cookies: signedInCookies(result.token, result.account) } };
+			return { state: next, result: { status: 200, cookies: signedInCookies(result.token, result.account), clearSite: true } };
 		}
 		const keep = result.state === state ? null : result.state;
 		switch (result.code) {
@@ -260,7 +267,7 @@ export const logoutRoute: Handler = (request, deps) => guarded(async () => {
 		const found = resolveSession(state, token, now);
 		return { state: found ? removeSession(state, found.session.id) : null, result: undefined };
 	});
-	return json({ ok: true }, 200, signedOutCookies());
+	return json({ ok: true }, 200, signedOutCookies(), CLEAR_SITE_CACHE);
 });
 
 /** GET: Settings → Account. Today's `devices`, plus the name, the owner flag and the codes left. */
@@ -318,7 +325,7 @@ export const signOutEverywhereRoute: Handler = (request, deps) => guarded(async 
 	});
 	if (!accountId) return json({ error: SIGN_IN_FIRST }, 401);
 	await deps.unpairer.attempt(accountId);
-	return json({ ok: true }, 200, signedOutCookies());
+	return json({ ok: true }, 200, signedOutCookies(), CLEAR_SITE_CACHE);
 });
 
 // ─── Pairing a desktop app (slice 2b) ────────────────────────────────────────
@@ -412,7 +419,7 @@ export const BASE_ROUTES: RouteTable = {
 };
 
 /** Picks the route by exact path and method; anything else is 404 (405 for a known path). */
-export async function handleRequest(request: Request, deps: RouteDeps, routes: RouteTable = BASE_ROUTES): Promise<Response> {
+export async function handleRequest<D extends RouteDeps>(request: Request, deps: D, routes: RouteTable<D> = BASE_ROUTES): Promise<Response> {
 	const pathname = new URL(request.url).pathname;
 	const route = Object.hasOwn(routes, pathname) ? routes[pathname] : undefined;
 	if (!route) return notFound();

@@ -6,7 +6,7 @@
  * can reach it (the `front` network).
  *
  *   lh-gateway               serve (PORT, default 9000)
- *   lh-gateway reset-owner   the owner's last way back in (next slice)
+ *   lh-gateway reset-owner   the owner's last way back in (./control.ts)
  *
  * At a start with no owner yet it prints a one-time setup code to its log,
  * as the single-copy server does today.
@@ -15,11 +15,19 @@
 import http from "node:http";
 import { pathToFileURL } from "node:url";
 import { hasOwner, issueSetupCode } from "../src/core/accounts.ts";
+import { ACCOUNT_ROUTES, type AccountDeps } from "./account-routes.ts";
 import { ConfigError, loadConfig, type GatewayConfig } from "./config.ts";
+import { CONTROL_PATH, controlRoute, resetOwnerCommand } from "./control.ts";
 import { createRelay, createUnpairer, type Relay, type Unpairer } from "./copies.ts";
 import { NO_STORE } from "./gate.ts";
-import { BASE_ROUTES, handleRequest, type RouteDeps, type RouteTable } from "./routes.ts";
+import { createLifecycle, type Lifecycle } from "./lifecycle.ts";
+import { createMakerClient, NO_MAKER, type MakerClient } from "./maker-client.ts";
+import { OWNER_ROUTES } from "./owner-routes.ts";
+import { BASE_ROUTES, handleRequest, type RouteTable } from "./routes.ts";
 import { createStore, StateDamagedError, type GatewayStore } from "./state.ts";
+
+/** Every route the gateway serves. */
+export const ALL_ROUTES: RouteTable<AccountDeps> = { ...BASE_ROUTES, ...ACCOUNT_ROUTES, ...OWNER_ROUTES };
 
 /** Every request body the gateway takes is small (sign-in, a pairing code). */
 export const BODY_LIMIT_BYTES = 16 * 1024;
@@ -80,8 +88,8 @@ async function send(res: http.ServerResponse, response: Response, head: boolean)
 	res.end(body ?? undefined);
 }
 
-/** The listener; `handle` is the route table's dispatcher. */
-export function createServer(handle: (request: Request) => Promise<Response>): http.Server {
+/** The listener; `handle` is the route table's dispatcher, told the connection's own address. */
+export function createServer(handle: (request: Request, info: { remoteAddress: string | undefined }) => Promise<Response>): http.Server {
 	const server = http.createServer((req, res) => {
 		void (async () => {
 			const head = req.method === "HEAD";
@@ -91,7 +99,7 @@ export function createServer(handle: (request: Request) => Promise<Response>): h
 				// The path is the gateway's own: the request's Host never decides where it is routed.
 				const url = new URL(req.url ?? "/", "http://gateway.invalid");
 				const request = new Request(url, { method, headers: toHeaders(req), body: body && body.length ? new Uint8Array(body) : undefined });
-				await send(res, await handle(request), head);
+				await send(res, await handle(request, { remoteAddress: req.socket.remoteAddress }), head);
 			} catch (error) {
 				const status = error instanceof TooLarge ? 413 : 400;
 				if (!res.headersSent) {
@@ -111,37 +119,54 @@ export function createServer(handle: (request: Request) => Promise<Response>): h
 
 export interface Gateway {
 	server: http.Server;
-	deps: RouteDeps;
+	deps: AccountDeps;
 	stop(): Promise<void>;
 }
 
+export interface GatewayOptions {
+	relay?: Relay;
+	unpairer?: Unpairer;
+	maker?: MakerClient;
+	lifecycle?: Lifecycle;
+	routes?: RouteTable<AccountDeps>;
+	log?: (line: string) => void;
+	now?: () => number;
+	listen?: boolean;
+	/** The lifecycle loop's timer (default: on when a maker is configured). */
+	loop?: boolean;
+}
+
 /** Builds and starts the gateway (tests pass a stand-in relay and port 0). */
-export async function startGateway(config: GatewayConfig, options: { relay?: Relay; unpairer?: Unpairer; routes?: RouteTable; log?: (line: string) => void; now?: () => number; listen?: boolean } = {}): Promise<Gateway> {
+export async function startGateway(config: GatewayConfig, options: GatewayOptions = {}): Promise<Gateway> {
 	const log = options.log ?? ((line: string) => console.log(line));
+	const now = options.now ?? Date.now;
 	const store = createStore(config.stateFile);
 	const relay = options.relay ?? createRelay(config);
 	const unpairer = options.unpairer ?? createUnpairer({ store, relay, config, log });
-	const deps: RouteDeps = { store, config, relay, unpairer, now: options.now ?? Date.now, log };
+	const maker = options.maker ?? createMakerClient(config);
+	const lifecycle = options.lifecycle ?? createLifecycle({ store, maker, unpairer, config, now, log });
+	const deps: AccountDeps = { store, config, relay, unpairer, lifecycle, now, log };
 	announceSetupCode(store, log);
 	const stopRetries = unpairer.start();
-	const server = createServer((request) => handleRequest(request, deps, options.routes ?? BASE_ROUTES));
+	const stopLoop = (options.loop ?? maker !== NO_MAKER) ? lifecycle.start() : () => undefined;
+	const routes = options.routes ?? ALL_ROUTES;
+	const server = createServer((request, info) =>
+		new URL(request.url).pathname === CONTROL_PATH ? controlRoute(request, deps, info.remoteAddress) : handleRequest(request, deps, routes));
 	if (options.listen !== false) await new Promise<void>((resolve) => server.listen(config.port, resolve));
 	return {
 		server, deps,
 		stop: () => new Promise<void>((resolve) => {
 			stopRetries();
+			stopLoop();
 			server.close(() => resolve());
 			server.closeIdleConnections?.();
 		}),
 	};
 }
 
-/** Sub-commands (`lh-gateway <name>`); the next slice fills reset-owner. */
+/** Sub-commands (`lh-gateway <name>`). */
 export const SUBCOMMANDS: Record<string, (args: string[]) => Promise<number>> = {
-	"reset-owner": async () => {
-		console.error("lh-gateway reset-owner: not available in this build.");
-		return 1;
-	},
+	"reset-owner": () => resetOwnerCommand(),
 };
 
 export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {

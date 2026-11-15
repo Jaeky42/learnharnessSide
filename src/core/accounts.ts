@@ -109,6 +109,13 @@ export interface AccountRecord {
 	 * Pause, Remove). Its sync requests get 503 until it is cleared.
 	 */
 	unpairPending?: true;
+	/**
+	 * Present (true) from just before the gateway asks the maker to (re)create
+	 * the copy until the answer's upstream and secret are saved. Set, the maker
+	 * may have made a container whose secret the gateway never received, so
+	 * the lifecycle loop creates it again (a fresh secret) before trusting it.
+	 */
+	copyPending?: true;
 }
 
 export interface GatewaySession extends SessionRecord {
@@ -186,12 +193,14 @@ function parseAccount(raw: unknown): AccountRecord {
 	if (raw.upstream !== null && !isStr(raw.upstream)) return bad("account");
 	if (raw.gateSecret !== null && !isStr(raw.gateSecret)) return bad("account");
 	if (raw.unpairPending !== undefined && raw.unpairPending !== true) return bad("account");
+	if (raw.copyPending !== undefined && raw.copyPending !== true) return bad("account");
 	return {
 		id: raw.id, tag: raw.tag as string | null, name: raw.name, nameKey: raw.nameKey, password: parsePassword(raw.password),
 		recoveryCodes: [...(raw.recoveryCodes as string[])], role, state, createdAt: raw.createdAt,
 		lastSeenAt: raw.lastSeenAt as number | null, removedAt: raw.removedAt as number | null,
 		upstream: raw.upstream as string | null, gateSecret: raw.gateSecret as string | null,
 		...(raw.unpairPending === true ? { unpairPending: true as const } : {}),
+		...(raw.copyPending === true ? { copyPending: true as const } : {}),
 	};
 }
 
@@ -528,6 +537,18 @@ export function rollbackReservation(state: GatewayState, accountId: string, invi
 	return { ...erased, invites: [...erased.invites, invite] };
 }
 
+/**
+ * A reservation whose copy couldn't be made (or whose maker answer never
+ * came): the account goes to `deleting` (no slot, no sign-in; name and tag
+ * kept until the leftovers are gone and it is erased). Idempotent.
+ */
+export function abandonReservation(state: GatewayState, accountId: string): { ok: true; state: GatewayState; account: AccountRecord } | Fail<"not-found" | "bad-state"> {
+	const account = findAccount(state, accountId);
+	if (!account) return { ok: false, code: "not-found", state };
+	if (account.role !== "member" || (account.state !== "deleting" && isReady(account))) return { ok: false, code: "bad-state", state };
+	return { ok: true, ...markDeleting(state, account) };
+}
+
 /** Member accounts that were reserved but never got a copy (a crash between steps 1 and 3). */
 export function unfinishedReservations(state: GatewayState): AccountRecord[] {
 	return state.accounts.filter((a) => a.role === "member" && (a.state === "active" || a.state === "paused") && !isReady(a));
@@ -857,6 +878,47 @@ export function clearUnpairPending(state: GatewayState, accountId: string): Gate
 
 export function unpairPendingAccounts(state: GatewayState): AccountRecord[] {
 	return state.accounts.filter((a) => a.unpairPending === true);
+}
+
+// ─── (Re)creating a copy ─────────────────────────────────────────────────────
+
+/** Written before every POST /copies for an existing account (same object when already set). */
+export function markCopyPending(state: GatewayState, accountId: string): GatewayState {
+	const account = findAccount(state, accountId);
+	if (!account || account.copyPending) return state;
+	return withAccount(state, { ...account, copyPending: true });
+}
+
+/** The maker's answer: the copy's address and its new secret; the pending mark goes. */
+export function saveCopy(state: GatewayState, accountId: string, copy: { upstream: string; gateSecret: string }): GatewayState {
+	const account = findAccount(state, accountId);
+	if (!account) return state;
+	const { copyPending: _done, ...rest } = account;
+	return withAccount(state, { ...rest, upstream: copy.upstream, gateSecret: copy.gateSecret });
+}
+
+export function copyPendingAccounts(state: GatewayState): AccountRecord[] {
+	return state.accounts.filter((a) => a.copyPending === true);
+}
+
+// ─── The owner's last way back in (`lh-gateway reset-owner`) ─────────────────
+
+/**
+ * Every session of the owner's account ends, the lockouts are cleared (as
+ * today's reset-password does) and a reset code for the owner is issued:
+ * once, 24 hours, used at the reset page like any other. With no owner yet,
+ * a fresh first-start setup code instead.
+ */
+export function resetOwnerAccess(state: GatewayState, now: number): { kind: "reset"; state: GatewayState; name: string; code: string; expiresAt: number } | { kind: "setup"; state: GatewayState; code: string } {
+	const owner = ownerAccount(state);
+	if (!owner) {
+		const code = newSetupCode();
+		return { kind: "setup", state: { ...state, lockouts: {}, setupCodeHash: setupCodeHash(code) }, code };
+	}
+	const code = newSetupCode();
+	const record: ResetRecord = { accountId: owner.id, codeHash: setupCodeHash(code), createdAt: now, expiresAt: now + RESET_LIFETIME_MS };
+	const resets = [...state.resets.filter((r) => r.expiresAt > now && r.accountId !== owner.id), record];
+	return { kind: "reset", state: { ...removeAccountSessions(state, owner.id), resets, lockouts: {} }, name: owner.name, code, expiresAt: record.expiresAt };
 }
 
 // ─── Views ───────────────────────────────────────────────────────────────────

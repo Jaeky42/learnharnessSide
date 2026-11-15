@@ -1,6 +1,6 @@
 /**
- * The gateway's pages before sign-in (/login, /setup; the next slices add
- * /invite, /reset and the recovery codes with `pageShell`), built like
+ * The gateway's pages before sign-in (/login, /setup, /invite with the
+ * recovery codes shown once after it, /reset), built like
  * src/server/server-auth-pages.ts: self-contained HTML, one inline style and
  * one inline script, the same CSP. Always in the app's standard dark theme
  * (the owner's decision), never anyone's saved theme. Every word comes from
@@ -8,7 +8,10 @@
  */
 
 import {
+	INVITE_TEXT,
 	PASSWORDS_DONT_MATCH,
+	RECOVERY_PAGE_TEXT,
+	RESET_PAGE_TEXT,
 	SETUP_TEXT,
 	SIGN_IN_TEXT,
 	USE_AT_LEAST,
@@ -78,6 +81,11 @@ button[disabled] { opacity: .6; cursor: default; }
 .error { color: var(--error); font-size: 13px; min-height: 1.5em; }
 nav { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 16px; font-size: 13px; }
 a { color: var(--muted); }
+ul.codes { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; }
+ul.codes li { font-size: 16px; letter-spacing: .12em; user-select: all; }
+.row { display: flex; gap: 8px; }
+.row button { flex: 1; }
+button.secondary { color: var(--fg); background: transparent; border: 1px solid var(--border); }
 `;
 
 export interface ShellOptions {
@@ -235,6 +243,72 @@ ${form("/api/server-auth/setup", [
     ${newPasswordCheck("password", "confirm")}
     return { code: value("code"), name: value("name"), password: value("password") };
   }`,
+	});
+}
+
+/**
+ * The invite page. On success its own script replaces the form with "Your
+ * recovery codes": the codes exist only in the POST's answer and in this
+ * page's memory, never in a URL, a cookie or storage, and a reload can't
+ * bring them back (Continue goes to "/" with `location.replace`).
+ */
+export function invitePageHtml(): string {
+	const r = RECOVERY_PAGE_TEXT;
+	return pageShell({
+		title: INVITE_TEXT.title,
+		body: `
+<h1>${escapeHtml(INVITE_TEXT.title)}</h1>
+${form("/api/server-auth/invite", [
+		field({ id: "code", label: INVITE_TEXT.codeLabel, autocomplete: "one-time-code", code: true, placeholder: "XXXX-XXXX", autofocus: true }),
+		field({ id: "name", label: INVITE_TEXT.nameLabel, autocomplete: "username", plain: true, help: [INVITE_TEXT.nameHelp, INVITE_TEXT.nameHelpSignIn] }),
+		field({ id: "password", label: INVITE_TEXT.passwordLabel, type: "password", autocomplete: "new-password", minlength: PASSWORD_MIN_LENGTH, help: [INVITE_TEXT.passwordHelp] }),
+		field({ id: "confirm", label: INVITE_TEXT.confirmLabel, type: "password", autocomplete: "new-password" }),
+	], INVITE_TEXT.submit)}`,
+		payload: `function (form) {
+    ${newPasswordCheck("password", "confirm")}
+    return { code: value("code"), name: value("name"), password: value("password") };
+  }`,
+		onSuccess: `function (body) {
+    var codes = body && Array.isArray(body.codes) ? body.codes : [];
+    var main = document.querySelector("main");
+    while (main.firstChild) main.removeChild(main.firstChild);
+    function el(tag, text, cls) { var node = document.createElement(tag); if (text) node.textContent = text; if (cls) node.className = cls; main.appendChild(node); return node; }
+    el("h1", ${jsString(r.title)});
+    el("p", ${jsString(r.body)});
+    var list = el("ul", "", "codes");
+    list.setAttribute("data-testid", "recovery-codes");
+    codes.forEach(function (code) { var item = document.createElement("li"); item.textContent = String(code); list.appendChild(item); });
+    var row = el("div", "", "row");
+    var copy = document.createElement("button"); copy.type = "button"; copy.className = "secondary"; copy.textContent = ${jsString(r.copy)};
+    copy.addEventListener("click", function () { try { navigator.clipboard.writeText(codes.join("\\n")).catch(function () {}); } catch (e) { /* the codes are selectable */ } });
+    var go = document.createElement("button"); go.type = "button"; go.textContent = ${jsString(r.continue)};
+    go.addEventListener("click", function () { codes = []; window.location.replace("/"); });
+    row.appendChild(copy); row.appendChild(go);
+    document.title = ${jsString(`${r.title} · LearnHarness`)};
+    go.focus();
+  }`,
+	});
+}
+
+/** "Forgot your password?": one box for a recovery code or the owner's reset code. On success, the sign-in page. */
+export function resetPageHtml(): string {
+	const t = RESET_PAGE_TEXT;
+	return pageShell({
+		title: t.title,
+		body: `
+<h1>${escapeHtml(t.title)}</h1>
+<p>${escapeHtml(t.intro)}</p>
+${form("/api/server-auth/reset", [
+		field({ id: "name", label: t.nameLabel, autocomplete: "username", plain: true, autofocus: true }),
+		field({ id: "code", label: t.codeLabel, autocomplete: "one-time-code", code: true, placeholder: "XXXX-XXXX" }),
+		field({ id: "password", label: t.passwordLabel, type: "password", autocomplete: "new-password", minlength: PASSWORD_MIN_LENGTH }),
+		field({ id: "confirm", label: t.confirmLabel, type: "password", autocomplete: "new-password" }),
+	], t.submit)}`,
+		payload: `function (form) {
+    ${newPasswordCheck("password", "confirm")}
+    return { name: value("name"), code: value("code"), password: value("password") };
+  }`,
+		onSuccess: `function () { window.location.replace("/login"); }`,
 	});
 }
 
