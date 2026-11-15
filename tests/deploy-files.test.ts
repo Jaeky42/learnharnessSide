@@ -640,3 +640,185 @@ describe("deploy/update.sh", () => {
 		assert.match(update, /claude update[^\n]*\|\| true/, "never fails the update over Claude Code");
 	});
 });
+
+describe("deploy/install-firewall.sh", () => {
+	const script = path.join(root, "deploy/install-firewall.sh");
+	const source = read("deploy/install-firewall.sh");
+	const TOOLS = ["iptables", "ip6tables", "iptables-restore", "ip6tables-restore", "iptables-save", "ip6tables-save", "docker", "systemctl", "journalctl"];
+	/** A bin folder whose firewall tools only log their arguments (and answer `ok`). */
+	const fakes = (ok: boolean, uid?: string) => {
+		const bin = tmp("fw-bin");
+		const log = path.join(bin, "calls.log");
+		for (const tool of TOOLS) fs.writeFileSync(path.join(bin, tool), `#!/bin/sh\necho "${tool} $*" >> "${log}"\nexit ${ok ? 0 : 1}\n`, { mode: 0o755 });
+		if (uid) fs.writeFileSync(path.join(bin, "id"), `#!/bin/sh\necho ${uid}\n`, { mode: 0o755 });
+		return { bin, calls: () => (fs.existsSync(log) ? fs.readFileSync(log, "utf8").trim().split("\n").filter(Boolean) : []) };
+	};
+	/** Only the tools --rules needs, so no iptables of any kind is on the PATH. */
+	const bareBin = () => {
+		const bin = tmp("fw-bare");
+		for (const tool of ["sed", "tr", "sort"]) {
+			const found = execFileSync("sh", ["-c", `command -v ${tool}`], { encoding: "utf8" }).trim();
+			fs.symlinkSync(found, path.join(bin, tool));
+		}
+		return bin;
+	};
+	// The shell by its full path: the PATH handed to the script may hold no sh.
+	const shell = execFileSync("sh", ["-c", "command -v sh"], { encoding: "utf8" }).trim();
+	const run = (argv: string[], PATH: string) => spawnSync(shell, [script, ...argv], { env: { PATH } as unknown as NodeJS.ProcessEnv, encoding: "utf8" });
+	const rulesOf = (family: "4" | "6", PATH: string) => {
+		const result = run(["--rules", family], PATH);
+		assert.equal(result.status, 0, result.stderr);
+		return result.stdout.trim().split("\n");
+	};
+	const chain = (lines: string[], name: string) => lines.filter((l) => l.startsWith(`-A ${name} `));
+	// The resolver exceptions come from the machine's own resolv.conf files: any number of them.
+	const DNS = /^-A LH-FW-(INPUT|FORWARD)-BR -d [0-9a-fA-F.:]+ -p (udp|tcp) --dport 53 -j RETURN$/;
+	const withoutDns = (lines: string[]) => lines.filter((l) => !/--dport 53 -j RETURN$/.test(l));
+
+	it("parses as POSIX sh (and as dash, Ubuntu's sh) and is executable", () => {
+		for (const shell of ["sh", "dash"]) {
+			if (shell === "dash" && spawnSync("sh", ["-c", "command -v dash"]).status !== 0) continue;
+			const result = spawnSync(shell, ["-n", script], { encoding: "utf8" });
+			assert.equal(result.status, 0, `${shell} -n: ${result.stderr}`);
+		}
+		assert.ok(fs.statSync(script).mode & 0o100, "the workflow and the guide run it as ./install-firewall.sh");
+		assert.ok(source.startsWith("#!/bin/sh\n"));
+	});
+
+	it("--rules prints without root and with no iptables installed, and runs nothing that changes a rule", () => {
+		for (const family of ["4", "6"] as const) {
+			const lines = rulesOf(family, bareBin());
+			assert.equal(lines[0], "*filter");
+			assert.equal(lines.at(-1), "COMMIT");
+		}
+		for (const ok of [false, true]) {
+			const { bin, calls } = fakes(ok, "1000");
+			rulesOf("4", `${bin}:${bareBin()}`);
+			rulesOf("6", `${bin}:${bareBin()}`);
+			for (const call of calls()) assert.match(call, /^ip6tables -w -n -L [A-Z-]+$/, `only a read: ${call}`);
+		}
+		assert.notEqual(run(["--rules", "5"], bareBin()).status, 0, "only 4 or 6");
+	});
+
+	for (const [family, v6Docker] of [["4", false], ["6", false], ["6", true]] as const) {
+		it(`IPv${family}${family === "6" ? (v6Docker ? " with Docker's IPv6 rules" : " without Docker's IPv6 rules") : ""}: only LH-FW-* chains, refusals only behind the two bridge jumps, never ACCEPT`, () => {
+			const { bin } = fakes(v6Docker);
+			const lines = rulesOf(family, `${bin}:${bareBin()}`);
+			const meta = family === "4" ? "169.254.0.0/16" : "fd00:ec2::254";
+			const forward = family === "4" || v6Docker;
+			const declared = lines.filter((l) => l.startsWith(":"));
+			assert.deepEqual(declared, [":LH-FW-INPUT - [0:0]", ":LH-FW-INPUT-BR - [0:0]", ...(forward ? [":LH-FW-FORWARD - [0:0]", ":LH-FW-FORWARD-BR - [0:0]"] : [])]);
+			for (const line of lines.slice(1, -1)) {
+				if (line.startsWith(":")) continue;
+				assert.match(line, /^-A LH-FW-[A-Z-]+ /, `a rule in our own chains only: ${line}`);
+				assert.ok(!/\bACCEPT\b/.test(line), `never ACCEPT: ${line}`);
+				assert.ok(!/^-[PIDFXNZ] /.test(line) && !/ -P /.test(line), `no policy and no change to another chain: ${line}`);
+			}
+			assert.ok(!lines.some((l) => / ACCEPT|^-P /.test(l)));
+			// The top chains only pick out traffic from a Docker bridge.
+			assert.deepEqual(chain(lines, "LH-FW-INPUT"), ["-A LH-FW-INPUT -i docker0 -j LH-FW-INPUT-BR", "-A LH-FW-INPUT -i br-+ -j LH-FW-INPUT-BR"]);
+			assert.deepEqual(chain(lines, "LH-FW-FORWARD"), forward ? ["-A LH-FW-FORWARD -i docker0 -j LH-FW-FORWARD-BR", "-A LH-FW-FORWARD -i br-+ -j LH-FW-FORWARD-BR"] : []);
+			assert.equal(lines.filter((l) => / -j LH-FW-[A-Z]+-BR$/.test(l)).length, forward ? 4 : 2, "the -BR chains are reached only through those jumps");
+			for (const l of lines.filter((x) => /-j REJECT/.test(x))) assert.match(l, /^-A LH-FW-(INPUT|FORWARD)-BR /, `a refusal only in a -BR chain: ${l}`);
+			// Resolver exceptions are for named resolvers, port 53 only.
+			for (const l of lines.filter((x) => /--dport 53 /.test(x))) assert.match(l, DNS);
+			const input = withoutDns(chain(lines, "LH-FW-INPUT-BR"));
+			assert.equal(input[0], "-A LH-FW-INPUT-BR -m conntrack --ctstate RELATED,ESTABLISHED -j RETURN", "replies to the host's own connections first");
+			assert.equal(chain(lines, "LH-FW-INPUT-BR")[0], input[0], "before any resolver exception too");
+			const metaAt = input.indexOf(`-A LH-FW-INPUT-BR -d ${meta} -p tcp -j REJECT --reject-with tcp-reset`);
+			const publicAt = input.indexOf("-A LH-FW-INPUT-BR -p tcp -m multiport --dports 80,443 -j RETURN");
+			assert.ok(metaAt > 0 && publicAt > metaAt, "the metadata address is refused before the site's 80/443 step aside");
+			assert.ok(input.includes(`-A LH-FW-INPUT-BR -d ${meta} -j REJECT --reject-with ${family === "4" ? "icmp-admin-prohibited" : "icmp6-adm-prohibited"}`));
+			assert.deepEqual(input.slice(-4), [
+				"-A LH-FW-INPUT-BR -p tcp -m multiport --dports 80,443 -j RETURN",
+				"-A LH-FW-INPUT-BR -p udp -m multiport --dports 443 -j RETURN",
+				"-A LH-FW-INPUT-BR -p tcp -j REJECT --reject-with tcp-reset",
+				`-A LH-FW-INPUT-BR -j REJECT --reject-with ${family === "4" ? "icmp-admin-prohibited" : "icmp6-adm-prohibited"}`,
+			], "everything else to the host is refused");
+			if (family === "4") {
+				assert.deepEqual(input, [
+					"-A LH-FW-INPUT-BR -m conntrack --ctstate RELATED,ESTABLISHED -j RETURN",
+					"-A LH-FW-INPUT-BR -d 169.254.0.0/16 -p tcp -j REJECT --reject-with tcp-reset",
+					"-A LH-FW-INPUT-BR -d 169.254.0.0/16 -j REJECT --reject-with icmp-admin-prohibited",
+					...input.slice(-4),
+				]);
+			}
+			if (forward) {
+				// Through the host to elsewhere: only the metadata address is refused (the internet stays).
+				assert.deepEqual(withoutDns(chain(lines, "LH-FW-FORWARD-BR")), [
+					`-A LH-FW-FORWARD-BR -d ${meta} -p tcp -j REJECT --reject-with tcp-reset`,
+					`-A LH-FW-FORWARD-BR -d ${meta} -j REJECT --reject-with ${family === "4" ? "icmp-admin-prohibited" : "icmp6-adm-prohibited"}`,
+				]);
+			}
+		});
+	}
+
+	it("refuses every mode that changes something unless run as root, and touches nothing", () => {
+		for (const mode of [[], ["--apply"], ["--status"], ["--remove"]]) {
+			const { bin, calls } = fakes(true, "1000");
+			const result = run(mode, `${bin}:${bareBin()}`);
+			assert.equal(result.status, 1, `${mode.join(" ") || "install"}: ${result.stdout}`);
+			assert.match(result.stderr, new RegExp(`Run it with sudo: sudo \\S+install-firewall\\.sh${mode.length ? ` ${mode[0]}` : ""}\\n`));
+			assert.deepEqual(calls(), []);
+		}
+		assert.match(run(["--what"], bareBin()).stderr, /^Usage: sudo \S+ \[--status \| --remove\]/);
+	});
+
+	it("installs a copy outside the repository and a oneshot unit that runs after Docker, with it", () => {
+		const unit = /cat > "\$UNIT" <<UNIT\n([\s\S]*?)\nUNIT\n/.exec(source)?.[1] ?? "";
+		for (const line of ["After=docker.service", "PartOf=docker.service", "Type=oneshot", "RemainAfterExit=yes", "ExecStart=$BIN --apply", "WantedBy=docker.service"]) {
+			assert.ok(unit.split("\n").includes(line), line);
+		}
+		assert.match(source, /^BIN=\/usr\/local\/sbin\/\$NAME$/m);
+		assert.match(source, /^NAME=learnharness-firewall$/m);
+	});
+
+	it("is loaded with iptables-restore --noflush, and a failure half-way takes everything out", () => {
+		const apply = source.slice(source.indexOf("apply() {"), source.indexOf("\n}\n", source.indexOf("apply() {")));
+		assert.match(source, /iptables-restore -w --noflush/);
+		assert.ok(apply.indexOf('r4="$(rules 4)"') < apply.indexOf("trap '"), "the rules are worked out before anything changes");
+		assert.ok(!/rules [46] \|/.test(apply), "no pipe from rules(): its failure would be lost");
+		assert.match(apply, /trap '[^']*remove_rules[^']*exit 1' EXIT/);
+		assert.match(source, /firewall-backend[\s\S]*nftables/, "Docker's nftables backend is refused with a reason");
+	});
+
+	describe("the server image workflow tries it on the real stack", () => {
+		type Step = { name?: string; run?: string };
+		const workflow = yaml.load(read(".github/workflows/server-image.yml")) as { jobs: Record<string, { steps: Step[] }> };
+		const step = Object.values(workflow.jobs).flatMap((j) => j.steps).find((s) => s.name === "Multi-account stack and crossing tests");
+		const lines = (step?.run ?? "").split("\n");
+		const line = (i: number) => lines[i] ?? "";
+		const at = (needle: string | RegExp, from = 0) => lines.findIndex((l, i) => i >= from && (typeof needle === "string" ? l.includes(needle) : needle.test(l)));
+
+		it("installs the firewall before the crossing run and passes --firewall with a host listener's port", () => {
+			const listener = at(/python3 -m http\.server "\$fw_port" --bind 0\.0\.0\.0/);
+			const install = at(/^\s*sudo \.\/install-firewall\.sh \|\|/);
+			const crossing = at("node test/crossing.mjs");
+			assert.ok(listener > 0 && install > listener && crossing > install, "listener, install, then crossing");
+			assert.match(line(crossing), /--firewall --host-port "\$fw_port"/);
+			assert.match(line(install), /::error::/);
+		});
+
+		it("after the run: restarts Docker, then requires --status, a refused probe, and a clean --remove", () => {
+			const crossing = at("node test/crossing.mjs");
+			const restart = at("sudo systemctl restart docker", crossing);
+			const status = at("sudo ./install-firewall.sh --status", restart);
+			const probe = at(/exec -T lh node -e "\$probe" "\$fw_port"/, status);
+			const remove = at(/^\s*sudo \.\/install-firewall\.sh --remove$/, probe);
+			const left = at("grep -c LH-FW", remove);
+			assert.ok(restart > crossing && status > restart && probe > status && remove > probe && left > remove, "in that order");
+			const unhook = at("iptables -w -D INPUT -j LH-FW-INPUT", crossing);
+			assert.ok(unhook > crossing && unhook < restart, "a jump is taken out first, so only the unit can put it back");
+			assert.match(line(status), /\|\| \{ echo "::error::/);
+			assert.match(line(left), /\|\| true\)"$/, "grep -c's exit code can't end the step");
+		});
+
+		it("cleanup and the failure dump cover the firewall", () => {
+			const cleanup = (step?.run ?? "").slice((step?.run ?? "").indexOf("cleanup() {"), (step?.run ?? "").indexOf("trap cleanup EXIT"));
+			assert.match(cleanup, /sudo \.\/install-firewall\.sh --remove >\/dev\/null 2>&1 \|\| true/);
+			assert.match(cleanup, /kill "\$listener"/);
+			const dump = line(at(/^\s*dump\(\) \{/));
+			for (const part of ["sudo iptables -S 2>&1 | grep LH-FW || true", "sudo iptables -S DOCKER-USER || true", "systemctl status learnharness-firewall --no-pager || true"]) assert.ok(dump.includes(part), part);
+		});
+	});
+});

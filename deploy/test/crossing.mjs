@@ -9,6 +9,7 @@
  *   node deploy/test/crossing.mjs --base https://localhost --ca <caddy root.crt> [--compose-dir deploy]
  *   node deploy/test/crossing.mjs --insecure ...   (no CA: TLS is not verified)
  *   node deploy/test/crossing.mjs --list           (prints what it would try; touches nothing)
+ *   ... --firewall --host-port <port>              (also checks deploy/install-firewall.sh's rules)
  *
  * The owner's account: LH_CROSSING_OWNER_NAME and LH_CROSSING_OWNER_PASSWORD
  * in the environment, or, on a stack nobody has claimed yet, the script claims
@@ -34,8 +35,15 @@ const { values: args } = parseArgs({
 		caddy: { type: "string", default: "lh-caddy" },
 		insecure: { type: "boolean", default: false },
 		list: { type: "boolean", default: false },
+		firewall: { type: "boolean", default: false },
+		"host-port": { type: "string" },
 	},
 });
+const HOST_PORT = args["host-port"] === undefined ? undefined : Number(args["host-port"]);
+if (args.firewall && !(Number.isInteger(HOST_PORT) && HOST_PORT > 0 && HOST_PORT < 65536)) {
+	console.error("--firewall needs --host-port <port>: a TCP port with a listener on the host, bound to 0.0.0.0.");
+	process.exit(2);
+}
 const BASE = new URL(args.base);
 const CA = args.ca ? fs.readFileSync(args.ca) : undefined;
 const COMPOSE_DIR = path.resolve(args["compose-dir"]);
@@ -83,6 +91,31 @@ function fromInside(container, url, headers = {}) {
 	try { return docker(["exec", container, "node", "-e", script, url, JSON.stringify(headers)]).trim(); }
 	catch { return "exec-failed"; }
 }
+
+/**
+ * A plain TCP connect made from inside a container (node -e; the image has no
+ * curl): "connected", "ECONNREFUSED <ms>ms", "timeout" or "error:<code>".
+ * The host "gateway" means the container's default gateway (its bridge's
+ * address on the host), read from /proc/net/route.
+ */
+function tcpFromInside(container, host, port) {
+	const script = `const net=require("net"),fs=require("fs");let h=process.argv[1];const p=+process.argv[2];
+if(h==="gateway"){const l=fs.readFileSync("/proc/net/route","utf8").split("\\n").map(x=>x.trim().split(/\\s+/)).find(f=>f[1]==="00000000");if(!l){console.log("error:no-default-route");process.exit(0)}h=l[2].match(/../g).reverse().map(x=>parseInt(x,16)).join(".")}
+const t=Date.now(),s=net.connect({host:h,port:p});s.setTimeout(5000);
+s.on("connect",()=>{console.log("connected");s.destroy()});s.on("timeout",()=>{console.log("timeout");s.destroy()});
+s.on("error",e=>console.log(e.code==="ECONNREFUSED"?"ECONNREFUSED "+(Date.now()-t)+"ms":"error:"+e.code))`;
+	try { return docker(["exec", container, "node", "-e", script, host, String(port)]).trim(); }
+	catch { return "exec-failed"; }
+}
+/** A DNS lookup from inside a container: "resolved" or "error:<code>". */
+function dnsFromInside(container, name) {
+	const script = `require("dns").promises.lookup(process.argv[1]).then(()=>console.log("resolved"),e=>console.log("error:"+e.code))`;
+	try { return docker(["exec", container, "node", "-e", script, name]).trim(); }
+	catch { return "exec-failed"; }
+}
+/** Refused by a rule: a TCP reset, quickly (a timeout or a connection is not). */
+const refusedQuickly = (s) => /^ECONNREFUSED (\d+)ms$/.test(s) && Number(/(\d+)ms/.exec(s)[1]) < 3000;
+const FIREWALL_PUBLIC_HOST = "github.com";
 
 // ─── The table ───────────────────────────────────────────────────────────────
 
@@ -280,6 +313,17 @@ async function main() {
 		expect("Caddy's relay port is not published on the host", docker(["port", args.caddy]).includes("9200") ? "published" : "not published", "not published");
 		expect("from the gateway: a copy directly (it goes through the relay only)", fromInside(gateway, `http://${a.container}:3000/api/chats`), unreachable);
 
+		// 3b. The host firewall (deploy/install-firewall.sh), only with --firewall.
+		if (args.firewall) {
+			for (const [from, label] of [[a.container, "A's copy"], [owners, "the owner's copy"]]) {
+				expect(`firewall, from ${label}: the host's port ${HOST_PORT} on its bridge gateway -> refused`, tcpFromInside(from, "gateway", HOST_PORT), refusedQuickly);
+				expect(`firewall, from ${label}: the metadata address 169.254.169.254:80 -> refused`, tcpFromInside(from, "169.254.169.254", 80), refusedQuickly);
+				expect(`firewall, from ${label}: DNS lookup of ${FIREWALL_PUBLIC_HOST} (control)`, dnsFromInside(from, FIREWALL_PUBLIC_HOST), "resolved");
+				expect(`firewall, from ${label}: ${FIREWALL_PUBLIC_HOST}:443 outbound (control)`, tcpFromInside(from, FIREWALL_PUBLIC_HOST, 443), "connected");
+				expect(`firewall, from ${label}: the site's port 443 on its bridge gateway (control)`, tcpFromInside(from, "gateway", 443), "connected");
+			}
+		}
+
 		// 4. /api/internal/* and path tricks, from outside.
 		for (const p of INTERNAL_PATHS) {
 			for (const [who, cookie] of [["signed out", undefined], ["owner", owner], ["A", a.cookie]]) {
@@ -361,6 +405,13 @@ const PLAN = [
 	["from the gateway: A's copy directly", "unreachable"],
 	["from A's copy, by IP address: B's copy, the owner's copy, the gateway, the maker", "unreachable"],
 	["Caddy's relay port (9200) published on the host", "not published"],
+	...(args.firewall ? ["A's copy", "the owner's copy"].flatMap((label) => [
+		[`firewall, from ${label}: the host's port ${HOST_PORT} on its bridge gateway`, "ECONNREFUSED, under 3 s"],
+		[`firewall, from ${label}: 169.254.169.254:80 (the metadata address)`, "ECONNREFUSED, under 3 s"],
+		[`firewall, from ${label}: DNS lookup of ${FIREWALL_PUBLIC_HOST} (control)`, "resolved"],
+		[`firewall, from ${label}: ${FIREWALL_PUBLIC_HOST}:443 outbound (control)`, "connected"],
+		[`firewall, from ${label}: the site's port 443 on its bridge gateway (control)`, "connected"],
+	]) : [["the host firewall (only with --firewall --host-port <port>)", "not checked"]]),
 	["A's cookie on GET and POST /api/accounts (the owner's routes)", "404"],
 	...INTERNAL_PATHS.map((p) => [`POST ${p} (signed out, owner, A; client X-LH-Scope: internal)`, "400/404"]),
 	...TRICK_PATHS.flatMap((p) => [[`GET ${p} (signed out)`, "refused or empty"], [`GET ${p} (A)`, "refused, empty, or A's own only"]]),
