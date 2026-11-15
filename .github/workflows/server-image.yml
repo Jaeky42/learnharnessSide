@@ -190,8 +190,29 @@ jobs:
             curl -s -o /dev/null "http://127.0.0.1:$fw_port/" && break
             sleep 0.5
           done
+          curl -s -o /dev/null "http://127.0.0.1:$fw_port/" || { echo "::error::the host listener on port $fw_port doesn't answer from the host"; dump; exit 1; }
+          # A TCP connect from inside the owner's copy (node; the image has no curl): to "gateway" (its
+          # bridge's address on the host, from /proc/net/route) or an address. Prints connected,
+          # ECONNREFUSED, timeout or another error code.
+          probe='let h=process.argv[1];if(h==="gateway"){const r=require("fs").readFileSync("/proc/net/route","utf8").split("\n").map(l=>l.trim().split(/\s+/)).find(f=>f[1]==="00000000");h=r[2].match(/../g).reverse().map(x=>parseInt(x,16)).join(".")}const s=require("net").connect({host:h,port:+process.argv[2]});s.setTimeout(5000,()=>{console.log("timeout");s.destroy()});s.on("connect",()=>{console.log("connected");s.destroy()});s.on("error",e=>console.log(e.code))'
+          probe_lh() { docker compose exec -T lh node -e "$probe" "$@" 2>&1 || true; }
+          # Controls before the firewall: without it the host's port is open from a container, so its
+          # refusal later is the firewall's.
+          got="$(probe_lh gateway "$fw_port")"
+          [ "$got" = "connected" ] || { echo "::error::before the firewall, the owner's copy could not reach the host's port $fw_port (got: $got); the firewall checks would prove nothing"; dump; exit 1; }
+          got="$(probe_lh 169.254.169.254 80)"
+          echo "Before the firewall, 169.254.169.254:80 from the owner's copy: $got"
+          [ "$got" != "ECONNREFUSED" ] || echo "::warning::169.254.169.254:80 is already refused on this runner without the firewall; the metadata check proves nothing by its result alone (the rule counters below still must rise)"
           sudo ./install-firewall.sh || { echo "::error::install-firewall.sh refused or failed to install (its own message is above)"; dump; exit 1; }
           node test/crossing.mjs --base https://localhost --ca "$RUNNER_TEMP/caddy-root.crt" --compose-dir "$stack" --firewall --host-port "$fw_port" || { echo "::error::a crossing between accounts, or past the host firewall, was not refused (or the run could not finish)"; dump; exit 1; }
+          # The refusals came from our rules: their counters rose (read before the restart, which resets them).
+          counter() { { sudo iptables -w -nvxL "$1" || true; } | awk -v want="$2" '$3 == "REJECT" && /tcp-reset/ && $9 == want { n += $1 } END { print n + 0 }'; }
+          meta_fwd="$(counter LH-FW-FORWARD-BR 169.254.0.0/16)"
+          meta_in="$(counter LH-FW-INPUT-BR 169.254.0.0/16)"
+          host_tcp="$(counter LH-FW-INPUT-BR 0.0.0.0/0)"
+          echo "Firewall counters: metadata tcp-reset forwarded $meta_fwd, to the host $meta_in; the host's other TCP ports $host_tcp"
+          [ "$((meta_fwd + meta_in))" -gt 0 ] || { echo "::error::the firewall's 169.254.0.0/16 rules refused nothing: the metadata refusal didn't come from them"; dump; exit 1; }
+          [ "$host_tcp" -gt 0 ] || { echo "::error::the firewall's last TCP rule in LH-FW-INPUT-BR refused nothing: the host port's refusal didn't come from it"; dump; exit 1; }
           # After a Docker restart the start-up unit must put the rules back. One jump is taken out by
           # hand first, so only the unit can make --status pass again.
           sudo iptables -w -D INPUT -j LH-FW-INPUT
@@ -202,17 +223,19 @@ jobs:
           done
           [ "$(curl -s --cacert "$RUNNER_TEMP/caddy-root.crt" -o /dev/null -w '%{http_code}' https://localhost/)" = "303" ] || { echo "::error::the site did not answer again after a Docker restart"; dump; exit 1; }
           sudo ./install-firewall.sh --status || { echo "::error::after a Docker restart the firewall's rules were not all back: the start-up unit did not put them back"; dump; exit 1; }
-          probe='const r=require("fs").readFileSync("/proc/net/route","utf8").split("\n").map(l=>l.trim().split(/\s+/)).find(f=>f[1]==="00000000");const h=r[2].match(/../g).reverse().map(x=>parseInt(x,16)).join(".");const s=require("net").connect({host:h,port:+process.argv[1]});s.setTimeout(5000,()=>{console.log("timeout");s.destroy()});s.on("connect",()=>{console.log("connected");s.destroy()});s.on("error",e=>console.log(e.code))'
           for i in $(seq 1 30); do
             [ -n "$(docker compose ps -q --status running lh)" ] && break
             sleep 2
           done
-          got="$(docker compose exec -T lh node -e "$probe" "$fw_port" 2>&1 || true)"
+          got="$(probe_lh gateway "$fw_port")"
           [ "$got" = "ECONNREFUSED" ] || { echo "::error::after a Docker restart the owner's copy was not refused on the host's port $fw_port (got: $got)"; dump; exit 1; }
           sudo ./install-firewall.sh --remove
           left="$({ sudo iptables-save; sudo ip6tables-save 2>/dev/null || true; } | grep -c LH-FW || true)"
           [ "$left" = 0 ] || { echo "::error::install-firewall.sh --remove left $left LH-FW lines in the firewall"; sudo iptables-save | grep LH-FW || true; exit 1; }
           if sudo systemctl is-enabled learnharness-firewall >/dev/null 2>&1; then echo "::error::install-firewall.sh --remove left its start-up unit enabled"; exit 1; fi
+          # And the route is open again: the listener was there all along.
+          got="$(probe_lh gateway "$fw_port")"
+          [ "$got" = "connected" ] || { echo "::error::after --remove the owner's copy still could not reach the host's port $fw_port (got: $got)"; dump; exit 1; }
       - name: Publish
         if: github.event_name == 'push'
         env:

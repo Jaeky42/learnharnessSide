@@ -130,14 +130,16 @@ jump_numbers() {
 # The jump to <target> is the first rule of <chain>, exactly once.
 ensure_first() {
 	fam=$1 chain=$2 target=$3
-	first="$(jump_numbers "$fam" "$chain" "$target" | head -n 1)"
-	if [ "$first" != 1 ]; then
-		ipt "$fam" -I "$chain" 1 -j "$target"
-	fi
-	# Any further copies (a re-run after something was inserted above ours).
-	for n in $(jump_numbers "$fam" "$chain" "$target" | sed 1d | sort -rn); do
-		ipt "$fam" -D "$chain" "$n"
+	# Already first and the only one: nothing changes.
+	nums="$(jump_numbers "$fam" "$chain" "$target")"
+	[ "$nums" = 1 ] && return 0
+	# Deleted by what it is, never by its number: another program (fail2ban,
+	# say) may insert a rule between our read and our delete. Between the
+	# delete and the insert the jump is missing for a moment; that is accepted.
+	while ipt "$fam" -C "$chain" -j "$target" 2>/dev/null; do
+		ipt "$fam" -D "$chain" -j "$target"
 	done
+	ipt "$fam" -I "$chain" 1 -j "$target"
 }
 
 remove_family() {
@@ -164,15 +166,20 @@ remove_rules() {
 }
 
 # A bridge named br-* that isn't one of Docker's would be treated as a
-# container network. Refuse rather than touch it. This prints any such bridge.
+# container network. This prints any such bridge: Docker names its bridges
+# br- and the first 12 hex characters of the network's id.
 foreign_bridges() {
-	ids="$(docker network ls -q --no-trunc 2>/dev/null)" || return 1
+	ids="$(docker network ls -q --no-trunc 2>/dev/null | cut -c1-12)" || return 1
 	for d in /sys/class/net/br-*; do
 		[ -e "$d" ] || continue
 		n=${d##*/}
-		say "$ids" | grep -q "^${n#br-}" || say "$n"
+		id=${n#br-}
+		if printf '%s\n' "$id" | grep -qx '[0-9a-f]\{12\}' && say "$ids" | grep -qx -- "$id"; then continue; fi
+		say "$n"
 	done
 }
+# With "drop" (the --apply of the start-up unit), rules from an earlier run
+# are taken out too: none is better than rules that match a foreign bridge.
 check_bridges() {
 	bad="$(foreign_bridges)" || die "Couldn't ask Docker for its networks. Is Docker running? Nothing was changed."
 	if [ -n "$bad" ]; then
@@ -180,7 +187,22 @@ check_bridges() {
 		sleep 2
 		bad="$(foreign_bridges)" || die "Couldn't ask Docker for its networks. Is Docker running? Nothing was changed."
 	fi
-	[ -z "$bad" ] || die "The network interface $(say "$bad" | head -n 1) isn't one of Docker's networks, and this firewall treats every br-* interface as one. Nothing was changed."
+	[ -z "$bad" ] && return 0
+	msg="The network interface $(say "$bad" | head -n 1) isn't one of Docker's networks, and this firewall treats every br-* interface as one."
+	if [ "${1:-}" = drop ] && have_rules; then
+		remove_rules
+		die "$msg The firewall rules from before are removed, so none are in place now. Rename or remove that interface, then: sudo systemctl restart $NAME"
+	fi
+	die "$msg Nothing was changed."
+}
+
+# Any of this script's chains present?
+have_rules() {
+	for c in LH-FW-INPUT LH-FW-FORWARD LH-FW-INPUT-BR LH-FW-FORWARD-BR; do
+		ipt 4 -n -L "$c" >/dev/null 2>&1 && return 0
+		v6_usable && ipt 6 -n -L "$c" >/dev/null 2>&1 && return 0
+	done
+	return 1
 }
 
 preflight() {
@@ -188,12 +210,12 @@ preflight() {
 	iptables -w -n -L INPUT >/dev/null 2>&1 || die "iptables can't read this server's rules. Nothing was changed."
 	iptables -w -n -L DOCKER-USER >/dev/null 2>&1 || die "Docker's DOCKER-USER chain isn't there. Either Docker isn't running (start it: sudo systemctl start docker), or it uses its nftables firewall backend (\"firewall-backend\": \"nftables\" in /etc/docker/daemon.json), which this script doesn't support. Nothing was changed."
 	have docker || die "The docker command isn't installed. Nothing was changed."
-	check_bridges
+	check_bridges "${1:-}"
 }
 
 apply() {
 	need_root --apply
-	preflight
+	preflight drop
 	# The rules are worked out before anything changes; a pipe would lose a
 	# failure on its left side.
 	r4="$(rules 4)"
@@ -221,7 +243,7 @@ status() {
 		if [ "$(jump_numbers "$1" "$2" "$3" 2>/dev/null | head -n 1)" = 1 ]; then
 			say "  in place: IPv$1 $2 -> $3 (first rule)"
 		elif [ -n "$(jump_numbers "$1" "$2" "$3" 2>/dev/null)" ]; then
-			say "  NOT FIRST: IPv$1 $2 -> $3 (another rule comes before it; run: sudo systemctl restart $NAME)"; ok=1
+			say "  NOT FIRST: IPv$1 $2 -> $3. Another rule comes before it. If that rule is another firewall's, this is harmless; to put ours first again: sudo systemctl restart $NAME"; ok=1
 		else
 			say "  MISSING:  IPv$1 $2 -> $3"; ok=1
 		fi
@@ -241,6 +263,14 @@ status() {
 		say "  IPv6: ip6tables isn't usable here; nothing to do."
 	fi
 	if have docker; then
+		if bad="$(foreign_bridges)"; then
+			for n in $bad; do
+				say "  FOREIGN BRIDGE: $n isn't one of Docker's networks. The rules treat it as a container network, so new connections arriving on it to this server are refused. Remove the firewall (sudo $0 --remove), or rename that bridge."
+				ok=1
+			done
+		else
+			say "  Couldn't ask Docker for its networks (is Docker running?)."; ok=1
+		fi
 		for net in $(docker network ls -q --filter driver=bridge 2>/dev/null); do
 			bn="$(docker network inspect -f '{{index .Options "com.docker.network.bridge.name"}}' "$net" 2>/dev/null || true)"
 			case $bn in '' | docker0 | br-*) ;; *) say "  NOT COVERED: Docker network $net uses the bridge name $bn"; ok=1 ;; esac
@@ -252,6 +282,10 @@ status() {
 		say "Start-up unit: ${enabled:-not installed}, ${active:-unknown}"
 		# Without it the rules are gone after the next restart.
 		[ "$enabled" = enabled ] || ok=1
+		if [ "$enabled" = enabled ] && [ "$active" != active ]; then
+			say "  The start-up unit's last run didn't succeed ($active). Its reason: journalctl -u $NAME --no-pager | tail; to try again: sudo systemctl restart $NAME"
+			ok=1
+		fi
 	fi
 	[ "$ok" = 0 ] && say "All in place." || say "Not all in place."
 	return "$ok"

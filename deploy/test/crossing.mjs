@@ -24,6 +24,7 @@ import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import https from "node:https";
+import net from "node:net";
 import path from "node:path";
 import { parseArgs } from "node:util";
 
@@ -113,6 +114,13 @@ function dnsFromInside(container, name) {
 	try { return docker(["exec", container, "node", "-e", script, name]).trim(); }
 	catch { return "exec-failed"; }
 }
+/** A TCP connect from this machine: "connected" or "error:<code>". */
+const tcpHere = (host, port) => new Promise((resolve) => {
+	const s = net.connect({ host, port });
+	s.setTimeout(5000, () => { s.destroy(); resolve("timeout"); });
+	s.on("connect", () => { s.destroy(); resolve("connected"); });
+	s.on("error", (e) => resolve(`error:${e.code}`));
+});
 /** Refused by a rule: a TCP reset, quickly (a timeout or a connection is not). */
 const refusedQuickly = (s) => /^ECONNREFUSED (\d+)ms$/.test(s) && Number(/(\d+)ms/.exec(s)[1]) < 3000;
 const FIREWALL_PUBLIC_HOST = "github.com";
@@ -315,6 +323,8 @@ async function main() {
 
 		// 3b. The host firewall (deploy/install-firewall.sh), only with --firewall.
 		if (args.firewall) {
+			// Without a listener a refusal would prove nothing: it must answer from the host itself.
+			expect(`firewall: the host's listener on port ${HOST_PORT} answers on the host (control)`, await tcpHere("127.0.0.1", HOST_PORT), "connected");
 			for (const [from, label] of [[a.container, "A's copy"], [owners, "the owner's copy"]]) {
 				expect(`firewall, from ${label}: the host's port ${HOST_PORT} on its bridge gateway -> refused`, tcpFromInside(from, "gateway", HOST_PORT), refusedQuickly);
 				expect(`firewall, from ${label}: the metadata address 169.254.169.254:80 -> refused`, tcpFromInside(from, "169.254.169.254", 80), refusedQuickly);
@@ -405,6 +415,7 @@ const PLAN = [
 	["from the gateway: A's copy directly", "unreachable"],
 	["from A's copy, by IP address: B's copy, the owner's copy, the gateway, the maker", "unreachable"],
 	["Caddy's relay port (9200) published on the host", "not published"],
+	...(args.firewall ? [[`firewall: the host's listener on port ${HOST_PORT} answers on the host (control)`, "connected"]] : []),
 	...(args.firewall ? ["A's copy", "the owner's copy"].flatMap((label) => [
 		[`firewall, from ${label}: the host's port ${HOST_PORT} on its bridge gateway`, "ECONNREFUSED, under 3 s"],
 		[`firewall, from ${label}: 169.254.169.254:80 (the metadata address)`, "ECONNREFUSED, under 3 s"],

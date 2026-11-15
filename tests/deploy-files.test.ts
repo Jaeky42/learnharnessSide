@@ -782,6 +782,57 @@ describe("deploy/install-firewall.sh", () => {
 		assert.match(source, /firewall-backend[\s\S]*nftables/, "Docker's nftables backend is refused with a reason");
 	});
 
+	it("against a stand-in iptables: first and single, idempotent, never deletes by number, a foreign rule kept", () => {
+		const state = tmp("fw-state");
+		const bin = tmp("fw-ipt");
+		const tool = (name: string, body: string) => fs.writeFileSync(path.join(bin, name), `#!/bin/sh\nS="${state}"\necho "${name} $*" >> "$S/calls"\n${body}\n`, { mode: 0o755 });
+		// One file per chain, one "-A" line per rule.
+		tool("iptables", [
+			'[ "$1" = -w ] && shift',
+			"case $1 in",
+			'-n) [ -f "$S/$3" ] ;;',
+			'-S) [ -f "$S/$2" ] || exit 1; echo "-P $2 ACCEPT"; cat "$S/$2" ;;',
+			'-C) grep -qx -- "-A $2 $3 $4" "$S/$2" ;;',
+			'-D) [ $# = 4 ] || exit 9; awk -v l="-A $2 $3 $4" \'!d && $0 == l { d = 1; next } 1\' "$S/$2" > "$S/t" && mv "$S/t" "$S/$2" ;;',
+			'-I) { echo "-A $2 $4 $5"; cat "$S/$2"; } > "$S/t" && mv "$S/t" "$S/$2" ;;',
+			'-F) : > "$S/$2" ;;',
+			'-X) /bin/rm -f "$S/$2" ;;',
+			"*) exit 9 ;;",
+			"esac",
+		].join("\n"));
+		tool("iptables-restore", 'set -f\nwhile read -r l; do case $l in :*) c=${l#:}; : > "$S/${c%% *}" ;; -A*) set -- $l; echo "$l" >> "$S/$2" ;; esac; done');
+		for (const name of ["ip6tables", "ip6tables-restore"]) tool(name, "exit 1");
+		tool("id", "echo 0");
+		// --remove deletes the unit and the installed copy: never this machine's real ones.
+		tool("rm", "exit 0");
+		tool("systemctl", 'case $1 in is-enabled) echo enabled ;; is-active) echo active ;; esac');
+		// Docker's own networks: one for each br-<12 hex> bridge on this machine.
+		tool("docker", 'case "$*" in *--no-trunc*) for d in /sys/class/net/br-*; do [ -e "$d" ] && printf "%s%s\\n" "${d##*/br-}" 0000000000000000000000000000000000000000000000000000; done ;; esac; exit 0');
+		const rules = (c: string) => fs.readFileSync(path.join(state, c), "utf8").trim().split("\n").filter(Boolean);
+		const calls = () => fs.readFileSync(path.join(state, "calls"), "utf8").split("\n").filter((c) => c.startsWith("iptables -w -") && / -[DI] /.test(c));
+		fs.writeFileSync(path.join(state, "INPUT"), "-A INPUT -j OTHER-FW\n");
+		fs.writeFileSync(path.join(state, "DOCKER-USER"), "");
+		const go = (mode: string) => run([mode], `${bin}:${process.env.PATH}`);
+		assert.equal(go("--apply").status, 0);
+		assert.deepEqual(rules("INPUT"), ["-A INPUT -j LH-FW-INPUT", "-A INPUT -j OTHER-FW"]);
+		assert.deepEqual(rules("DOCKER-USER"), ["-A DOCKER-USER -j LH-FW-FORWARD"]);
+		const before = calls().length;
+		assert.equal(go("--apply").status, 0);
+		assert.equal(calls().length, before, "already first and single: nothing inserted or deleted");
+		// Another program's rule lands above ours.
+		fs.writeFileSync(path.join(state, "INPUT"), `-A INPUT -j FAIL2BAN\n${fs.readFileSync(path.join(state, "INPUT"), "utf8")}`);
+		const status = go("--status");
+		assert.equal(status.status, 1);
+		assert.match(status.stdout, /NOT FIRST: IPv4 INPUT -> LH-FW-INPUT\. Another rule comes before it\. If that rule is another firewall's, this is harmless; to put ours first again: sudo systemctl restart learnharness-firewall/);
+		assert.equal(go("--apply").status, 0);
+		assert.deepEqual(rules("INPUT"), ["-A INPUT -j LH-FW-INPUT", "-A INPUT -j FAIL2BAN", "-A INPUT -j OTHER-FW"]);
+		assert.equal(go("--status").status, 0, go("--status").stdout);
+		for (const c of calls()) assert.doesNotMatch(c, / -D \S+ \d+$/, `never by number: ${c}`);
+		assert.equal(go("--remove").status, 0);
+		assert.deepEqual(rules("INPUT"), ["-A INPUT -j FAIL2BAN", "-A INPUT -j OTHER-FW"]);
+		assert.ok(!fs.existsSync(path.join(state, "LH-FW-INPUT-BR")) && !fs.existsSync(path.join(state, "LH-FW-FORWARD")));
+	});
+
 	describe("the server image workflow tries it on the real stack", () => {
 		type Step = { name?: string; run?: string };
 		const workflow = yaml.load(read(".github/workflows/server-image.yml")) as { jobs: Record<string, { steps: Step[] }> };
@@ -795,6 +846,13 @@ describe("deploy/install-firewall.sh", () => {
 			const install = at(/^\s*sudo \.\/install-firewall\.sh \|\|/);
 			const crossing = at("node test/crossing.mjs");
 			assert.ok(listener > 0 && install > listener && crossing > install, "listener, install, then crossing");
+			// Positive controls first, or a refusal later would prove nothing.
+			const hostCheck = at(/curl -s -o \/dev\/null "http:\/\/127\.0\.0\.1:\$fw_port\/" \|\| \{ echo "::error::/, listener);
+			const openBefore = at('got="$(probe_lh gateway "$fw_port")"', listener);
+			const metaBefore = at('got="$(probe_lh 169.254.169.254 80)"', listener);
+			assert.ok(hostCheck > listener && openBefore > hostCheck && metaBefore > openBefore && install > metaBefore, "host answers, container reaches it, metadata looked at, then install");
+			assert.match(line(openBefore + 1), /\[ "\$got" = "connected" \] \|\| \{ echo "::error::/);
+			assert.ok(at("::warning::", metaBefore) > metaBefore && at("::warning::", metaBefore) < install);
 			assert.match(line(crossing), /--firewall --host-port "\$fw_port"/);
 			assert.match(line(install), /::error::/);
 		});
@@ -803,10 +861,18 @@ describe("deploy/install-firewall.sh", () => {
 			const crossing = at("node test/crossing.mjs");
 			const restart = at("sudo systemctl restart docker", crossing);
 			const status = at("sudo ./install-firewall.sh --status", restart);
-			const probe = at(/exec -T lh node -e "\$probe" "\$fw_port"/, status);
+			const probe = at('got="$(probe_lh gateway "$fw_port")"', status);
 			const remove = at(/^\s*sudo \.\/install-firewall\.sh --remove$/, probe);
 			const left = at("grep -c LH-FW", remove);
-			assert.ok(restart > crossing && status > restart && probe > status && remove > probe && left > remove, "in that order");
+			const openAgain = at('got="$(probe_lh gateway "$fw_port")"', left);
+			assert.ok(restart > crossing && status > restart && probe > status && remove > probe && left > remove && openAgain > left, "in that order");
+			assert.match(line(probe + 1), /\[ "\$got" = "ECONNREFUSED" \]/);
+			assert.match(line(openAgain + 1), /\[ "\$got" = "connected" \]/, "--remove opens the route again");
+			// The refusals were our rules': their counters, read before the restart resets them.
+			const counters = at(/meta_fwd \+ meta_in/, crossing);
+			assert.ok(counters > crossing && counters < restart && at(/"\$host_tcp" -gt 0/, crossing) < restart);
+			assert.match(step?.run ?? "", /counter LH-FW-FORWARD-BR 169\.254\.0\.0\/16/);
+			assert.match(step?.run ?? "", /counter LH-FW-INPUT-BR 0\.0\.0\.0\/0/);
 			const unhook = at("iptables -w -D INPUT -j LH-FW-INPUT", crossing);
 			assert.ok(unhook > crossing && unhook < restart, "a jump is taken out first, so only the unit can put it back");
 			assert.match(line(status), /\|\| \{ echo "::error::/);
