@@ -298,6 +298,7 @@ describe("deploy/compose.yaml", () => {
 		assert.deepEqual(gateway.tmpfs, ["/tmp"]);
 		assert.deepEqual(maker.tmpfs, ["/tmp"]);
 		assert.equal(maker.stop_grace_period, "120s", "a running pass finishes before Docker kills the maker");
+		assert.equal(gateway.stop_grace_period, "90s", "an account being made finishes (the gateway drains up to 75 s) before Docker kills the gateway");
 		assert.equal(gateway.environment?.HOME, "/tmp");
 		assert.equal(maker.environment?.HOME, "/tmp");
 	});

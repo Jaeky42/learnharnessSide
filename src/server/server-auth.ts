@@ -516,9 +516,10 @@ export async function signOutEverywhereResponse(request: Request, now = Date.now
 // ─── Internal routes (behind a gateway only) ─────────────────────────────────
 
 /** POST /api/internal/unpair-all: the gateway unpairs every desktop app of
- *  this copy (after a password change, a reset, Sign out everywhere, Pause,
- *  Remove). The gate checked the secret and the scope already; both are
- *  checked again here. */
+ *  this copy (after a password change, a reset or Sign out everywhere; Pause
+ *  and Remove leave pairings alone, so a restored account's PC carries on).
+ *  The gate checked the secret and the scope already; both are checked
+ *  again here. */
 export function unpairAllResponse(request: Request): Response {
 	if (!behindGateway() || !gatePasses(request.headers) || gateScopeOf(request.headers) !== "internal") return notFound();
 	try {

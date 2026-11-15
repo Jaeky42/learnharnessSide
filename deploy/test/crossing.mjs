@@ -217,6 +217,12 @@ async function main() {
 		const markers = { owner: await marker(owner, `marker-owner-${suffix}`), a: await marker(a.cookie, `marker-a-${suffix}`), b: await marker(b.cookie, `marker-b-${suffix}`) };
 		const keys = { owner: await pairKey(owner), a: await pairKey(a.cookie), b: await pairKey(b.cookie) };
 		ownerDevice = keys.owner.deviceId;
+		// A paired desktop's first round: until a device has asked for news, a
+		// copy's sync authority has no record yet and knows no session (404).
+		for (const k of Object.values(keys)) {
+			const first = await sync(k.key, "POST", "/api/sync/sessions", { cursor: 0 });
+			if (first.status !== 200) throw new Error(`a test desktop's first sync round answered ${first.status}`);
+		}
 		// A member's tag is the first 3 characters of its device key; its container is named after it.
 		a.tag = keys.a.key.slice(0, 3); b.tag = keys.b.key.slice(0, 3);
 		a.container = `lh-acct-${a.tag}`; b.container = `lh-acct-${b.tag}`;
@@ -251,6 +257,8 @@ async function main() {
 		const codeA = jsonOf(await request("POST", "/api/server-auth/desktops", { cookie: a.cookie, body: { op: "code" } }))?.code;
 		expect("A's pairing code with B's tag -> refused", (await request("POST", "/api/sync/pair", { body: { code: codeA.slice(0, -3) + b.tag, deviceId: `dev_${rand(8)}`, name: "Crossing test" } })).status, [400, 401, 404]);
 		expect("A's pairing code with no tag (the owner's copy) -> refused", (await request("POST", "/api/sync/pair", { body: { code: codeA.slice(0, 9), deviceId: `dev_${rand(8)}`, name: "Crossing test" } })).status, [400, 401, 404]);
+		expect("A's cookie on the owner's list (GET /api/accounts) -> 404", (await request("GET", "/api/accounts", { cookie: a.cookie })).status, 404);
+		expect("A's cookie making an invite (POST /api/accounts) -> 404", (await request("POST", "/api/accounts", { cookie: a.cookie, body: { op: "invite" } })).status, 404);
 		expect("a client-sent X-LH-Scope: internal on a sync path does nothing more", (await request("POST", "/api/sync/hello", { headers: { authorization: `Bearer ${keys.a.key}`, "x-lh-sync-protocol": SYNC_PROTOCOL, "x-lh-scope": "internal" }, body: {} })).status, 200);
 
 		// 3. From inside containers.
@@ -264,6 +272,12 @@ async function main() {
 			expect(`from ${label}: Caddy's relay with no token`, fromInside(from, `http://${args.caddy}:9200/api/chats`, { "x-lh-upstream": "lh:3000" }), "404");
 		}
 		expect("from B's copy: the maker", fromInside(b.container, "http://maker:9100/copies"), unreachable);
+		// By address too, not only by name: another network is not routed at all.
+		const ipsOf = (container) => docker(["inspect", "-f", "{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}", container]).trim().split(/\s+/).filter(Boolean);
+		for (const [container, what, port] of [[b.container, "B's copy", 3000], [owners, "the owner's copy", 3000], [gateway, "the gateway", 9000], [containerOf("maker"), "the maker", 9100]]) {
+			for (const ip of ipsOf(container)) expect(`from A's copy, by address: ${what}`, fromInside(a.container, `http://${ip}:${port}/`), unreachable, ip);
+		}
+		expect("Caddy's relay port is not published on the host", docker(["port", args.caddy]).includes("9200") ? "published" : "not published", "not published");
 		expect("from the gateway: a copy directly (it goes through the relay only)", fromInside(gateway, `http://${a.container}:3000/api/chats`), unreachable);
 
 		// 4. /api/internal/* and path tricks, from outside.
@@ -345,6 +359,9 @@ const PLAN = [
 	["from A's / the owner's copy: the relay with a wrong token, and with none", "404"],
 	["from B's copy: the maker", "unreachable"],
 	["from the gateway: A's copy directly", "unreachable"],
+	["from A's copy, by IP address: B's copy, the owner's copy, the gateway, the maker", "unreachable"],
+	["Caddy's relay port (9200) published on the host", "not published"],
+	["A's cookie on GET and POST /api/accounts (the owner's routes)", "404"],
 	...INTERNAL_PATHS.map((p) => [`POST ${p} (signed out, owner, A; client X-LH-Scope: internal)`, "400/404"]),
 	...TRICK_PATHS.flatMap((p) => [[`GET ${p} (signed out)`, "refused or empty"], [`GET ${p} (A)`, "refused, empty, or A's own only"]]),
 	["Service-Worker: script", "403"],

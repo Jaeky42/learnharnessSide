@@ -90,6 +90,9 @@ services:
       - no-new-privileges:true
     mem_limit: 256m
     pids_limit: 128
+    # An account being made when the gateway is told to stop is finished (or
+    # rolled back) first; it drains for up to 75 s. Docker must not kill it sooner.
+    stop_grace_period: 90s
     logging: *lh-logging
 
   maker:
