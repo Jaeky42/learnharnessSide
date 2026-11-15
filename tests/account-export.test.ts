@@ -21,7 +21,7 @@ process.env.LH_DATA_DIR = path.join(TMP, "unused-data");
 process.env.LH_AUTH_FILE = path.join(TMP, "unused-secrets", "auth.json");
 
 const { accountExportResponse, exportFileName, listExportFiles, resetExportLock, EXPORT_PARTS } = await import("../src/server/account-export.ts");
-const { zipChunks, crc32 } = await import("../src/server/zip-writer.ts");
+const { zipChunks, crc32, isSafeEntryName } = await import("../src/server/zip-writer.ts");
 const route = await import("../app/api/account/export/route.ts");
 
 const SECRET = "k3Jq9XvT0pLw8ZrB2mN5sY7dF1gH4cE6aQ-uViOtRe_";
@@ -417,5 +417,75 @@ describe("zip writer", () => {
 		for await (const chunk of zipChunks([{ name: "dir/é ü ✓/x y.txt", path: file }, { name: "e.txt", path: empty }, { name: "missing.txt", path: path.join(root, "nope") }])) parts.push(Buffer.from(chunk));
 		const entries = readZip(Buffer.concat(parts));
 		assert.deepEqual(entries.map((e) => [e.name, e.data.toString()]), [["dir/é ü ✓/x y.txt", "hello"], ["e.txt", ""]]);
+	});
+});
+
+describe("entry names are safe to unzip anywhere", () => {
+	const BAD = [
+		"back\\slash.json", "colon:name.json", "lt<name.json", "gt>name.json", 'quote".json', "pipe|name.json", "what?.json", "star*.json",
+		"new\nline.json", "tab\tname.json", "del\u007f.json", "trailing-dot.", "trailing-space ", "CON", "con.json", "Aux.txt", "nul", "COM1.json", "lpt9.x.y", "PRN",
+	];
+
+	it("the rule, class by class; good unicode names and spaces pass", () => {
+		for (const name of ["chats/chat_1.json", "chats/séssion ✓ naïve.json", "chats/with space.json", "a/b/c.d", "chats/console.json", "chats/COM10.json", "chats/.hidden", "chats/日本語.json"]) assert.ok(isSafeEntryName(name), name);
+		for (const name of [...BAD.map((b) => `chats/${b}`), "", "/abs.json", "C:/x.json", "chats/../x", "../x", "chats/./x", "chats//x", "chats/x/", ".", "..", "a\\b/c", "chats/\ud800.json", "x".repeat(256)]) assert.ok(!isSafeEntryName(name), JSON.stringify(name));
+	});
+
+	it("bad names in the data folder are skipped with their subtrees, never renamed; a note says how many", async () => {
+		write("chats/good é.json", "{}");
+		let skipped = 0;
+		for (const bad of BAD) {
+			try { write(`chats/${bad}`, "planted"); skipped += 1; } catch { /* the file system refused the name */ }
+			try { write(`graph/${bad}/inside.json`, "planted"); skipped += 1; } catch { /* the same */ }
+		}
+		assert.ok(skipped > 20);
+		write("graph/fine.jsonl", "{}");
+		const zip = await collect(await accountExportResponse(request("sam"), { dataDir: data }));
+		const entries = readZip(zip);
+		const names = entries.map((e) => e.name).sort();
+		assert.deepEqual(names, ["chats/good é.json", "graph/fine.jsonl", "skipped-files.txt"]);
+		const note = entries.find((e) => e.name === "skipped-files.txt")!.data.toString();
+		assert.match(note, new RegExp(`^${skipped} files or folders were left out`));
+		assert.ok(!note.includes("planted") && !note.includes("slash") && !note.includes("CON"), "the note never names them");
+		assert.ok(!zip.includes(Buffer.from("planted")));
+		externalCheck(zip, root);
+	});
+
+	it("no skipped-files.txt when nothing was skipped", async () => {
+		write("chats/a.json", "{}");
+		const entries = readZip(await collect(await accountExportResponse(request("sam"), { dataDir: data })));
+		assert.deepEqual(entries.map((e) => e.name), ["chats/a.json"]);
+	});
+
+	it("the writer itself refuses names it is handed (leading slash, .., drive letter), and counts them", async () => {
+		const file = path.join(root, "x.txt");
+		fs.writeFileSync(file, "hello");
+		const parts: Buffer[] = [];
+		for await (const chunk of zipChunks([{ name: "ok.txt", path: file }, { name: "/abs.txt", path: file }, { name: "a/../../escape.txt", path: file }, { name: "C:/win.txt", path: file }])) parts.push(Buffer.from(chunk));
+		const zip = Buffer.concat(parts);
+		const entries = readZip(zip);
+		assert.deepEqual(entries.map((e) => e.name), ["ok.txt", "skipped-files.txt"]);
+		assert.match(entries[1]!.data.toString(), /^3 files or folders were left out/);
+		externalCheck(zip, root);
+	});
+
+	it("a folder swapped for a link out of the data folder after the list was made is not followed", async () => {
+		write("chats/aaa.jsonl", Buffer.from(crypto.randomBytes(200 * 1024).toString("hex")));
+		write("graph/g.jsonl", "{\"mine\":true}");
+		write("outside/g.jsonl", "{\"outside\":true}", root);
+		const response = await accountExportResponse(request("sam"), { dataDir: data });
+		const reader = response.body!.getReader();
+		const first = await reader.read();
+		fs.rmSync(path.join(data, "graph"), { recursive: true });
+		fs.symlinkSync(path.join(root, "outside"), path.join(data, "graph"));
+		const parts: Buffer[] = [Buffer.from(first.value!)];
+		for (;;) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			parts.push(Buffer.from(value));
+		}
+		const zip = Buffer.concat(parts);
+		assert.deepEqual(readZip(zip).map((e) => e.name), ["chats/aaa.jsonl"]);
+		assert.ok(!zip.includes(Buffer.from("outside")));
 	});
 });

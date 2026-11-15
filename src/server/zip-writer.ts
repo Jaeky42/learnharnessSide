@@ -29,7 +29,6 @@ export interface ZipSource {
 // ─── Entry names ─────────────────────────────────────────────────────────────
 
 // Control characters, backslash, colon and what Windows forbids in a file name.
-// eslint-disable-next-line no-control-regex
 const FORBIDDEN = /[\u0000-\u001f\u007f<>:"|?*\\]/;
 const RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
 
