@@ -185,12 +185,12 @@ describe("step 3: icons and build files", () => {
 
 describe("step 4: writes from another site", () => {
 	it("are refused with the copy's words, signed in or not", () => {
-		const { tokens } = fixture();
+		const { state, tokens } = fixture();
 		for (const over of [{ origin: "https://evil.example" }, { origin: null }, { origin: ORIGIN, fetchSite: "cross-site" }, { origin: "not a url" }]) {
-			const r = refused(decide({ uri: "/api/chats/x", method: "POST", cookie: cookieOf(tokens.sam!), ...over }), 403);
+			const r = refused(decide({ uri: "/api/chats/x", method: "POST", cookie: cookieOf(tokens.sam!), ...over }, state), 403);
 			assert.deepEqual(JSON.parse(r.body), { error: "This request must come from the LearnHarness site itself." });
 		}
-		assert.equal(routed(decide({ uri: "/api/chats/x", method: "PATCH", origin: ORIGIN, cookie: cookieOf(tokens.sam!) })).upstream, sam().upstream);
+		assert.equal(routed(decide({ uri: "/api/chats/x", method: "PATCH", origin: ORIGIN, cookie: cookieOf(tokens.sam!) }, state)).upstream, sam().upstream);
 	});
 });
 
@@ -257,12 +257,12 @@ describe("step 6: sign in first", () => {
 
 describe("what a client can't do", () => {
 	it("choose a copy with an X-LH-* header: the decision never reads one", () => {
-		const { tokens } = fixture();
+		const { state, tokens } = fixture();
 		const base = { "x-forwarded-method": "GET", "x-forwarded-uri": "/chat/1", host: HOST, cookie: cookieOf(tokens.sam!), "x-forwarded-proto": "https" };
 		const plain = gate.gateInputFrom(new Headers(base));
 		const forged = gate.gateInputFrom(new Headers({ ...base, "x-lh-upstream": OWNER_UP, "x-lh-gate": OWNER_SECRET, "x-lh-relay": "t", "x-lh-client-addr": "1.2.3.4" }));
 		assert.deepEqual(forged, plain);
-		assert.equal(routed(gate.decideGate(forged, fixture().state, CONFIG, NOW)).upstream, sam().upstream);
+		assert.equal(routed(gate.decideGate(forged, state, CONFIG, NOW)).upstream, sam().upstream);
 	});
 
 	it("send a path the copy would read differently: refused", () => {
