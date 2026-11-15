@@ -19,6 +19,9 @@ ENV LH_BUILD_VERSION=${LH_BUILD_VERSION} LH_BUILD_HOMEPAGE=${LH_BUILD_HOMEPAGE}
 # Upstream 0.6.0: the core plugins are built from plugins/ into core-plugins/
 # (their own dependencies first), and build-server.mjs refuses without them.
 RUN npm run plugins:setup && npm run build && node scripts/smoke-provider-runtime.mjs && node scripts/build-server.mjs
+# Multi-account: the gateway and the maker, two single-file bundles
+# (docs/multi-account-build.md). Not part of the standalone server.
+RUN node scripts/build-gateway.mjs
 
 # ── run ──────────────────────────────────────────────────────────────────
 FROM node:26-bookworm-slim
@@ -44,14 +47,20 @@ ENV NODE_ENV=production \
     PATH=/data/home/.local/bin:$PATH
 COPY --from=build /src/.next/standalone ./
 COPY --from=build /src/scripts/server-reset-password.mjs ./scripts/server-reset-password.mjs
+COPY --from=build /src/gateway-dist/gateway.mjs /src/gateway-dist/maker.mjs /app/gateway/
 COPY deploy/docker-entrypoint.sh /usr/local/bin/lh-entrypoint
-# `docker compose exec lh reset-password`: the forgot-password path.
-RUN printf '#!/bin/sh\nexec node /app/scripts/server-reset-password.mjs "$@"\n' > /usr/local/bin/reset-password \
- && chmod 755 /usr/local/bin/reset-password \
+# `docker compose exec lh reset-password`: the forgot-password path. Where a
+# gateway runs (LH_GATEWAY_FILE set, its container) it resets the owner's
+# account there instead; everywhere else it is the single-copy reset as ever.
+# `lh-gateway` and `lh-maker` start the two multi-account programs.
+RUN printf '#!/bin/sh\nif [ -n "${LH_GATEWAY_FILE:-}" ]; then exec lh-gateway reset-owner "$@"; fi\nexec node /app/scripts/server-reset-password.mjs "$@"\n' > /usr/local/bin/reset-password \
+ && printf '#!/bin/sh\nexec node /app/gateway/gateway.mjs "$@"\n' > /usr/local/bin/lh-gateway \
+ && printf '#!/bin/sh\nexec node /app/gateway/maker.mjs "$@"\n' > /usr/local/bin/lh-maker \
+ && chmod 755 /usr/local/bin/reset-password /usr/local/bin/lh-gateway /usr/local/bin/lh-maker \
  && chmod 755 /usr/local/bin/lh-entrypoint \
- && mkdir -p /data/data /data/secrets /data/home /data/vault \
- && chown -R node:node /data \
- && chmod 700 /data/secrets
+ && mkdir -p /data/data /data/secrets /data/home /data/vault /gateway \
+ && chown -R node:node /data /gateway \
+ && chmod 700 /data/secrets /gateway
 USER node
 VOLUME ["/data"]
 EXPOSE 3000

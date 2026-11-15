@@ -5,6 +5,26 @@
 # background; later starts ask it to update itself. LearnHarness starts
 # straight away either way; Settings shows "isn't installed yet" until done.
 mkdir -p "$HOME/.local/bin"
+
+# A new account's copy (multi-account; docs/multi-account-plan.md): the maker
+# sets LH_SEED_WORKER_CONCURRENCY, and a volume with no settings.json yet gets
+# "helpers at once" at that number, in the shape the app writes
+# (src/store/settings.ts: version 1, tab-indented, no trailing newline). An
+# existing file is never touched; a value that isn't a positive whole number
+# is ignored (no leading zero, at most four digits).
+seed="${LH_SEED_WORKER_CONCURRENCY:-}"
+case "$seed" in
+	''|*[!0-9]*|0|0[0-9]*|[0-9][0-9][0-9][0-9][0-9]*) ;;
+	*)
+		settings_file="${LH_DATA_DIR:-/data/data}/settings.json"
+		if [ ! -e "$settings_file" ] && mkdir -p "$(dirname "$settings_file")"; then
+			printf '{\n\t"version": 1,\n\t"agent": {\n\t\t"workerRequestConcurrency": %s\n\t}\n}' "$seed" >"$settings_file.seed-$$" \
+				&& mv "$settings_file.seed-$$" "$settings_file" \
+				|| rm -f "$settings_file.seed-$$"
+		fi
+		;;
+esac
+
 if [ ! -x "$HOME/.local/bin/claude" ]; then
 	(
 		# Download first: in `curl | bash` a failed download still "succeeds".

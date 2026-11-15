@@ -1,9 +1,65 @@
-# HTTPS for LearnHarness. Caddy gets and renews the certificate itself.
+{
+	servers {
+		# no trusted_proxies: client X-Forwarded-* is never trusted
+	}
+}
+
+(strip) {
+	request_header -X-LH-Upstream
+	request_header -X-LH-Gate
+	request_header -X-LH-Relay
+	request_header -X-LH-Client-Addr
+}
+
+(to_copy) {
+	forward_auth gateway:9000 {
+		uri /gate
+		copy_headers X-LH-Upstream X-LH-Gate
+	}
+	reverse_proxy {http.request.header.X-LH-Upstream} {
+		flush_interval -1
+	}
+}
+
 {$LH_DOMAIN} {
 	encode zstd gzip
-	reverse_proxy lh:3000 {
-		# Lesson replies and the live event stream arrive in pieces:
-		# pass them on immediately instead of buffering.
-		flush_interval -1
+
+	route {
+		import strip
+
+		handle /api/internal/* {
+			respond 404
+		}
+
+		@copyOwn path /api/server-auth/desktops
+		@gateway path /login /setup /invite /reset /manifest.webmanifest /api/accounts /api/accounts/* /api/sync/pair /api/server-auth/*
+
+		handle @copyOwn {
+			import to_copy
+		}
+		handle @gateway {
+			reverse_proxy gateway:9000
+		}
+		handle {
+			import to_copy
+		}
+	}
+}
+
+# Internal relay: plain HTTP, internal network only (never published).
+http://:9200 {
+	route {
+		@ok expression `"{$LH_RELAY_TOKEN}" != "" && {header.X-LH-Relay} == "{$LH_RELAY_TOKEN}"`
+		handle @ok {
+			reverse_proxy {http.request.header.X-LH-Upstream} {
+				flush_interval -1
+				header_up -X-LH-Relay
+				header_up X-Forwarded-For {http.request.header.X-LH-Client-Addr}
+				header_up -X-LH-Client-Addr
+			}
+		}
+		handle {
+			respond 404
+		}
 	}
 }

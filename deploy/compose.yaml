@@ -1,38 +1,142 @@
-# LearnHarness on a VPS (side-tutor fork, cloud sync Phase 1).
-# Copy .env.example to .env, fill it in, then: docker compose up -d
+# LearnHarness on a VPS (side-tutor fork, cloud sync Phase 1; multi-account
+# slice 1d/3d, docs/multi-account-build.md).
+# Copy .env.example to .env, run ./make-secrets.sh once, then: docker compose up -d
 # LearnHarness is reachable only through Caddy, which serves HTTPS for
-# LH_DOMAIN with an automatic certificate.
+# LH_DOMAIN with an automatic certificate and asks the gateway about every
+# request. The gateway holds the accounts; the maker alone talks to Docker and
+# makes each invited person's own copy at run time (not listed here).
+#
+# Networks keep everything apart:
+#   front  Caddy + gateway only
+#   owner  Caddy + the owner's copy (lh) only
+#   maker  gateway + maker only (internal: no way out, no way in)
+# Each account copy gets a network of its own, made by the maker, that only
+# Caddy joins. Nothing but Caddy reaches the gateway or a copy; copies share
+# no network with each other, the gateway or the maker.
+
+x-lh-image: &lh-image ghcr.io/jaeky42/learnharnessside:${LH_CHANNEL:-latest}
+
 services:
   lh:
-    image: ghcr.io/jaeky42/learnharnessside:${LH_CHANNEL:-latest}
+    image: *lh-image
     restart: unless-stopped
     environment:
       # Caddy is the only way in, so its X-Forwarded-For is trusted for the
       # login lockout (src/server/server-auth.ts clientAddress).
       LH_TRUST_PROXY: "1"
+      # Behind the gateway: the copy's own password gate is off and every
+      # request must carry this secret (added by Caddy from the gateway's answer).
+      LH_GATE_SECRET: ${LH_GATE_SECRET:?Run ./make-secrets.sh in deploy/ first}
       TZ: ${TZ:-UTC}
     volumes:
       - lh-data:/data
+    networks:
+      - owner
     expose:
       - "3000"
 
+  gateway:
+    image: *lh-image
+    # The image's own start script (Claude Code, ob) must not run here.
+    command: ["lh-gateway"]
+    restart: unless-stopped
+    depends_on:
+      - maker
+    environment:
+      LH_GATEWAY_FILE: /gateway/accounts.json
+      LH_MAX_ACCOUNTS: ${LH_MAX_ACCOUNTS:-4}
+      LH_OWNER_UPSTREAM: lh:3000
+      LH_OWNER_GATE_SECRET: ${LH_GATE_SECRET:?Run ./make-secrets.sh in deploy/ first}
+      LH_MAKER_URL: http://maker:9100
+      LH_MAKER_TOKEN: ${LH_MAKER_TOKEN:?Run ./make-secrets.sh in deploy/ first}
+      # Requests to any copy go through Caddy's internal relay (never published).
+      LH_RELAY_URL: http://caddy:9200
+      LH_RELAY_TOKEN: ${LH_RELAY_TOKEN:?Run ./make-secrets.sh in deploy/ first}
+      LH_TRUST_PROXY: "1"
+      TZ: ${TZ:-UTC}
+      HOME: /tmp
+    volumes:
+      - gateway-data:/gateway
+    networks:
+      - front
+      - maker
+    expose:
+      - "9000"
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 256m
+    pids_limit: 128
+
+  maker:
+    image: *lh-image
+    command: ["lh-maker"]
+    restart: unless-stopped
+    # The only service with Docker's socket, which is root on this server.
+    # It stays the unprivileged image user; the socket's group is added
+    # instead (LH_DOCKER_GID, written by make-secrets.sh).
+    group_add:
+      - ${LH_DOCKER_GID:?Run ./make-secrets.sh in deploy/ first}
+    environment:
+      LH_MAKER_TOKEN: ${LH_MAKER_TOKEN:?Run ./make-secrets.sh in deploy/ first}
+      # Every copy is made from this same image.
+      LH_IMAGE: *lh-image
+      LH_CADDY_CONTAINER: lh-caddy
+      TZ: ${TZ:-UTC}
+      HOME: /tmp
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - maker
+    expose:
+      - "9100"
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 128m
+    pids_limit: 64
+
   caddy:
     image: caddy:2
+    # A fixed name: the maker joins this container to each account's network.
+    container_name: lh-caddy
     restart: unless-stopped
     depends_on:
       - lh
+      - gateway
     ports:
       - "80:80"
       - "443:443"
       - "443:443/udp"
     environment:
       LH_DOMAIN: ${LH_DOMAIN:?Set LH_DOMAIN in deploy/.env}
+      LH_RELAY_TOKEN: ${LH_RELAY_TOKEN:?Run ./make-secrets.sh in deploy/ first}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
       - caddy-config:/config
+    networks:
+      front:
+        aliases:
+          - caddy
+      owner: {}
+
+networks:
+  front:
+  owner:
+  maker:
+    internal: true
 
 volumes:
   lh-data:
+  gateway-data:
   caddy-data:
   caddy-config:

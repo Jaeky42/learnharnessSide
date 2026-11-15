@@ -9,7 +9,10 @@
  */
 
 import { PASSWORD_MIN_LENGTH, formatWait } from "./server-auth.ts";
-import { RECOVERY_CODE_COUNT, REMOVED_KEEP_MS } from "./accounts.ts";
+
+// Equal to RECOVERY_CODE_COUNT and REMOVED_KEEP_MS in ./accounts.ts (a test pins it); not imported, to keep this file standalone.
+const RECOVERY_TOTAL = 4;
+const KEEP_MS = 30 * 24 * 60 * 60 * 1000;
 
 // ─── Reused as they are today ────────────────────────────────────────────────
 
@@ -142,7 +145,7 @@ export function accountStatusText(account: { role: "owner" | "member"; state: "a
 export const inviteUntilText = (expiresAt: number): string => `Works once, until ${dayText(expiresAt)}`;
 
 /** A removed account: "Removed 9 Nov · deleted for good on 9 Dec". */
-export const removedText = (removedAt: number, deletedAt: number = removedAt + REMOVED_KEEP_MS): string => `Removed ${dayText(removedAt)} · deleted for good on ${dayText(deletedAt)}`;
+export const removedText = (removedAt: number, deletedAt: number = removedAt + KEEP_MS): string => `Removed ${dayText(removedAt)} · deleted for good on ${dayText(deletedAt)}`;
 
 export interface ConfirmText { title: string; body: string; cancel: string; confirm: string }
 
@@ -217,4 +220,4 @@ export const ACCOUNT_TEXT = {
 	},
 } as const;
 
-export const recoveryLeftText = (left: number, total: number = RECOVERY_CODE_COUNT): string => `${left} of ${total} left.`;
+export const recoveryLeftText = (left: number, total: number = RECOVERY_TOTAL): string => `${left} of ${total} left.`;

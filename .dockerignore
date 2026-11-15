@@ -18,3 +18,4 @@ github-copilot-credentials.json*
 xai-credentials.json*
 .env*
 *.log
+gateway-dist
