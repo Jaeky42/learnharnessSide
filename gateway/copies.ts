@@ -40,13 +40,13 @@ export class AnswerTooLarge extends Error {
 }
 
 /** Reads a body of at most `limit` bytes; beyond it the rest is cancelled and AnswerTooLarge thrown. */
-export async function readCapped(response: Response, limit = ANSWER_LIMIT_BYTES): Promise<Uint8Array> {
+export async function readCapped(response: Response, limit = ANSWER_LIMIT_BYTES): Promise<Uint8Array<ArrayBuffer>> {
 	const declared = Number(response.headers.get("content-length") ?? "");
 	if (Number.isFinite(declared) && declared > limit) {
 		await response.body?.cancel().catch(() => undefined);
 		throw new AnswerTooLarge();
 	}
-	if (!response.body) return new Uint8Array(0);
+	if (!response.body) return new Uint8Array(new ArrayBuffer(0));
 	const reader = response.body.getReader();
 	const chunks: Uint8Array[] = [];
 	let size = 0;
@@ -60,7 +60,7 @@ export async function readCapped(response: Response, limit = ANSWER_LIMIT_BYTES)
 		}
 		chunks.push(value);
 	}
-	const out = new Uint8Array(size);
+	const out = new Uint8Array(new ArrayBuffer(size));
 	let at = 0;
 	for (const chunk of chunks) { out.set(chunk, at); at += chunk.byteLength; }
 	return out;

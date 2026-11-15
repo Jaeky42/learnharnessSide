@@ -409,7 +409,7 @@ export const MAX_LOCKOUT_ENTRIES = 2000;
  */
 export function lockoutKey(address: string): string {
 	const plain = address.trim().toLowerCase();
-	const mapped = /^(?:0{0,4}:){0,5}(?:0{0,4}::?)?ffff:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(plain) ?? /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(plain);
+	const mapped = /^(?:::|(?:0{1,4}:){5})ffff:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(plain);
 	if (mapped) return mapped[1]!;
 	if (!plain.includes(":") || !/^[0-9a-f:.%a-z]+$/.test(plain)) return address;
 	const bare = plain.split("%")[0]!;

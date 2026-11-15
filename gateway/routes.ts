@@ -400,7 +400,7 @@ export const pairRoute: Handler = (request, deps) => guarded(async () => {
 		} catch {
 			return new Response(null, { status: 503, headers: NO_STORE });
 		}
-		let data: Uint8Array;
+		let data: Uint8Array<ArrayBuffer>;
 		try {
 			data = await readCapped(answer);
 		} catch (error) {
