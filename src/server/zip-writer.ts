@@ -237,7 +237,15 @@ export async function* zipChunks(sources: ZipSource[], options: ZipOptions = {})
 			}
 		} finally {
 			deflate?.destroy();
-			read?.destroy();
+			// A read stream made from a handle closes that handle itself when it is
+			// destroyed, and handle.close() then answers at once although the real
+			// close is still under way. Wait for the stream's own "close", so that a
+			// cancelled download has shut its file by the time the cancel returns.
+			if (read) {
+				const stream = read;
+				stream.destroy();
+				if (!stream.closed) await new Promise<void>((resolve) => stream.once("close", () => resolve()));
+			}
 			await opened.handle.close().catch(() => {});
 		}
 		const descriptor = dataDescriptor(crc, compressed, size);
