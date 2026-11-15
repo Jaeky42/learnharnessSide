@@ -70,7 +70,7 @@ The names, routes and file shapes under "Contracts" are the planner's proposals 
 | `GET /api/server-auth/account` | signed in | Today's shape (`devices` = signed-in browsers), plus `name`, `owner`, `recoveryCodesLeft`. |
 | `POST /api/server-auth/password`, `/logout`, `/sign-out-everywhere` | signed in | As today, per account. |
 | `POST /api/server-auth/recovery-codes` | signed in, with the password | Replaces the 4 codes; returns them once. |
-| `POST /api/server-auth/delete-account` | signed in, with the password; not the owner | The same as Remove. |
+| `POST /api/server-auth/delete-account` | signed in, with the password; not the owner | Deletes at once (the owner's decision): ends every session, has the maker remove the container and delete the volume, then erases the account's record. No `removed` state, no 30 days. |
 | `GET /api/accounts`, `POST /api/accounts {op}` | the owner | The list, and `invite`, `cancel-invite`, `reset`, `pause`, `resume`, `remove`, `restore`, `delete-now`. |
 | `POST /api/sync/pair` | a desktop app | Reads the tag from the code in the body, passes the request to that copy with its secret, passes the answer back. |
 
@@ -154,7 +154,7 @@ Slices 4 and 5 can be built side by side. Inside a slice, the lettered parts wit
 
 After it, the owner's server does what it does today, through the gateway, with a name on the sign-in page.
 
-- **Ask the owner first:** the words of the sign-in page (with a name), the first-start page (setup code, name, password), and the refusals (a wrong name or password, the lockout).
+- **Already answered** ("The approved words" in the plan): the sign-in page, the first-start page and their refusals. A paused or removed account is told so only after a correct name and password.
 - **1a. The rules** (new `src/core/accounts.ts`, pure, exported like the other core rules): the state's shape and its parser (unknown fields dropped, a wrong version refused), name rules and the reserved list, create / find / pause / remove / restore an account, sessions with an `accountId`, invites, reset codes, recovery codes, the cap. Reuse from `src/core/server-auth.ts`: `hashPassword`, `verifyPassword`, `passwordProblem`, `newSessionToken`, `newSetupCode`, `setupCodeHash`, `setupCodeMatches`, `lockedFor`, `recordFailure`, `clearFailures`, `formatWait`, `deviceLabel`, `SESSION_COOKIE`, `SESSION_LIFETIME_MS`.
   - Tests: `tests/accounts-core.test.ts`.
 - **1b. The gateway program** (new `gateway/`): `state.ts` (the file, as `src/store/server-auth.ts` does it), `gate.ts` (the `/gate` decision as one pure function of method, path, headers and state), `routes.ts` (each route as `(Request) => Response`), `pages.ts`, `main.ts` (the HTTP listener, the setup code printed at first start, as `announceSetupCode` does). No dependency beyond Node and `src/core`.
@@ -179,7 +179,7 @@ After it, the owner's server does what it does today, through the gateway, with 
 
 ### Slice 3: the maker, invites and new accounts
 
-- **Ask the owner first:** the invite page and its refusals ("This server is full.", a wrong, used or run-out code, a taken or refused name), the recovery-codes page shown once, and whether the invite page says what the owner can and can't do.
+- **Already answered:** the invite page and its refusals (no note about the owner's powers) and the recovery-codes page (Copy and Continue, nothing to tick). **Still to ask:** the sentence for a reserved name.
 - **3a. The maker** (new `gateway/maker.ts` and `gateway/docker.ts`): the Docker Engine API over the socket with plain `node:http` (`socketPath`), no dependency. The fixed template; the per-account network and joining Caddy to it; start, stop, remove; at its own start, bring every `lh-acct-*` container whose image differs from `LH_IMAGE` onto it, one at a time.
   - Tests: `tests/maker.test.ts` against a stand-in Docker API on a socket: the exact create request (limits, no extra mounts, no privileges), a refused tag, the token check, the re-create on a new image.
 - **3b. Invites in the gateway:** `POST /api/server-auth/invite`, the cap, the tag's choice, the maker call, rolling back the account if the maker fails, the recovery codes returned once.
@@ -190,17 +190,18 @@ After it, the owner's server does what it does today, through the gateway, with 
 
 ### Slice 4: the owner's screen
 
-- **Ask the owner first:** every word of Settings → Accounts and its confirm boxes, with a drawing; how Pause reads to the paused person at sign-in.
+- **Already answered:** Settings → Accounts (a ⋯ menu per account), its four confirm boxes, and what a paused or removed person reads at sign-in. **Still to ask:** the menu item that undoes Pause, and how a reset code and a new invite code are shown once made.
 - **Build:** the gateway's `/api/accounts` (owner only, checked by the gateway; an `lh_owner=1` marker cookie only decides whether the row shows); the 30-day deletion (checked at the gateway's start and once a day; `DELETE /volumes/<tag>`); the unpair-all calls. New `components/settings/accounts-section.tsx`; one row in `components/settings/settings-dialog.tsx` (upstream's file; add it to the list in `docs/upstream-0.6.0.md`); the phone's Settings list (`components/phone/phone-plugins.ts`, `tests/phone-layout.test.ts` pin the rows).
 - **Tests:** `tests/gateway-accounts.test.ts` (each `op`, a non-owner refused, the cap, Restore with no free slot, the 30 days with a moved clock), `tests/accounts-ui.test.tsx` (every state with the approved words; the row absent for a member and in the desktop app).
 - **Risk:** moderate. Routine implementer for the screen, complex for the gateway part.
 
 ### Slice 5: each person's own
 
-- **Ask the owner first:** the new parts of Settings → Account (recovery codes, Download my data, Delete my account), the reset page, and the download's file type.
+- **Already answered:** the new parts of Settings → Account and their boxes, the reset page (one box for either code), and the download's file type (.zip).
+- **Delete my account is immediate** (the owner's decision): the gateway checks the password, ends every session, calls the maker's `DELETE /copies/<tag>` and `DELETE /volumes/<tag>`, and only then erases the record. If the maker fails part-way, the account stays signed out and marked for deletion and the gateway tries again; it is never left usable with half its data gone.
 - **5a. Settings → Account** (`components/settings/account-section.tsx`): reads the gateway's wider answer; the three new blocks only when the answer has them, so a single-copy server's screen is unchanged.
 - **5b. Reset** in the gateway: recovery code or owner's code, both counted by the one lockout, both ending every session and unpairing.
-- **5c. Download my data:** `app/api/account/export/route.ts` and `src/server/account-export.ts`: the parts `src/store/sync/backup.ts` lists (`chats`, `graph`, `jobs`, `settings.json`, `prompts`, `themes`, `notes/sessions`, `plugins-state.json`, `core-plugin-data`), streamed, never `sync/`, the secrets folder, the home folder or the vault. The repo has no archive library; choose with the owner's answer on the file type.
+- **5c. Download my data:** `app/api/account/export/route.ts` and `src/server/account-export.ts`: the parts `src/store/sync/backup.ts` lists (`chats`, `graph`, `jobs`, `settings.json`, `prompts`, `themes`, `notes/sessions`, `plugins-state.json`, `core-plugin-data`), streamed, never `sync/`, the secrets folder, the home folder or the vault. The owner chose **.zip**; the repo has no archive library, so add one small zip writer (with npm 11, for the lockfile), or write the store-only zip format by hand if nothing suitable is found. The file is named `learnharness-<name>-<date>.zip`.
 - **5d. Browser storage at sign-out:** the app's stored keys are window and view state (`lh:side-tutor:pos`, `lh:side-tutor:size`, `lh:notes-*`, `lh:sidebar-open`, `lh:session-kind-filter`, `lh:zoom`, `lh.graph.camera.v1`). Check the files that touch storage (`components/chat.tsx`, `opening-prompt.ts`, `sidebar.tsx`, `graph-view.tsx`, `graph-canvas.ts`, `notes/notes-drawer.tsx`, `side-tutor.tsx`, `settings/settings-dialog.tsx`, `settings/keyboard-section.tsx`) for anything that holds a person's words, and clear that at sign-out.
 - **Tests:** `tests/gateway-reset.test.ts`, `tests/account-export.test.ts` (what is in, what is never in), more cases in `tests/server-auth-ui`-style tests for the Account screen.
 - **Risk:** moderate; the reset paths get the deep reviewer's eye with slice 1's.

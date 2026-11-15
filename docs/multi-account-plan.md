@@ -1,6 +1,6 @@
 # Plan: accounts on one server (several people, one address)
 
-**Status: approved by the owner** ("I agree with everything"), with one change: 4 recovery codes, where the draft said 8. **Nothing is built, and nothing is to be built until the owner says so** ("do not build anything"): the plan is written so a later session can build it quickly. Approving the plan is not the word to start. That session reads this, waits for the owner's word to build, asks the owner whatever is listed under "To ask the owner at build time", and builds the plan as written; anything that has to differ from it goes back to the owner first. Change a decision recorded here only with the owner's approval.
+**Status: approved by the owner** ("I agree with everything"), with one change: 4 recovery codes, where the draft said 8. **Since then the owner answered the wording questions** ("The approved words" below) and changed one rule: a person who deletes their own account has their data deleted at once. **Nothing is built, and nothing is to be built until the owner says so** ("do not build anything"): the plan is written so a later session can build it quickly. Approving the plan is not the word to start. That session reads this, waits for the owner's word to build, asks the owner whatever is listed under "To ask the owner at build time", and builds the plan as written; anything that has to differ from it goes back to the owner first. Change a decision recorded here only with the owner's approval.
 
 ## What was asked
 
@@ -26,6 +26,8 @@ Asked one at a time, each with pictures of the options.
 | 10 | Model access | **Each person brings their own** (their Claude or ChatGPT sign-in, or API keys, in their own Settings). Nothing of the owner's is shared. |
 | 11 | Features for invited accounts | **Everything the owner has, in a hardened container:** a memory cap, a CPU share, a process limit, no special system rights. |
 | 12 | Extras in the first version | **Delete my own account** and **Download my data.** Not in the first version: usage per account on the owner's screen, renaming an account. |
+| 12a | Deleting one's own account (the owner's later change) | **The data is deleted at once, for good.** No 30 days and no Restore. The owner's own Remove keeps its 30 days (decision 9). |
+| 12b | The download | **A .zip file**, its folders laid out like the data folder. |
 
 ## Facts this plan rests on
 
@@ -130,7 +132,8 @@ Asked one at a time, each with pictures of the options.
 ### In each person's Settings → Account
 
 - As today: change password, the signed-in devices, Sign out, Sign out everywhere. These calls are answered by the gateway now (Caddy sends `/api/server-auth/*` there, except the desktop-app list and pairing codes, which stay the copy's).
-- New: recovery codes; **Download my data**; **Delete my account** (password and a confirm box; the same 30-day rule as Remove; not offered to the owner).
+- New: recovery codes; **Download my data**; **Delete my account** (password and a confirm box; not offered to the owner).
+- **Delete my account deletes at once** (decision 12a): every device is signed out, the copy is stopped and removed, its volume is deleted, and the account's record, name and tag are gone. Nothing is kept and nothing can be restored. A desktop app that was paired with it is answered 401 `not_paired` from then on; what is on that person's own PC stays there.
 - **Download my data** is made by the copy itself: one archive of its data folder in the folder's own layout (sessions, graph, settings, prompt texts, themes, plugin data, the notes records), so it can be put into a desktop app's data folder. Not in it: sign-ins and keys, the sync records, and the Obsidian vault (Obsidian has it).
 
 ### Limits on a copy
@@ -168,11 +171,40 @@ Asked one at a time, each with pictures of the options.
 
 ## To ask the owner at build time
 
-- **Every word on the new screens**, with a drawing of each: the sign-in page with a name, the invite page, the recovery-code page, the reset page, Settings → Accounts, the new parts of Settings → Account, the confirm boxes, and each refusal ("This server is full.", "This account is paused.", a wrong or used code, a taken name). The drawings shown with the questions are drafts, not approved wording.
+- **The words listed as "Not yet worded"** under "The approved words". Everything else on the new screens is answered there.
 - **Whether the four numbers above still fit** (cap, memory ceiling, swap, helpers at once), once the real server has been watched with two copies. They are approved as first values.
-- **The download's file type** (zip is proposed).
-- **Whether a person is told** on the invite page that the owner can pause, reset and remove their account but can't open it from the site.
 - **Which branch feeds it**, and when the owner's server and the desktop app get it.
+
+## The approved words
+
+Asked one screen at a time, each with a drawing; the owner's answers. They belong in one place in the code when built (as `src/core/sync/screens.ts` holds the sync screens' words). Change them only with the owner's approval. Quoted names take curly quotes, as elsewhere in the app.
+
+- **The sign-in page** (everyone, every sign-in). "LearnHarness" / "Name" / "Password" / **Sign in** / links "Have an invite code?" and "Forgot your password?".
+  - A wrong name or a wrong password: "That name or password isn't right."
+  - Too many tries: today's sentence, "Too many attempts. Try again in 15 minutes."
+  - **With the correct name and password, on a paused account:** "This account is paused. Ask this server's owner." **On an account the owner removed** (while its data is still kept): "This account was removed. Ask this server's owner." Only after a correct password, so a stranger guessing names learns nothing. (The owner first chose the ordinary sentence here, then changed it to this.)
+- **The first-start page** (the owner, once, at the switch-over). "Set up LearnHarness" / "Enter the setup code from the server log, then choose a name and a password of at least 8 characters." / "Setup code" / "Name" with "3 to 20 letters, digits or dashes." / "New password" / "Type it again" / **Create account**. No sentence about the owner's account or the existing data (the owner's choice).
+  - A wrong code: today's sentence, "That setup code isn't right. Check the server log for the current code." A name that isn't allowed: "Use 3 to 20 letters, digits or dashes."
+- **The invite page** (an invited person, once). "Create your account" / "Invite code" / "Name" with "3 to 20 letters, digits or dashes." and "You sign in with it." / "Password" with "At least 8 characters." / "Type it again" / **Create account**. **No note about what the owner can and can't do** (the owner's choice).
+  - Refusals: "That invite code isn't right, or it has run out." / "That name is taken. Choose another." / "This server is full. Ask its owner."
+- **The recovery codes page** (once, right after an account is made). "Your recovery codes" / "If you forget your password, any one of these lets you choose a new one. Each works once. They won't be shown again." / the four codes / **Copy**, **Continue**. Nothing has to be ticked first (the owner's choice).
+- **The reset page** (from "Forgot your password?"). One box takes either kind of code (the owner's choice). "Choose a new password" / "Enter one of your recovery codes, or a reset code from this server's owner." / "Name" / "Code" / "New password" / "Type it again" / **Set new password**.
+  - Refusal: "That name or code isn't right, or the code has been used or has run out."
+- **Settings → Accounts** (the owner only). Each account is one line with a **⋯** menu (the owner's choice over buttons on every row; it fits a phone).
+  - Group "Accounts": the name, then "Owner · signed in now", "Last seen 9 Nov, 18:20" or "Paused". The menu: **Reset password**, **Pause**, **Remove** (red, last). Under the list: "3 of 4 accounts used."
+  - Group "Invite codes": **New invite code**; each waiting code with "Works once, until 22 Nov" and **Cancel**.
+  - Group "Removed": the name, "Removed 9 Nov · deleted for good on 9 Dec", **Restore**, **Delete now**.
+- **The owner's confirm boxes** (approved as drawn):
+  - `Reset “sam”’s password?` / "You get a code to pass on. It works once, for 24 hours. When it is used, sam is signed out everywhere and pairs their desktop apps again." / Cancel, **Get reset code**.
+  - `Pause “sam”?` / "sam can't sign in and their copy stops. Nothing is deleted." / Cancel, **Pause**.
+  - `Remove “sam”?` / "The account stops now. Its data is kept for 30 days, then deleted for good." / Cancel, **Remove** (red).
+  - `Delete “lee” now?` / "This deletes the account's data for good." / Cancel, **Delete** (red).
+- **Each person's Settings → Account, the new parts** (approved as drawn):
+  - Group "Recovery codes": "2 of 4 left." / **New recovery codes**. Its box: "New recovery codes?" / "Your old codes stop working." / "Password" / Cancel, **Make new codes**.
+  - Group "Your data": **Download my data** / "Your sessions, graph and settings as one file."
+  - **Delete my account** (not shown to the owner). Its box: "Delete your account?" / "Your account and everything in it are deleted now, for good. This can't be undone. Download your data first if you want to keep it." / "Password" / Cancel, **Delete my account** (red).
+
+**Not yet worded** (drawn in no question; for the owner at build time): the paused account's menu item that undoes Pause ("Resume" in a drawing the owner didn't choose); how the reset code and a new invite code are shown once made; the sentence for a reserved name; the first-start page's two-passwords-don't-match and too-short lines (today's exist: "The two passwords don't match.", "Use at least 8 characters.").
 
 ## Build order
 
