@@ -615,7 +615,7 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
     - Two things the guide asked for that haven't been confirmed one by one: "Concurrent worker requests" lowered to 3 on the owner's copy, and the recovery codes kept.
   - **After `git pull` on the server, `./make-secrets.sh` must run before the next `./update.sh`:** the new compose file refuses to start without the secrets, so the nightly update would fail (and change nothing) until they exist.
   - **The Windows release** carries the wider pairing box and, unused there, the account screens.
-  - **The two open decisions were not settled by the ship** ("Open for the owner"): the owner said "ship" to the question of a password box on Reset, Remove and Delete now, which was read as shipping the approved confirm boxes as they are; the firewall step was shown to the owner after the ship.
+  - **The two open decisions were not settled by the ship** ("Open for the owner"): the owner said "ship" to the question of a password box on Reset, Remove and Delete now, which was read as shipping the approved confirm boxes as they are; the firewall step was shown to the owner after the ship, and the owner then decided to add it ("The host firewall (optional)": built, not shipped).
   - **Way back:** the per-commit image tag of `bab6d0e` and the previous `deploy/` files; the owner's copy's own password login was never touched.
   - **This line and the release number were added after the ship**, on `claude/dazzling-maxwell-j6mfy1` only (a docs-only commit); they reach the two release branches with the next change that ships.
 - **The sync protocol stays 3 and no stored format changed.** Nothing on the wire changed shape, so the order of updating the server and a PC doesn't matter. A desktop app and a single-copy server (no gateway) behave as before: everything new is switched by `LH_GATE_SECRET` / `LH_ACCOUNT_TAG` being set, or lives in the gateway and the maker. No existing test file was edited.
@@ -849,6 +849,63 @@ Bodies are at most 16 KB; a request has 10 s for its headers and 30 s in all.
 - **`reset-password`:** where the image runs a gateway (`LH_GATEWAY_FILE` set: the gateway's container) the command is `lh-gateway reset-owner`; everywhere else it is the single-copy reset as ever (`scripts/server-reset-password.mjs` is unchanged; the choice is in the image's wrapper script).
 - **The cap** is `LH_MAX_ACCOUNTS` in `deploy/.env` (4), changed by editing that line and running `./update.sh`.
 
+#### The host firewall (optional)
+
+- **State: built on `claude/dazzling-maxwell-j6mfy1`, checked on GitHub's runner, not shipped.** The owner saw a page of a trial with stand-in containers and decided to add it ("ok, i say we add it"), with the result shown before it ships. Neither release branch has it and the owner's server doesn't run it. Shipping needs the owner's word; it changes only `deploy/`, the server image workflow and a test, so the Windows release it would publish changes nothing in the app.
+- **Why:** account networks are not internal (a copy needs outbound access for its model providers), so a program inside a copy (the teacher's tools, a coding question's test program) can reach the server's own services through the bridge's gateway address, and the hosting provider's metadata address. The owner's copy always could. The app can't close this; the host's packet filter can.
+- **What it is:** `deploy/install-firewall.sh`, run once on the server with `sudo`, in the style of `install-update-timer.sh`. Optional: the stack works the same with or without it.
+  - no option: installs (copies itself to `/usr/local/sbin/learnharness-firewall`, writes and enables the systemd unit `learnharness-firewall.service`, applies the rules now);
+  - `--status`: is every rule in place, is the jump first, is the unit enabled and active, is every `br-*` interface one of Docker's (needs root; exits 1 when not all in place);
+  - `--remove`: takes the rules, the unit and the installed copy out;
+  - `--rules 4 | 6`: prints the rules and changes nothing (no root, no `iptables` needed); `--apply` is what the unit runs.
+- **The rules** (IPv4, mirrored for IPv6 where `ip6tables` works, with AWS's `fd00:ec2::254`): the script's own chains (`LH-FW-INPUT`, `LH-FW-INPUT-BR`, `LH-FW-FORWARD`, `LH-FW-FORWARD-BR`), loaded in one step with `iptables-restore --noflush`, reached by one jump kept as the first rule of `INPUT` and of `DOCKER-USER`. Only packets that arrive on `docker0` or `br-+` are looked at.
+  - **To the host itself:** replies to connections the host opened pass (conntrack `RELATED,ESTABLISHED`, which carries the ICMP that path-MTU discovery needs); port 53 to the resolvers named in the host's `resolv.conf` files and in `daemon.json`'s `dns` passes; `169.254.0.0/16` is refused; TCP 80 and 443 and UDP 443 pass (the site's own published ports); everything else is refused.
+  - **Forwarded:** port 53 to those resolvers passes, then `169.254.0.0/16` is refused. Everything else is left to Docker's own rules: outbound, container to container, Caddy to a copy.
+  - **Refused means `REJECT`** (a TCP reset, else ICMP admin-prohibited), so an attempt fails in milliseconds instead of hanging.
+  - **Nothing is ever accepted and no chain policy changes**, so it can't open what another firewall closed, and it can't cut SSH, which never arrives from a bridge.
+- **When it refuses to install, changing nothing:** no `iptables`; no `DOCKER-USER` chain (Docker's nftables backend); a `br-*` interface that isn't one of Docker's networks (exactly 12 hex characters equal to the start of a network id); no systemd. A failure half-way takes out everything it added and exits 1, also on a signal.
+- **After a restart of Docker or the server** the unit puts the rules back (`After=`, `PartOf=` and `WantedBy=docker.service`, a oneshot that stays "active"). An apply that fails then takes its rules out: it fails open, and `--status` and `systemctl status learnharness-firewall` say so.
+- **`deploy/update.sh` doesn't touch it**, and the maker needs no change: an account network made later is a `br-*` bridge like the others.
+
+**The check on GitHub** (the "Multi-account stack and crossing tests" step of `server-image.yml`, on the real stack, after the plain crossing run's set-up):
+
+1. A listener is started on the host (`python3 -m http.server`, all addresses). **Before the firewall** the owner's copy must reach it through the bridge's gateway address, and what `169.254.169.254:80` answers from there is printed. Without that, "refused" would prove nothing: a port with no listener is refused too.
+2. `sudo ./install-firewall.sh`, then the crossing script with `--firewall --host-port <port>`: from inside an account's copy and inside the owner's copy, the listener and `169.254.169.254:80` must be refused within 3 s; a DNS lookup, a TCP connection to an outside host on 443 and one to the site's own 443 on the gateway address must still work. That is 11 more checks: **122** with the firewall, 111 without.
+3. The firewall's own packet counters must have risen (the `169.254.0.0/16` rules, and the last TCP rule to the host), so the refusals came from these rules.
+4. The jump is deleted from `INPUT` by hand and Docker is restarted: once the unit has run again, `--status` must say all in place, and the owner's copy must be refused again.
+5. `--remove`: no `LH-FW` line left in `iptables-save` or `ip6tables-save`, the unit not enabled, and the owner's copy reaches the listener again.
+
+**What the runs showed** (three runs started by hand on the session branch; they publish nothing):
+
+- **Before the firewall**, from the owner's copy: the listener `connected`, and `169.254.169.254:80` `connected` too (GitHub's runners are Azure machines with a real metadata service).
+- **With it:** `ECONNREFUSED` after 3 ms for both, from an account's copy and from the owner's copy; the three controls worked; **122 of 122 refused as expected**; counters: 2 metadata resets on the forward path, 0 to the host, 2 resets on the host's other TCP ports.
+- **After a Docker restart** the rules were back and the copy was refused again; **after `--remove`** nothing was left and the copy connected again (the run on `6f9665a`, which passed whole).
+- **The first run** was cancelled by starting the second (the workflow's concurrency group). **The second failed in the check, not in the script:** it asked for the status the instant the site answered after Docker's restart, about half a second before systemd had run the unit again (`MISSING: IPv4 INPUT -> LH-FW-INPUT`, and the rule there a second later). The check now waits up to 30 s for the status before requiring it.
+
+**An independent security review** (read-only, "changes required"; all four fixed before the run that passed):
+
+1. The check could have passed with no firewall at all (no listener is also "refused"): the positive controls before the install, the counters, and "connected again after `--remove`" were added.
+2. The jump was kept first by deleting by rule number, which could delete another program's rule added in the same instant (fail2ban, for one): it is deleted by its own spec now, and nothing is touched when it is already first and single.
+3. `--status` said "All in place." with a failed unit or a foreign bridge: it reports both, and a jump that isn't first.
+4. The bridge check matched by prefix: an exact match now.
+
+**Choices made while building, for the owner to review** (the owner saw the first four on the trial's page before deciding):
+
+- **It covers every Docker bridge on the server**, not only LearnHarness's: account networks appear at runtime and the packet filter sees only `br-<id>`. Anything else in Docker on that server that needs the host itself is refused too.
+- **Ports 80 and 443 stay reachable from containers** (the site's own address).
+- **The provider's private network isn't blocked**, only the host itself and `169.254.0.0/16`.
+- **Copies run for a moment at boot before the rules are back** (the unit runs after Docker has started).
+- **A rule another program puts above the jump** (fail2ban inserting at the top) makes `--status` say NOT FIRST. That is harmless when the rule above is that program's own; `--status` says so and how to put the jump first again.
+
+**Known limits and not tried:**
+
+- **Not on the owner's server yet,** so their provider, their Docker version and whether they use `ufw` are untried. Run so far: GitHub's Ubuntu 24.04 runner (systemd, Docker's iptables backend) and the sandbox's Docker 29 with stand-in containers.
+- **IPv6 traffic** wasn't sent through it (the rules are loaded and removed in the runs; no IPv6 probe).
+- **A bridge named `br-*` that isn't Docker's, made after the install** (libvirt or a hand-made one): new connections arriving on it to the host would be refused, and the next apply (a Docker restart, a reboot) refuses, takes the rules out and says so in `--status`. An SSH session never arrives on a bridge.
+- **A provider whose metadata address is outside `169.254.0.0/16`** isn't covered for that address (Azure's second one, `168.63.129.16`, is such an address).
+- **A failed apply at boot is silent** except in `--status` and `systemctl status`: nothing in the app shows it.
+- **The unit tests pin mostly the rules' text and order** (and a run against stand-in `iptables`, `docker` and `systemctl`); that the rules really refuse is shown only by the GitHub step.
+
 #### Rulings made while building (for the owner to review)
 
 None of these is approved item by item. Each went the way the plan or the code pointed. The owner has the review page (an Artifact page), which lists the main ones under "Added or decided while building", and gave the word to ship without commenting on them.
@@ -873,20 +930,11 @@ None of these is approved item by item. Each went the way the plan or the code p
 
 #### Open for the owner
 
-Not built; each is a decision for the owner.
+Each is a decision for the owner. Only the firewall is built.
 
 - **Asking for the owner's password again on Reset, Remove and Delete now.** All copies share one origin, so a tab left open from a member's copy in a browser the owner then signs in on could call the owner's Accounts routes (the routes check the session's role, not where the page came from). A password box on those confirm boxes would close that; the approved confirm boxes have none, so it changes approved screens.
-- **A firewall rule on the server** so account copies can't reach services on the host or the provider's metadata address. A copy can today (as the owner's copy always could); the app can't do this. Account networks are not internal because the copies need outbound access.
-  - **Prototyped and tried after the ship, at the owner's ask ("show me the firewall"); not in the repository, and the owner hasn't decided.** The owner has a page with the results (an Artifact page). The draft script lived only in the session's scratch folder, so this is the record to rebuild it from:
-    - **Shape:** `deploy/install-firewall.sh` in the style of `install-update-timer.sh`: no option installs (copies itself to `/usr/local/sbin`, writes a systemd oneshot unit `After=` and `PartOf=docker.service`, `WantedBy=docker.service`, applies), `--status`, `--remove`.
-    - **Rules** (IPv4, mirrored for IPv6 where `ip6tables` works), in the script's own chains, loaded in one step with `iptables-restore --noflush`, reached by one jump kept as the first rule of `INPUT` and of `DOCKER-USER`. Only packets that arrive on `docker0` or `br-+` are looked at.
-      - To the host itself: replies to connections the host opened pass (conntrack `RELATED,ESTABLISHED`, which carries the ICMP that path-MTU discovery needs); port 53 to the resolvers named in the host's `resolv.conf` files and in `daemon.json`'s `dns` passes; `169.254.0.0/16` is refused; TCP 80 and 443 and UDP 443 pass (the site's own published ports); everything else is refused.
-      - Forwarded: port 53 to those resolvers passes, then `169.254.0.0/16` is refused.
-      - Refused means `REJECT` (a TCP reset, else ICMP admin-prohibited), so an attempt fails in about 0.1 s instead of hanging. Nothing is ever accepted, and no chain policy changes, so it can't open what another firewall closed and can't cut SSH, which never arrives from a bridge.
-      - It stops, changing nothing, when `iptables` or `DOCKER-USER` is missing (Docker's nftables backend), when a `br-*` interface isn't one of Docker's networks, or without systemd; a failure half-way removes everything it added.
-    - **Tried in the sandbox** (Docker 29, stand-in containers on a non-internal user bridge, on `docker0` and on a network made after the rules; a stand-in host service; the metadata address both forwarded to an "outside" namespace and bound on the host): every route to the host service and to `169.254.169.254` went from reached to refused; outbound (a real HTTPS request through a relay to the sandbox's proxy, a 1 MiB upload over an MTU-1280 hop), DNS through Docker's resolver, container to container, the published port from the host and from containers all still worked. Applied three times: the same rules. Removed: `iptables-save` identical to before. After a `dockerd` restart the rules were still there.
-    - **Not tried:** the real accounts stack and the crossing script with the rules on (the sandbox's built image was gone); the systemd unit running (no systemd in the sandbox; it passed `systemd-analyze verify`); IPv6 traffic; `ufw`; Docker 25 to 28. GitHub's runner has systemd and real Docker, so the stack step of `server-image.yml` is where to run it if the owner says yes.
-    - **Choices in the draft, for the owner:** it covers every Docker bridge on the server, not only LearnHarness's (account networks appear at runtime and iptables sees only `br-<id>`); ports 80 and 443 stay reachable from containers; the provider's private network isn't blocked; copies run for a few seconds at boot before the rules are back.
+- **The firewall on the server is decided and built** (the owner: "ok, i say we add it"); what is left is the owner's word to ship it. See "The host firewall (optional)" above.
+  - **The trial the owner saw before deciding** (the sandbox, Docker 29, stand-in containers on a non-internal user bridge, on `docker0` and on a network made after the rules; a stand-in host service; the metadata address both forwarded to an "outside" namespace and bound on the host): every route to the host service and to `169.254.169.254` went from reached to refused; outbound (a real HTTPS request through a relay to the sandbox's proxy, a 1 MiB upload over an MTU-1280 hop), DNS through Docker's resolver, container to container, the published port from the host and from containers all still worked. Applied three times: the same rules. Removed: `iptables-save` identical to before. After a `dockerd` restart the rules were still there.
 - **Each password check holds the gateway's one thread briefly** (scrypt, as on a single-copy server today): a flood of sign-in tries slows the site for everyone. The lockout bounds one address, not many.
 - **The owner's Reset is, by design (plan decisions 6 and 8), the power to set a member's password.** It signs the member out and unpairs their desktop apps, which is how the member can tell. Recorded here so the owner can confirm they accept it.
 - **The four first values** (4 accounts, 1 GB per copy, 2 GB of swap, 3 helpers at once) are approved as first values to tune on the real server ("Still for the owner, after the build" in the plan).
@@ -906,7 +954,8 @@ Not built; each is a decision for the owner.
 | `src/server/account-export.ts`, `zip-writer.ts`, `app/api/account/export/route.ts`, `app/api/internal/unpair-all/route.ts` | Download my data; the copy's internal route. |
 | `components/settings/accounts-section.tsx`, `account-accounts-group.tsx`, `owner-mode.ts`, `account-section.tsx`, `sign-out-storage.ts`, `settings-dialog.tsx` | The screens ("The screens"); the dialog edit is marked in the file. |
 | `Dockerfile`, `scripts/build-gateway.mjs`, `deploy/compose.yaml`, `Caddyfile`, `make-secrets.sh`, `update.sh`, `docker-entrypoint.sh`, `.env.example` | The image's two extra programs and wrapper scripts; the stack; the seed of "helpers at once". |
-| `deploy/test/crossing.mjs`, `deploy/test/README.md` | The crossing tests against a running stack (`--list` prints what it tries and touches nothing). |
+| `deploy/test/crossing.mjs`, `deploy/test/README.md` | The crossing tests against a running stack (`--list` prints what it tries and touches nothing; `--firewall --host-port <port>` adds the host firewall's checks). |
+| `deploy/install-firewall.sh` | The optional host firewall ("The host firewall (optional)"). |
 | `.github/workflows/server-image.yml`, `side-tutor-windows.yml` | The new "Multi-account stack and crossing tests" step after the single-copy smoke test; the Windows step's wider test list. |
 
 #### Tests
@@ -925,7 +974,7 @@ Run one file at a time (`NODE_ENV=test npx tsx --test tests/<file>`).
 | `tests/gateway-review.test.ts` | The security review's findings, end to end. |
 | `tests/accounts-ui.test.tsx`, `account-own-ui.test.tsx` | The owner's screen and each person's new parts in the approved words; the row absent for a member and in the desktop app; the phone group; a single-copy server's Account screen unchanged. |
 | `tests/account-export.test.ts`, `sign-out-storage.test.ts` | The download (what is in, what never is; read back by a reader written in the test and by `unzip` / Python when present); the storage audit. |
-| `tests/deploy-files.test.ts` | The Caddyfile, compose file, entrypoint seed, `make-secrets.sh`, `build-gateway.mjs` and the image's wrappers (shell and YAML nothing else runs). |
+| `tests/deploy-files.test.ts` | The Caddyfile, compose file, entrypoint seed, `make-secrets.sh`, `build-gateway.mjs` and the image's wrappers (shell and YAML nothing else runs); `install-firewall.sh` (its syntax, the rules' text and order, apply, status and remove against stand-in `iptables`, `docker` and `systemctl`, and the workflow's sequence). |
 
 The existing tests that guard "unchanged" (`tests/server-auth.test.ts`, `sync-inert.test.ts`, `sync-pairing.test.ts`, `claude-code-status-ui.test.tsx`) stay as they were. **Run in the sandbox:** the whole suite, one file at a time, by an independent run (495 files, 6,805 tests; the only failures are the four known sandbox ones; typecheck clean; lint only the existing warning).
 
@@ -1051,7 +1100,7 @@ Caddy, the gateway, the maker and copies ran together in Docker in the developme
 
 ### After the merge (read this first)
 
-- **Several accounts on one server is shipped** (built on `claude/dazzling-maxwell-j6mfy1`, cut from the released `side-tutor`): a gateway, a maker that makes one Docker container per account, invite codes and the owner's Accounts screen. With the owner's word ("can you ship"), the same commit went to `claude/pensive-goldberg-7dty2m` and to `side-tutor`, both plain fast-forwards from `bab6d0e`, after both dry runs had passed. No sync protocol or format change. **The owner's server is switched over:** the owner followed the guide (a copy of the server's data by hand, `git pull`, `./make-secrets.sh`, `./update.sh`, the setup code from the gateway's log, the claim) and reported "everything works great", without saying which screens they tried. If they report a problem, ask what the screen shows and for the lines of `docker compose logs gateway` that carry no code. Never ask for the setup code, a recovery code or a password. Still open for the owner: a password box on Reset, Remove and Delete now, and the firewall step. What was built, the builder's rulings for the owner to review, what is open and what only the real server can show are in "Accounts on one server" under "Hosting"; the owner's decisions and the approved words are in `docs/multi-account-plan.md`.
+- **Several accounts on one server is shipped** (built on `claude/dazzling-maxwell-j6mfy1`, cut from the released `side-tutor`): a gateway, a maker that makes one Docker container per account, invite codes and the owner's Accounts screen. With the owner's word ("can you ship"), the same commit went to `claude/pensive-goldberg-7dty2m` and to `side-tutor`, both plain fast-forwards from `bab6d0e`, after both dry runs had passed. No sync protocol or format change. **The owner's server is switched over:** the owner followed the guide (a copy of the server's data by hand, `git pull`, `./make-secrets.sh`, `./update.sh`, the setup code from the gateway's log, the claim) and reported "everything works great", without saying which screens they tried. If they report a problem, ask what the screen shows and for the lines of `docker compose logs gateway` that carry no code. Never ask for the setup code, a recovery code or a password. Still open for the owner: a password box on Reset, Remove and Delete now. **The optional host firewall is built on the session branch and waits for the owner's word to ship** ("The host firewall (optional)" under "Accounts on one server"). What was built, the builder's rulings for the owner to review, what is open and what only the real server can show are in "Accounts on one server" under "Hosting"; the owner's decisions and the approved words are in `docs/multi-account-plan.md`.
 
 - **Upstream 0.6.0 is merged and shipped** to both branches, at the same commit. It raises the sync protocol to 2, so the server and the desktop app must both be updated or sync pauses (nothing is discarded while paused). What changed in sync, the gate, the phone layout and the screens is in `docs/upstream-0.6.0.md`. Where this file and that one differ, that one is newer.
 - **The phone plugins round is shipped** (built on `claude/upstream-0.6.0`): Flashcards and Rich code blocks on a phone ("Plugins on a phone" under "Phone layouts") and Flashcards sync ("Flashcards sync" below). It raises the sync protocol to 3, so the same rule applies again: the server and the desktop app must both be updated, the server first.
