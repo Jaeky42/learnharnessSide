@@ -612,7 +612,7 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 - **Built on `claude/dazzling-maxwell-j6mfy1`** (the released `side-tutor` merged in first; the guide named `claude/upstream-0.6.0` as the start, which was at the same commit as this branch's start). The owner gave the word to build ("build my multi accounts feature"). The build ran straight through, as the owner decided; its one stop is the page of screenshots.
 - **Not shipped.** Nothing was pushed to `side-tutor` or `claude/pensive-goldberg-7dty2m`, so the owner's server and the Windows app are as they were. This branch isn't in `.github/workflows/server-image.yml`'s list, so a push to it builds nothing; both workflows can be started by hand (`workflow_dispatch`) for a dry run. **Nothing ships without the owner's approval after the screenshot page**, and then the same commit goes to both branches ("Which branch changes what" under "After the merge").
 - **The sync protocol stays 3 and no stored format changed.** Nothing on the wire changed shape, so the order of updating the server and a PC doesn't matter. A desktop app and a single-copy server (no gateway) behave as before: everything new is switched by `LH_GATE_SECRET` / `LH_ACCOUNT_TAG` being set, or lives in the gateway and the maker. No existing test file was edited.
-- TODO(lead): dry runs.
+- **Dry runs:** see "The full run in the real stack" below.
 - **Where to read:** the owner's decisions and every approved sentence are in `docs/multi-account-plan.md` (the sentences live in code in `src/core/account-screens.ts`). This part records what was built, where, and what the builder decided beyond the plan.
 
 #### What it does
@@ -917,7 +917,35 @@ The existing tests that guard "unchanged" (`tests/server-auth.test.ts`, `sync-in
 
 #### The full run in the real stack
 
-TODO(lead): results of the full-flow run, the crossing tests, the screenshots and the two workflow dry runs.
+Caddy, the gateway, the maker and copies ran together in Docker in the development sandbox, driven through a real browser (Playwright), with another container from the same image playing a desktop app. The image was built from a generated local copy of the `Dockerfile` ("Development notes" below), so it had no Chromium, curl or fonts. The flows first ran on the image of commit `2bc5ddf`; after the repair of the gateway's second half the image was rebuilt, the stack moved onto it with a real `update.sh`, and invite, both resets, Delete my account, `reset-password` and the crossing run were done again on it. All passed.
+
+| Flow | What was seen | Time |
+|---|---|---|
+| **The switch-over:** one copy with its own password login and a paired desktop copy, then the gateway stack put in front of the same data volume (`make-secrets.sh`, `up`) | `/setup` answered; after the claim all sessions were there; the desktop copy kept syncing without pairing again | `/setup` after 1.6 s; claim to the codes page 0.23 s; codes page to home 2.6 s; desktop sync 2.1 s |
+| **The way back:** the stack stopped, the copy started without `LH_GATE_SECRET` | The old password login works; the desktop copy syncs | 10 s |
+| **An invite redeemed** | Recovery codes, then an empty library asking for a provider key; `docker inspect` matches the template; the owner's list shows the member | codes page 1.0 s; the new copy's first page 5.1 s |
+| **Invite refusals:** wrong code, used code, taken name (capitals ignored), reserved name, bad name, passwords, a full server at cap 2 | Each approved sentence; the greyed New invite code button | — |
+| **Pause, Resume** | Copy exited, the open page answers 401, the paused sentence only with the right password; then back | 0.5 s; 0.2 s, sign-in 3.8 s |
+| **Remove, Restore, Delete now** | Container gone and volume kept; the removed sentence; Restore brought a marker session back; Delete now removed container, network and volume, and the name was free | 1.0 s; 2.2 s |
+| **Resets:** the owner's reset code, a recovery code, `reset-password` in the gateway's container | Each code works once; old sessions end; the fifth wrong code shows the lockout sentence | — |
+| **Delete my account** | At `/login` at once; container, network and volume gone; the name can be taken again | 0.23 s; all gone after 1.0 s (10.7 s on the rebuilt image) |
+| **Download my data** | A valid zip (`chats`, `graph`, `jobs`, `settings.json`); no `sync/`, nothing from the secrets folder | — |
+| **Pairing through the gateway** | A member: 13-character code, 46-character tagged key, the session reaches that member's library only. The owner: 9-character code, 43-character key | — |
+| **A paused member's desktop copy** | Offline, keeps its key; syncs again after Resume without pairing | 3.4 s |
+| **A member's password change** | The desktop copy must pair again | — |
+| **An update with accounts present** (`update.sh` onto a rebuilt image) | Every copy on the new image; Caddy joined to every account network again; a signed-in page and both desktop copies carried on | 8–10 s; 13.4 s once the gateway drains |
+
+- **The crossing tests** (`deploy/test/crossing.mjs`, on a fresh stack of the rebuilt image): **111 of 111 crossings refused, in 63 s.** Each cookie sees only its own marker session; two accounts' cookies together 401; forged `X-LH-*` headers change nothing (signed out: 401); another account's device key 404; a key with its tag swapped, removed or added 401; a pairing code with another tag or none 401; a member on `/api/accounts` 404; from inside a copy, the other copies, `lh`, the gateway and the maker don't resolve by name and time out by address; the relay without its token 404, and its port isn't published; `/api/internal/*` in ten spellings from three callers 404 or 400; path tricks 400 or 404; a `Service-Worker` request 403; a paused or removed account's cookie 401 and key 503; a deleted account's key 401 `not_paired` with its volume gone.
+  - An absolute-form request for a host Caddy doesn't serve gets Caddy's own empty 200; no gateway or copy is asked.
+  - One fix to the script on its first run: the key control read a session before any sync round, so the copy answered 404; it now does a first round first.
+- **Screenshots:** 91, of every new screen at 1280 × 800 and at iPhone 13 size, indexed in the scratch folder's `final-shots/INDEX.md`; 83 of them are on the owner's review page (an Artifact page). No page error in any.
+- **Seen in the run, for the owner to review:**
+  - "Last seen today, 04:40 AM" and "Removed Nov 15 · deleted for good on Dec 15": dates and times follow the device's own format (`dayText`, `dayTimeText` in `src/core/account-screens.ts`), as the sync screens do; the approved examples read "9 Nov, 18:20".
+  - On a computer the Accounts page's heading is followed by a group also headed "Accounts" (the approved group name).
+  - The desktop app's pairing box fitted a 13-character code with no room to spare in Chromium's font (158 of 158 px). It was then widened one step (`max-w-44` in `components/settings/cloud-section.tsx`), which the owner allowed; the screenshot predates that.
+  - `reset-password` unpairs the owner's desktop apps when its code is used (a reset does).
+- **Sandbox workarounds, in the scratch folder only:** a hosts entry for the test domain; account POSTs sent through Playwright's own client, because Chromium on the Docker host aborts requests in flight when Docker adds a network interface; the lockout table emptied between refusal screenshots.
+- **The two workflows started by hand on this branch** (`workflow_dispatch`; they publish nothing): TODO(lead): dry runs.
 
 #### Known limits
 
