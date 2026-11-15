@@ -519,15 +519,18 @@ describe("sign-in", () => {
 		assert.equal(acc.lockWait(state, "::ffff:203.0.113.7", NOW), 0);
 	});
 
-	it("review I: at most MAX_LOCKOUT_ENTRIES addresses are remembered, the oldest dropped first", () => {
+	it("review I: at most MAX_LOCKOUT_ENTRIES addresses are remembered; only one it needn't keep makes room", () => {
+		assert.equal(acc.MAX_LOCKOUT_ENTRIES, 5000);
 		const many: Record<string, acc.GatewayLockout> = {};
-		for (let i = 0; i < acc.MAX_LOCKOUT_ENTRIES; i += 1) many[`10.${i >> 16 & 255}.${i >> 8 & 255}.${i & 255}`] = { failures: 1, level: 0, lockedUntil: 0, lastFailureAt: NOW - DAY / 2 + i, against: "*" };
+		// One stale entry (a day old, not locked) that the prune drops; the rest recent.
+		for (let i = 0; i < acc.MAX_LOCKOUT_ENTRIES; i += 1) many[`10.${i >> 16 & 255}.${i >> 8 & 255}.${i & 255}`] = { failures: 1, level: 0, lockedUntil: 0, lastFailureAt: i === 0 ? NOW - DAY : NOW - DAY / 2 + i, against: "*" };
 		const full = { ...fixture(), lockouts: many };
 		const next = acc.recordWrongAttempt(full, ADDR, NOW).state;
 		assert.equal(Object.keys(next.lockouts).length, acc.MAX_LOCKOUT_ENTRIES);
 		assert.ok(next.lockouts[ADDR]);
-		assert.equal(next.lockouts["10.0.0.0"], undefined, "the oldest went");
+		assert.equal(next.lockouts["10.0.0.0"], undefined, "the stale one went");
 		assert.ok(next.lockouts["10.0.0.1"]);
+		assert.equal(next.lockoutPauseUntil, undefined, "no pause: there was room");
 	});
 
 	it("doubles the pause each time", () => {
@@ -774,9 +777,12 @@ describe("reset", () => {
 		const a = refused(acc.resetPassword(state, { ...base, name: "nobody", code: RECOVERY[0] }, ADDR, NOW), "reset-invalid");
 		const b = refused(acc.resetPassword(state, { ...base, name: "sam", code: "ZZZZ-ZZZZ" }, ADDR, NOW), "reset-invalid");
 		const c = refused(acc.resetPassword(state, { ...base, name: "kim", code: RECOVERY[0] }, ADDR, NOW), "reset-invalid");
-		assert.deepEqual(a.state, b.state);
-		assert.deepEqual(a.state, c.state);
+		// The address's lockout counts all three the same; a named account also counts it against itself (review finding 3c).
+		assert.deepEqual(a.state.lockouts, b.state.lockouts);
+		assert.deepEqual(a.state.lockouts, c.state.lockouts);
 		assert.equal(a.state.lockouts[ADDR]?.failures, 1);
+		assert.deepEqual(a.state.accounts, state.accounts);
+		assert.deepEqual(acc.findAccountByName(b.state, "sam")!.codeFailures, { count: 1, since: NOW });
 		refused(acc.resetPassword(state, { ...base, name: 5, code: 5 }, ADDR, NOW), "reset-invalid");
 	});
 
@@ -1069,5 +1075,187 @@ describe("the approved words", () => {
 		assert.equal(words.removedText(0, undefined), words.removedText(0, acc.REMOVED_KEEP_MS));
 		assert.equal(acc.INVITE_LIFETIME_MS, 7 * DAY);
 		assert.equal(acc.RESET_LIFETIME_MS, 24 * HOUR);
+	});
+});
+
+// ─── The security review's findings ──────────────────────────────────────────
+
+describe("review 1: a member whose copy was never made", () => {
+	const RES_CODES = ["JJJJ-KKKK", "MMMM-NNNN"];
+	/** Adds "res" (tag R3S), reserved but never made, in the given state. */
+	const withReservation = (status: acc.AccountStatus = "active", removedAt: number | null = null) => deepFreeze({
+		...fixture(),
+		accounts: [...fixture().accounts, account({ name: "res", tag: "R3S", upstream: null, gateSecret: null, state: status, removedAt, recoveryCodes: RES_CODES.map(setupCodeHash), createdAt: NOW - 40 * DAY })],
+	});
+	const RES = "acct_res";
+
+	it("is refused by every owner action, Delete my account and the reset code", () => {
+		refused(acc.pauseAccount(withReservation(), RES), "bad-state");
+		refused(acc.resumeAccount(withReservation("paused"), RES), "bad-state");
+		refused(acc.removeAccount(withReservation(), RES, NOW), "bad-state");
+		refused(acc.removeAccount(withReservation("paused"), RES, NOW), "bad-state");
+		refused(acc.restoreAccount(withReservation("removed", NOW - 31 * DAY), RES, 9), "bad-state");
+		refused(acc.deleteNow(withReservation("removed", NOW - DAY), RES), "bad-state");
+		refused(acc.deleteNow(withReservation("deleting"), RES), "bad-state");
+		refused(acc.deleteDue(withReservation("removed", NOW - 31 * DAY), RES, NOW), "bad-state");
+		refused(acc.selfDelete(withReservation(), RES, PASSWORD, ADDR, NOW), "bad-state");
+		refused(acc.selfDelete(withReservation("deleting"), RES, PASSWORD, ADDR, NOW), "bad-state");
+		refused(acc.issueResetCode(withReservation(), RES, NOW), "bad-state");
+		refused(acc.changePassword(withReservation(), RES, null, { current: PASSWORD, next: "brand new password" }, ADDR, NOW), "not-found");
+		refused(acc.replaceRecoveryCodes(withReservation(), RES, PASSWORD, ADDR, NOW), "not-found");
+		const state = withReservation();
+		assert.equal(acc.markCopyPending(state, RES), state, "no remake is ever marked");
+		assert.equal(acc.dueForDeletion(withReservation("removed", NOW - 31 * DAY), NOW).length, 0);
+	});
+
+	it("can't sign in: the same answer and count as a name with no account", () => {
+		const state = withReservation();
+		const res = refused(acc.signIn(state, { name: "res", password: PASSWORD }, "ua", ADDR, NOW), "wrong");
+		const nobody = refused(acc.signIn(state, { name: "nobody", password: PASSWORD }, "ua", ADDR, NOW), "wrong");
+		assert.deepEqual(res.state.lockouts, nobody.state.lockouts);
+		assert.equal(res.state.lockouts[ADDR]?.against, "*");
+		refused(acc.resetPassword(state, { name: "res", code: RES_CODES[0], password: "brand new password" }, ADDR, NOW), "reset-invalid");
+		const session = acc.createAccountSession(state, RES, "ua", NOW);
+		assert.equal(acc.resolveSession(session.state, session.token, NOW), null, "a session, however made, opens nothing");
+	});
+
+	it("is never listed on the owner's screen; its slot is still taken", () => {
+		for (const [status, removedAt] of [["active", null], ["paused", null], ["removed", NOW - DAY]] as const) {
+			const view = acc.accountsView(withReservation(status, removedAt), 9, NOW);
+			assert.ok(!view.accounts.some((a) => a.name === "res"), status);
+			assert.ok(!view.removed.some((a) => a.name === "res"), status);
+		}
+		assert.equal(acc.accountsView(withReservation(), 9, NOW).used, 4);
+	});
+
+	it("only finishing the redeem or abandoning it acts on it; a removed one (an older file) is abandoned too", () => {
+		assert.deepEqual(acc.unfinishedReservations(withReservation("removed", NOW - DAY)).map((a) => a.name), ["res"]);
+		const abandoned = good(acc.abandonReservation(withReservation("removed", NOW - DAY), RES));
+		assert.equal(abandoned.account.state, "deleting");
+		assert.equal(abandoned.account.keepVolume, true);
+		const made = good(acc.finishReservation(withReservation(), RES, { upstream: "lh-acct-R3S:3000", gateSecret: "s".repeat(43) }));
+		good(acc.pauseAccount(deepFreeze(made.state), RES));
+		good(acc.signIn(deepFreeze(made.state), { name: "res", password: PASSWORD }, "ua", ADDR, NOW));
+	});
+});
+
+describe("review 3: the lockout table can't be emptied", () => {
+	const SIGN = (name: string, password = "wrong wrong wrong") => ({ name, password });
+	const fill = (record: (i: number) => acc.GatewayLockout): Record<string, acc.GatewayLockout> => {
+		const many: Record<string, acc.GatewayLockout> = {};
+		for (let i = 0; i < acc.MAX_LOCKOUT_ENTRIES; i += 1) many[`10.${i >> 16 & 255}.${i >> 8 & 255}.${i & 255}`] = record(i);
+		return many;
+	};
+
+	it("never evicts a locked address, however old its last failure", () => {
+		const lockouts = fill((i) => ({ failures: 0, level: 1, lockedUntil: NOW + HOUR, lastFailureAt: NOW - 2 * DAY + i, against: "*" }));
+		const next = acc.recordWrongAttempt({ ...fixture(), lockouts }, ADDR, NOW).state;
+		assert.equal(Object.keys(next.lockouts).length, acc.MAX_LOCKOUT_ENTRIES);
+		assert.ok(Object.keys(lockouts).every((k) => next.lockouts[k]?.lockedUntil === NOW + HOUR), "every lock stands");
+		assert.equal(next.lockouts[ADDR], undefined, "the new address isn't recorded");
+		assert.equal(next.lockoutPauseUntil, NOW + acc.LOCKOUT_FULL_PAUSE_MS);
+	});
+
+	it("full of addresses it must keep: every address with no entry is refused for 60 seconds at a time; known ones and sessions carry on", () => {
+		let state = deepFreeze({ ...fixture(), lockouts: fill((i) => ({ failures: 1, level: 0, lockedUntil: 0, lastFailureAt: NOW - HOUR + i, against: "*" })) });
+		const first = refused(acc.signIn(state, SIGN("nobody"), "ua", ADDR, NOW), "locked");
+		assert.equal(first.waitMs, acc.LOCKOUT_FULL_PAUSE_MS);
+		assert.equal(words.tooManyAttempts(first.waitMs!), "Too many attempts. Try again in 1 min.");
+		state = deepFreeze(first.state);
+		const other = "198.51.100.9";
+		assert.equal(acc.lockWait(state, other, NOW + 1000), acc.LOCKOUT_FULL_PAUSE_MS - 1000);
+		refused(acc.signIn(state, SIGN("sam", PASSWORD), "ua", other, NOW + 1000), "locked");
+		refused(acc.resetPassword(state, { name: "sam", code: RECOVERY[0], password: "brand new password" }, other, NOW + 1000), "locked");
+		const invite = good(acc.createInvite(state, 9, NOW));
+		refused(acc.reserveMember(deepFreeze(invite.state), { code: invite.code, name: "newbie", password: PASSWORD }, 9, other, NOW + 1000), "locked");
+		const noOwner = deepFreeze(good(acc.issueSetupCode({ ...state, accounts: [] })).state);
+		refused(acc.claimOwner(noOwner, { code: "x", name: "Boss", password: PASSWORD, upstream: "lh:3000", gateSecret: "s" }, other, NOW + 1000), "locked");
+		// An address that has an entry, and an existing session, are not paused.
+		good(acc.signIn(state, SIGN("sam", PASSWORD), "ua", "10.0.0.7", NOW + 1000));
+		const session = acc.createAccountSession(state, idOf(state, "sam"), "ua", NOW);
+		assert.ok(acc.resolveSession(session.state, session.token, NOW + 1000));
+		// The pause ends; the next failure from a new address starts it again.
+		good(acc.signIn(state, SIGN("sam", PASSWORD), "ua", other, NOW + acc.LOCKOUT_FULL_PAUSE_MS));
+		const again = refused(acc.signIn(state, SIGN("nobody"), "ua", other, NOW + acc.LOCKOUT_FULL_PAUSE_MS), "locked");
+		assert.equal(again.state.lockoutPauseUntil, NOW + 2 * acc.LOCKOUT_FULL_PAUSE_MS);
+	});
+
+	it("10 wrong codes against one account in 24 hours, from any addresses, refuse code resets of it until the window passes", () => {
+		let state = fixture();
+		const T = (i: number) => NOW + i * MIN;
+		for (let i = 0; i < acc.CODE_TRIES_PER_ACCOUNT; i += 1) {
+			state = deepFreeze(refused(acc.resetPassword(state, { name: "sam", code: "ZZZZ-ZZZZ", password: "brand new password" }, `192.0.2.${i}`, T(i)), "reset-invalid").state);
+		}
+		assert.deepEqual(acc.findAccountByName(state, "sam")!.codeFailures, { count: 10, since: NOW });
+		// The right recovery code, from a fresh address, is refused with the same sentence.
+		const blocked = refused(acc.resetPassword(state, { name: "sam", code: RECOVERY[0], password: "brand new password" }, "198.51.100.1", T(20)), "locked");
+		assert.equal(blocked.waitMs, NOW + DAY - T(20));
+		assert.equal(blocked.state, state, "a refusal records nothing");
+		// Another account and sign-in by password are untouched.
+		const kimReset = good(acc.issueResetCode(state, idOf(state, "kim"), T(20)));
+		good(acc.resetPassword(deepFreeze(kimReset.state), { name: "kim", code: kimReset.code, password: "brand new password" }, "198.51.100.1", T(20)));
+		good(acc.signIn(state, { name: "sam", password: PASSWORD }, "ua", "198.51.100.2", T(20)));
+		// The window passes.
+		const done = good(acc.resetPassword(state, { name: "sam", code: RECOVERY[0], password: "brand new password" }, "198.51.100.1", NOW + DAY));
+		assert.equal(done.account.codeFailures, undefined);
+	});
+
+	it("under the limit, a correct code works and clears the count", () => {
+		let state = fixture();
+		for (let i = 0; i < acc.CODE_TRIES_PER_ACCOUNT - 1; i += 1) {
+			state = deepFreeze(refused(acc.resetPassword(state, { name: "sam", code: "ZZZZ-ZZZZ", password: "brand new password" }, `192.0.2.${i}`, NOW), "reset-invalid").state);
+		}
+		const done = good(acc.resetPassword(state, { name: "sam", code: RECOVERY[1], password: "brand new password" }, "198.51.100.1", NOW));
+		assert.equal(acc.findAccountByName(done.state, "sam")!.codeFailures, undefined);
+	});
+
+	it("reset-owner clears the pause and the owner's code count; both survive the file", () => {
+		const owner = { ...fixture().accounts[0]!, codeFailures: { count: 10, since: NOW } };
+		const state = deepFreeze({ ...fixture(), accounts: [owner, ...fixture().accounts.slice(1)], lockoutPauseUntil: NOW + MIN });
+		const back = acc.parseGatewayState(JSON.parse(JSON.stringify(state)));
+		assert.equal(back.lockoutPauseUntil, NOW + MIN);
+		assert.deepEqual(back.accounts[0]!.codeFailures, { count: 10, since: NOW });
+		const r = acc.resetOwnerAccess(state, NOW);
+		assert.equal(r.state.lockoutPauseUntil, undefined);
+		assert.equal(acc.ownerAccount(r.state)!.codeFailures, undefined);
+		assert.throws(() => acc.parseGatewayState({ ...JSON.parse(JSON.stringify(state)), lockoutPauseUntil: "soon" }));
+		assert.throws(() => acc.parseGatewayState({ ...JSON.parse(JSON.stringify(state)), accounts: [{ ...JSON.parse(JSON.stringify(owner)), codeFailures: { count: "x", since: 1 } }] }));
+	});
+});
+
+describe("review 4: the file must name every account once", () => {
+	const raw = () => JSON.parse(JSON.stringify(fixture())) as { accounts: Array<Record<string, unknown>> };
+	const damaged = (change: (v: { accounts: Array<Record<string, unknown>> }) => void) => {
+		const v = raw();
+		change(v);
+		assert.throws(() => acc.parseGatewayState(v), /Invalid/);
+	};
+
+	it("refuses duplicate ids, tags and names, two owners, an owner with a tag and a member without one", () => {
+		acc.parseGatewayState(raw());
+		damaged((v) => { v.accounts[2]!.id = v.accounts[1]!.id; });
+		damaged((v) => { v.accounts[2]!.tag = v.accounts[1]!.tag; v.accounts[2]!.upstream = v.accounts[1]!.upstream; });
+		damaged((v) => { v.accounts[2]!.nameKey = "sam"; });
+		damaged((v) => { v.accounts[2]!.role = "owner"; v.accounts[2]!.tag = null; v.accounts[2]!.upstream = "lh:3000"; });
+		damaged((v) => { v.accounts[0]!.tag = "ABC"; v.accounts[0]!.upstream = null; });
+		damaged((v) => { v.accounts[1]!.tag = null; v.accounts[1]!.upstream = null; });
+	});
+});
+
+describe("review 5: a reset code doesn't outlive the password it was for", () => {
+	it("a password change ends that account's reset code, no one else's", () => {
+		const base = fixture();
+		const sam = good(acc.issueResetCode(base, idOf(base, "sam"), NOW));
+		const both = good(acc.issueResetCode(deepFreeze(sam.state), idOf(base, "kim"), NOW));
+		const changed = good(acc.changePassword(deepFreeze(both.state), idOf(base, "sam"), null, { current: PASSWORD, next: "brand new password" }, ADDR, NOW));
+		assert.deepEqual(changed.state.resets.map((r) => r.accountId), [idOf(base, "kim")]);
+		refused(acc.resetPassword(deepFreeze(changed.state), { name: "sam", code: sam.code, password: "another new password" }, ADDR, NOW), "reset-invalid");
+	});
+
+	it("a reset by recovery code ends the account's reset code too", () => {
+		const base = fixture();
+		const sam = good(acc.issueResetCode(base, idOf(base, "sam"), NOW));
+		const done = good(acc.resetPassword(deepFreeze(sam.state), { name: "sam", code: RECOVERY[2], password: "brand new password" }, ADDR, NOW));
+		assert.equal(done.state.resets.length, 0);
 	});
 });

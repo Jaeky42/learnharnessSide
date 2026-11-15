@@ -73,6 +73,14 @@ export const MAX_TAG_TRIES = 5;
 /** The maker's answer is for this tag's copy, or it is not saved. */
 class WrongUpstream extends Error {}
 
+/**
+ * A remake asked for an account with no copy yet (a reservation): never
+ * without `fresh`, so never at all; only makeReservedCopy makes its copy.
+ */
+export class NotReady extends Error {
+	constructor() { super("Remake refused: the account has no copy yet."); }
+}
+
 export type OpResult = { ok: true } | { ok: false; status: number; code: string; error?: string };
 
 export interface LifecycleDeps {
@@ -185,6 +193,8 @@ export function createLifecycle(deps: LifecycleDeps): Lifecycle {
 	 * secret); if that fails too the mark stays for the loop. Caller holds the lock.
 	 */
 	async function remake(accountId: string, tag: string, start: boolean): Promise<boolean> {
+		const target = account(accountId);
+		if (!target || !isReady(target) || target.tag !== tag) throw new NotReady();
 		store.update((state) => ({ state: markCopyPending(state, accountId), result: undefined }));
 		for (let attempt = 0; attempt < 2; attempt += 1) {
 			try {
@@ -212,7 +222,9 @@ export function createLifecycle(deps: LifecycleDeps): Lifecycle {
 		if (target.tag) {
 			try {
 				await maker.removeCopy(target.tag);
-				if (!target.keepVolume && await maker.removeVolume(target.tag) === "in-use") {
+				// A member that never had a copy keeps its volume: it may be an older account's (a lost state file).
+				const keepVolume = target.keepVolume === true || !isReady(target);
+				if (!keepVolume && await maker.removeVolume(target.tag) === "in-use") {
 					say(`delete:${accountId}`, `Account ${accountId}: its data volume is still in use; deleting it later.`);
 					scheduleFollowUp();
 					return "later";
@@ -256,7 +268,7 @@ export function createLifecycle(deps: LifecycleDeps): Lifecycle {
 		const tag = check.account.tag;
 		if (!tag) return refusal("bad-state");
 		// The copy first: an account that can't be started stays paused.
-		if (check.account.copyPending || !isReady(check.account)) {
+		if (check.account.copyPending) {
 			if (!await remake(accountId, tag, true)) return unavailable();
 		} else {
 			let started: "ok" | "missing";

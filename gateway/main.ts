@@ -24,7 +24,7 @@ import { createLifecycle, type Lifecycle } from "./lifecycle.ts";
 import { createMakerClient, NO_MAKER, type MakerClient } from "./maker-client.ts";
 import { OWNER_ROUTES } from "./owner-routes.ts";
 import { BASE_ROUTES, handleRequest, type RouteTable } from "./routes.ts";
-import { createStore, StateDamagedError, type GatewayStore } from "./state.ts";
+import { createStore, damagedLine, StateDamagedError, type GatewayStore } from "./state.ts";
 
 /** Every route the gateway serves. */
 export const ALL_ROUTES: RouteTable<AccountDeps> = { ...BASE_ROUTES, ...ACCOUNT_ROUTES, ...OWNER_ROUTES };
@@ -34,6 +34,28 @@ export const BODY_LIMIT_BYTES = 16 * 1024;
 const HEADERS_TIMEOUT_MS = 10_000;
 const REQUEST_TIMEOUT_MS = 30_000;
 const KEEP_ALIVE_TIMEOUT_MS = 5_000;
+/**
+ * At SIGTERM the gateway stops taking requests and waits this long for the
+ * ones under way and the lifecycle's steps (a redeem's maker call can take
+ * ~60 s; its answer must be saved, or the reservation is left half made).
+ * Compose gives the container 90 s.
+ */
+export const SHUTDOWN_GRACE_MS = 75_000;
+
+/** Requests under way, and whether the gateway is shutting down. */
+export class RequestTracker {
+	active = 0;
+	closing = false;
+	private waiters: Array<() => void> = [];
+	enter(): void { this.active += 1; }
+	leave(): void {
+		this.active -= 1;
+		if (this.active === 0) for (const wake of this.waiters.splice(0)) wake();
+	}
+	idle(): Promise<void> {
+		return this.active === 0 ? Promise.resolve() : new Promise((resolve) => { this.waiters.push(resolve); });
+	}
+}
 
 /** Today's lines (src/server/server-auth.ts `announceSetupCode`), the code fresh at every start while no owner exists. */
 export function announceSetupCode(store: GatewayStore, log: (line: string) => void = console.log): void {
@@ -49,7 +71,7 @@ export function announceSetupCode(store: GatewayStore, log: (line: string) => vo
 			log("[LearnHarness] Open the site, enter this code and choose a password.");
 		}
 	} catch (error) {
-		if (error instanceof StateDamagedError) log("[LearnHarness] The server login file is damaged. Run reset-password on the server.");
+		if (error instanceof StateDamagedError) log(`[LearnHarness gateway] ${damagedLine(store.file)}`);
 		else log("[LearnHarness gateway] The state file couldn't be written.");
 	}
 }
@@ -107,8 +129,15 @@ async function send(res: http.ServerResponse, response: Response, head: boolean)
 }
 
 /** The listener; `handle` is the route table's dispatcher, told the connection's own address. */
-export function createServer(handle: (request: Request, info: { remoteAddress: string | undefined }) => Promise<Response>): http.Server {
+export function createServer(handle: (request: Request, info: { remoteAddress: string | undefined }) => Promise<Response>, tracker: RequestTracker = new RequestTracker()): http.Server {
 	const server = http.createServer((req, res) => {
+		if (tracker.closing) {
+			// Shutting down: nothing new starts (Caddy retries or shows its error).
+			res.writeHead(503, { ...NO_STORE, Connection: "close" });
+			res.end();
+			return;
+		}
+		tracker.enter();
 		void (async () => {
 			const head = req.method === "HEAD";
 			try {
@@ -117,7 +146,9 @@ export function createServer(handle: (request: Request, info: { remoteAddress: s
 				// The path is the gateway's own: the request's Host never decides where it is routed.
 				const url = new URL(req.url ?? "/", "http://gateway.invalid");
 				const request = new Request(url, { method, headers: toHeaders(req.rawHeaders), body: body && body.length ? new Uint8Array(body) : undefined });
-				await send(res, await handle(request, { remoteAddress: req.socket.remoteAddress }), head);
+				const response = await handle(request, { remoteAddress: req.socket.remoteAddress });
+				if (tracker.closing) res.setHeader("Connection", "close");
+				await send(res, response, head);
 			} catch (error) {
 				const status = error instanceof TooLarge ? 413 : 400;
 				if (!res.headersSent) {
@@ -126,6 +157,8 @@ export function createServer(handle: (request: Request, info: { remoteAddress: s
 				} else {
 					res.destroy();
 				}
+			} finally {
+				tracker.leave();
 			}
 		})();
 	});
@@ -139,6 +172,12 @@ export interface Gateway {
 	server: http.Server;
 	deps: AccountDeps;
 	stop(): Promise<void>;
+	/**
+	 * Shutting down: no new connection or request is taken, the requests under
+	 * way and the lifecycle's queued steps finish (at most `limitMs`), then
+	 * every connection is closed. True when everything finished in time.
+	 */
+	drain(limitMs?: number): Promise<boolean>;
 }
 
 export interface GatewayOptions {
@@ -168,8 +207,9 @@ export async function startGateway(config: GatewayConfig, options: GatewayOption
 	const stopRetries = unpairer.start();
 	const stopLoop = (options.loop ?? maker !== NO_MAKER) ? lifecycle.start() : () => undefined;
 	const routes = options.routes ?? ALL_ROUTES;
+	const tracker = new RequestTracker();
 	const server = createServer((request, info) =>
-		new URL(request.url).pathname === CONTROL_PATH ? controlRoute(request, deps, info.remoteAddress) : handleRequest(request, deps, routes));
+		new URL(request.url).pathname === CONTROL_PATH ? controlRoute(request, deps, info.remoteAddress) : handleRequest(request, deps, routes), tracker);
 	if (options.listen !== false) await new Promise<void>((resolve) => server.listen(config.port, resolve));
 	return {
 		server, deps,
@@ -179,6 +219,25 @@ export async function startGateway(config: GatewayConfig, options: GatewayOption
 			server.close(() => resolve());
 			server.closeIdleConnections?.();
 		}),
+		async drain(limitMs = SHUTDOWN_GRACE_MS) {
+			tracker.closing = true;
+			stopRetries();
+			stopLoop();
+			server.close(() => undefined);
+			server.closeIdleConnections?.();
+			const settled = (async () => {
+				// A request can queue a lifecycle step and a step can outlive its request: wait for both, twice over.
+				await tracker.idle();
+				await lifecycle.idle();
+				await tracker.idle();
+				return true;
+			})();
+			let timer: ReturnType<typeof setTimeout> | undefined;
+			const finished = await Promise.race([settled, new Promise<boolean>((resolve) => { timer = setTimeout(() => resolve(false), limitMs); })]);
+			clearTimeout(timer);
+			server.closeAllConnections?.();
+			return finished;
+		},
 	};
 }
 
@@ -210,8 +269,11 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
 	const gateway = await startGateway(config);
 	console.log(`[LearnHarness gateway] Listening on port ${config.port}.`);
 	const stop = () => {
-		void gateway.stop().then(() => process.exit(0));
-		setTimeout(() => process.exit(0), 10_000).unref();
+		setTimeout(() => process.exit(0), SHUTDOWN_GRACE_MS + 5_000).unref();
+		void gateway.drain(SHUTDOWN_GRACE_MS).then((finished) => {
+			if (!finished) console.log("[LearnHarness gateway] Stopped with work still under way.");
+			process.exit(0);
+		});
 	};
 	process.once("SIGTERM", stop);
 	process.once("SIGINT", stop);

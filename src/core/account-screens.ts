@@ -10,6 +10,9 @@
  * ./accounts.ts may import it, never the other way round.
  */
 
+// TODO(owner wording): placeholder, not approved. The 503 body while the gateway's accounts file is damaged.
+export const ACCOUNTS_FILE_DAMAGED_PLACEHOLDER = "The accounts file on this server is damaged. See the server guide.";
+
 /** Equal to PASSWORD_MIN_LENGTH in ./server-auth.ts (a test pins it). */
 const PASSWORD_MIN_LENGTH = 8;
 

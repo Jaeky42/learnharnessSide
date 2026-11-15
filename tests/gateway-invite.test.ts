@@ -190,7 +190,7 @@ describe("when the maker fails", () => {
 		await expectRolledBack(code, r);
 	});
 
-	it("an answer lost after the copy was made: the container and its volume are removed", async () => {
+	it("an answer lost after the copy was made: the container is removed, its volume kept", async () => {
 		const code = await invite();
 		h.maker.fail(/^POST \/copies /, "lost");
 		await expectRolledBack(code, await redeem(code));

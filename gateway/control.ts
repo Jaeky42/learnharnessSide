@@ -17,7 +17,7 @@
 import { resetOwnerAccess } from "../src/core/accounts.ts";
 import { DEFAULT_PORT } from "./config.ts";
 import { json, type RouteDeps } from "./routes.ts";
-import { createStore, StateDamagedError, type GatewayStore } from "./state.ts";
+import { createStore, damagedLine, StateDamagedError, type GatewayStore } from "./state.ts";
 
 export const CONTROL_PATH = "/control/reset-owner";
 /** Sent by the command; a plain cross-site form can't send it. */
@@ -111,7 +111,7 @@ export async function resetOwnerCommand(io: CommandIo = {}): Promise<number> {
 		});
 		if (!response.ok) {
 			const body = await response.json().catch(() => null) as { code?: unknown } | null;
-			err(body?.code === "damaged" ? "The gateway's state file is damaged. Nothing was changed." : "The running gateway couldn't make the change. Nothing was changed.");
+			err(body?.code === "damaged" ? damagedLine(file) : "The running gateway couldn't make the change. Nothing was changed.");
 			return 1;
 		}
 		answer = await response.json() as OwnerResetAnswer;
@@ -124,7 +124,7 @@ export async function resetOwnerCommand(io: CommandIo = {}): Promise<number> {
 		try {
 			answer = applyOwnerReset(createStore(file), now());
 		} catch (fileError) {
-			err(fileError instanceof StateDamagedError ? "The gateway's state file is damaged. Nothing was changed." : "The gateway's state file couldn't be written. Nothing was changed.");
+			err(fileError instanceof StateDamagedError ? damagedLine(file) : "The gateway's state file couldn't be written. Nothing was changed.");
 			return 1;
 		}
 	}

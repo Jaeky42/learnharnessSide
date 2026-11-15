@@ -557,7 +557,7 @@ describe("the state file", () => {
 		assert.equal(fs.statSync(deps.store.file).mode & 0o777, 0o600);
 		const text = fs.readFileSync(deps.store.file, "utf-8");
 		for (const clear of [PASSWORD, SAM_PASSWORD, code, core.normalizeSetupCode(code), cookie.split("=")[1]!, token]) assert.ok(!text.includes(clear), "a clear value leaked into the file");
-		assert.deepEqual(fs.readdirSync(dir), ["accounts.json"], "no temp file left beside it");
+		assert.deepEqual(fs.readdirSync(dir).filter((f) => f !== "accounts.json.bak"), ["accounts.json"], "no temp file left beside it");
 	});
 
 	it("a damaged file closes the site: every route answers 503, and nothing overwrites it", async () => {
@@ -573,7 +573,8 @@ describe("the state file", () => {
 		assert.equal(fs.readFileSync(deps.store.file, "utf-8"), JSON.stringify({ ...acc.emptyGatewayState(), version: 2 }));
 		const lines: string[] = [];
 		gatewayMain.announceSetupCode(deps.store, (l) => lines.push(l));
-		assert.deepEqual(lines, ["[LearnHarness] The server login file is damaged. Run reset-password on the server."]);
+		assert.equal(lines.length, 1);
+		assert.match(lines[0]!, /^\[LearnHarness gateway\] The accounts file is damaged\. Nothing was changed\. /);
 	});
 
 	it("a change made by another process is picked up", async () => {

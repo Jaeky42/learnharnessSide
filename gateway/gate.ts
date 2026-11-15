@@ -27,6 +27,7 @@ import {
 	type AccountRecord,
 	type GatewayState,
 } from "../src/core/accounts.ts";
+import { ACCOUNTS_FILE_DAMAGED_PLACEHOLDER } from "../src/core/account-screens.ts";
 import { SESSION_COOKIE } from "../src/core/server-auth.ts";
 import { bearerKey } from "../src/core/sync/devices.ts";
 import type { GatewayConfig } from "./config.ts";
@@ -187,7 +188,8 @@ export function copyOf(account: AccountRecord, config: Pick<GatewayConfig, "owne
 
 /** The desktop app reads this exact shape as "removed": it drops its key. */
 export const NOT_PAIRED_BODY = { error: "This desktop app isn't paired with this server.", code: "not_paired" } as const;
-export const DAMAGED_TEXT = "The server login file is damaged. Run reset-password on the server.";
+/** The 503 body while the accounts file is damaged (a placeholder until the owner words it). */
+export const DAMAGED_TEXT = ACCOUNTS_FILE_DAMAGED_PLACEHOLDER;
 export const SIGN_IN_FIRST = "Sign in to LearnHarness first.";
 export const SAME_SITE_REFUSAL = "This request must come from the LearnHarness site itself.";
 
