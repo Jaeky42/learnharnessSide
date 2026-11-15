@@ -27,7 +27,6 @@ const h = await import("./gateway-sync-harness.ts");
 process.env.LH_GATE_SECRET = h.OWNER_SECRET;
 
 const core = await import("../src/core/server-auth.ts");
-const acc = await import("../src/core/accounts.ts");
 const copyStore = await import("../src/store/server-auth.ts");
 const server = await import("../src/server/server-auth.ts");
 const syncHttp = await import("../src/server/sync/http.ts");
@@ -86,7 +85,6 @@ describe("the owner's copy through the gateway", () => {
 		assert.equal(status.sync.state, "ok");
 		const exchange = await client.syncRequest("/api/sync/sessions", { body: { cursor: 0 } }, deps());
 		assert.equal(exchange.ok, true, JSON.stringify(exchange));
-		// The copy saw the desktop's real address on its device record? It keeps the pairing in its own file.
 		assert.equal(copyStore.readServerAuthState().devices.length, 1);
 	});
 
@@ -98,7 +96,7 @@ describe("the owner's copy through the gateway", () => {
 		assert.equal(copyStore.readServerAuthState().lockouts[h.DESKTOP_ADDR]?.failures, 1);
 		const shape = await client.pairWithServer({ server: h.SERVER, code: "AAAA", name: "Desktop" }, deps());
 		assert.deepEqual(shape, wrong, "a code of no copy's shape gets the same answer from the gateway");
-		assert.equal(acc.lockWait(acc.parseGatewayState(JSON.parse(fs.readFileSync(world.deps.store.file, "utf-8"))), h.DESKTOP_ADDR, Date.now()), 0);
+		assert.equal(copyStore.readServerAuthState().lockouts[h.DESKTOP_ADDR]?.failures, 1, "the copy never saw it");
 		assert.equal(JSON.parse(fs.readFileSync(world.deps.store.file, "utf-8")).lockouts[h.DESKTOP_ADDR].failures, 1);
 	});
 
