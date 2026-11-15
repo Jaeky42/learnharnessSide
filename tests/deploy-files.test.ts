@@ -860,7 +860,10 @@ describe("deploy/install-firewall.sh", () => {
 		it("after the run: restarts Docker, then requires --status, a refused probe, and a clean --remove", () => {
 			const crossing = at("node test/crossing.mjs");
 			const restart = at("sudo systemctl restart docker", crossing);
-			const status = at("sudo ./install-firewall.sh --status", restart);
+			// systemd restarts the unit a moment after Docker's restart returns: a quiet wait comes first.
+			const wait = at("sudo ./install-firewall.sh --status >/dev/null 2>&1 && break", restart);
+			const status = at(/^\s*sudo \.\/install-firewall\.sh --status \|\|/, restart);
+			assert.ok(wait > restart && status > wait, "the status is required only after waiting for the unit");
 			const probe = at('got="$(probe_lh gateway "$fw_port")"', status);
 			const remove = at(/^\s*sudo \.\/install-firewall\.sh --remove$/, probe);
 			const left = at("grep -c LH-FW", remove);
