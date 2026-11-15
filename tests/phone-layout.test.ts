@@ -279,6 +279,17 @@ describe("the bottom block with the keyboard up (owner's iPhone)", async () => {
 	it("hides the Tutor's bubble while the keyboard is up", () => {
 		assert.match(rule(`html:not(.lh-electron) body[data-lh-keyboard-up] [data-phone="tutor-bubble"]`), /display: none;/);
 	});
+	it("leaves the session-list button out of the chains view (owner's ask)", () => {
+		assert.match(rule(`html:not(.lh-electron) [data-testid="chain-table"] > [data-phone="topbar"] > .sidebar-motion`), /display: none;/);
+		// The names that rule hangs on, in upstream's files.
+		const table = readFileSync(path.join(root, "components/chain-table.tsx"), "utf8");
+		assert.match(table, /data-testid="chain-table"/);
+		assert.match(table, /<TopBar sidebarToggle=\{!pickerChrome\}>/);
+		const bar = readFileSync(path.join(root, "components/top-bar.tsx"), "utf8");
+		assert.match(bar, /data-phone="topbar"/);
+		assert.match(bar, /\{sidebarToggle && <SidebarToggle \/>\}\s*\{children\}/, "the button is the top bar's own first child");
+		assert.match(readFileSync(path.join(root, "components/sidebar.tsx"), "utf8"), /export function SidebarToggle\(\) \{[\s\S]*?<span\s+className=\{cn\(\s*"sidebar-motion /);
+	});
 });
 
 describe("the keyboard's closing step waits a frame, and a removed box counts as a lost focus", async () => {
