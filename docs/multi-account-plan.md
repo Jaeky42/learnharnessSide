@@ -1,6 +1,6 @@
 # Plan: accounts on one server (several people, one address)
 
-**Status: approved by the owner** ("I agree with everything"), with one change: 4 recovery codes, where the draft said 8. **Since then the owner answered the wording questions** ("The approved words" below) and changed one rule: a person who deletes their own account has their data deleted at once. **Nothing is built, and nothing is to be built until the owner says so** ("do not build anything"): the plan is written so a later session can build it quickly. Approving the plan is not the word to start. That session reads this, waits for the owner's word to build, asks the owner whatever is listed under "To ask the owner at build time", and builds the plan as written; anything that has to differ from it goes back to the owner first. Change a decision recorded here only with the owner's approval.
+**Status: approved by the owner** ("I agree with everything"), with one change: 4 recovery codes, where the draft said 8. **Since then the owner answered every open question** ("The approved words" and "How it is built and tried" below), so that the build can run in one go, and changed one rule: a person who deletes their own account has their data deleted at once. **Nothing is built, and nothing is to be built until the owner says so** ("do not build anything"): the plan is written so a later session can build it quickly. Approving the plan is not the word to start. That session reads this, waits for the owner's word to build, asks the owner whatever is listed under "To ask the owner at build time", and builds the plan as written; anything that has to differ from it goes back to the owner first. Change a decision recorded here only with the owner's approval.
 
 ## What was asked
 
@@ -169,11 +169,24 @@ Asked one at a time, each with pictures of the options.
 - **The home-screen app** keeps working: same address, same icon.
 - **A single-copy server** (no gateway) stays possible and is what the image does by default.
 
-## To ask the owner at build time
+## How it is built and tried (the owner's answers)
 
-- **The words listed as "Not yet worded"** under "The approved words". Everything else on the new screens is answered there.
-- **Whether the four numbers above still fit** (cap, memory ceiling, swap, helpers at once), once the real server has been watched with two copies. They are approved as first values.
-- **Which branch feeds it**, and when the owner's server and the desktop app get it.
+Asked so that the build can run in one go once the owner says "build it".
+
+| About | Decision |
+|---|---|
+| Trying it | **Pictures first, then switch with a way back.** The build runs the whole system in a test set-up and gives the owner one page of screenshots and timings. On the owner's go the real server is switched in one update; the way back is the previous `deploy/` files and image, because the owner's copy keeps its own password login untouched. No trial address on the server. |
+| Stops | **Run straight through, one page at the end.** All seven slices without waiting, each risky part independently reviewed. The builder stops earlier only when the plan can't be followed as written. Nothing reaches the server or the Windows app before the owner approves after that page. |
+| Accounts in Settings | A row of its own under Account on a computer and a tablet. **On a phone it is a second group inside Account**, under a divider, as Obsidian sits inside Cloud; the phone's list stays at eight rows. Shown to the owner only. |
+| Colours before sign-in | **The app's standard dark theme, always**, for the sign-in, first-start, invite, recovery-code and reset pages. **The home-screen app's start-up colours too** (the manifest, which is fetched with no sign-in). Behind a gateway only: a single-copy server keeps its themed sign-in pages. Signed in, everyone has their own theme as now. |
+| The Windows app's pairing box | **May be widened** if a 13-character code doesn't fit; nothing else on that form changes. It rides with the Windows release that the shipping causes anyway. |
+| Changing the cap | **In the server's settings file** (`LH_MAX_ACCOUNTS` in `deploy/.env`, then `./update.sh`), with a short guide. Not on the Accounts screen. |
+
+## Still for the owner, after the build
+
+- **Approval to ship**, after the screenshot page: every push to `side-tutor` needs it, and the server's branch gets the same commit.
+- **Whether the four numbers still fit** (4 accounts, 1 GB per copy, 2 GB of swap, 3 helpers at once), once the real server has run two copies. They are approved as first values.
+- **Review of anything added beyond this plan**, listed on that page.
 
 ## The approved words
 
@@ -204,7 +217,14 @@ Asked one screen at a time, each with a drawing; the owner's answers. They belon
   - Group "Your data": **Download my data** / "Your sessions, graph and settings as one file."
   - **Delete my account** (not shown to the owner). Its box: "Delete your account?" / "Your account and everything in it are deleted now, for good. This can't be undone. Download your data first if you want to keep it." / "Password" / Cancel, **Delete my account** (red).
 
-**Not yet worded** (drawn in no question; for the owner at build time): the paused account's menu item that undoes Pause ("Resume" in a drawing the owner didn't choose); how the reset code and a new invite code are shown once made; the sentence for a reserved name; the first-start page's two-passwords-don't-match and too-short lines (today's exist: "The two passwords don't match.", "Use at least 8 characters.").
+- **The last small pieces** (approved as drawn):
+  - A paused account's ⋯ menu: **Reset password**, **Resume**, **Remove**.
+  - After **New invite code**, a box: "Invite code" / the code / "Works once, until 22 Nov. Send it to the person with this site's address." / **Copy**, **Done**.
+  - After **Get reset code**, a box: `Reset code for “sam”` / the code / "Works once, for 24 hours." / **Copy**, **Done**.
+  - The server is full (the invite button is greyed): "All 4 accounts are used. Remove one to invite someone." Restore with no room: "All 4 accounts are used. Remove one first."
+  - The invite page, a name that can't be used (a reserved one): "That name can't be used. Choose another."
+  - At the top of each person's Settings → Account: "Signed in as sam".
+- **Reused as they are today:** "The two passwords don't match." and "Use at least 8 characters." on the pages that set a password.
 
 ## Build order
 

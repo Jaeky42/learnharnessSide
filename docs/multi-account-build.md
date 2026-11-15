@@ -8,9 +8,10 @@ The names, routes and file shapes under "Contracts" are the planner's proposals 
 
 1. **The owner's word to build.** Approval of the plan is not it.
 2. **Read:** `docs/multi-account-plan.md`, then "Login (VPS)", "Hosting" and "Phase 5: what is built" → "Slice 1" in `docs/cloud-sync.md`.
-3. **Ask the owner** (one question per call, with a drawing): the questions listed per slice below. Each slice's questions must be answered before that slice's screens are built; the parts with no screen can go ahead.
-4. **Branch.** Work on its own branch. A push to a branch in `.github/workflows/server-image.yml`'s list reaches the owner's real server at the nightly update, so nothing goes to `claude/pensive-goldberg-7dty2m` or `side-tutor` before slice 6 is done and the owner approves. Dry runs: both workflows by hand (`workflow_dispatch`).
-5. **Rules that hold in every slice:**
+3. **Nothing is left to ask before building.** The owner answered the wording and the build questions; they are in the plan under "The approved words" and "How it is built and tried". If a screen needs a word that isn't there, use the app's existing wording for the same thing where one exists; otherwise build it with a clearly marked placeholder and list it on the end page for the owner. Never invent a sentence silently.
+4. **Branch.** Work on its own branch, started from `claude/upstream-0.6.0`. A push to a branch in `.github/workflows/server-image.yml`'s list reaches the owner's real server at the nightly update, so nothing goes to `claude/pensive-goldberg-7dty2m` or `side-tutor` before slice 6 is done and the owner approves. Dry runs: both workflows by hand (`workflow_dispatch`).
+5. **No stops** (the owner's decision): run slices 0 to 6 straight through and come back once, with the screenshot page. Stop earlier only when the plan can't be followed as written; that goes to the owner before anything is changed.
+6. **Rules that hold in every slice:**
    - The desktop app and a single-copy server (no gateway) behave byte for byte as today. Everything new is switched by `LH_GATE_SECRET` / `LH_ACCOUNT_TAG` being set, or lives in the gateway and the maker. `tests/server-auth.test.ts`, `tests/sync-inert.test.ts`, `tests/sync-pairing.test.ts` and `tests/claude-code-status-ui.test.tsx` stay green untouched.
    - The sync protocol stays 3. If a step seems to need a change on the wire, stop and ask.
    - No secret in a log line, a URL or a command-line argument.
@@ -53,7 +54,7 @@ The names, routes and file shapes under "Contracts" are the planner's proposals 
 
 1. `/api/internal/*` → 404 (Caddy refuses it too).
 2. A sync path (`isSyncPath`): the tag is read from the Bearer key (46 characters: the first 3 are the tag; 43: the owner's). Account active → 200. Paused, or removed and still kept → **503** (the desktop app reads that as offline and keeps its key). No such account, or no key → 401 `{code: "not_paired"}`, the shape the desktop app already understands.
-3. A public file (`/favicon.ico`, `/robots.txt`, `/manifest.webmanifest`, `/_next/`, `/fonts/`, `/icons/`: the list in `isPublic`) → 200, the owner's copy.
+3. A public file (`/favicon.ico`, `/robots.txt`, `/_next/`, `/fonts/`, `/icons/`: the list in `isPublic`, without the manifest) → 200, the owner's copy. **`/manifest.webmanifest` is the gateway's own**, with the standard dark colours (the owner's decision), so Caddy sends that path to the gateway.
 4. A write that doesn't come from the site itself (`sameOrigin`) → 403.
 5. A valid session cookie of an active account → 200, that account's copy. "Last seen" is touched at most every 5 minutes.
 6. Otherwise: an API path → 401 "Sign in to LearnHarness first."; a page → a redirect to `/login` (to `/setup` while no owner exists).
@@ -62,7 +63,7 @@ The names, routes and file shapes under "Contracts" are the planner's proposals 
 
 | Route | Who | Does |
 |---|---|---|
-| `GET /login`, `/invite`, `/reset`, `/setup` | anyone | The pages (plain HTML, built like `server-auth-pages.ts`, themed with a fixed default palette). |
+| `GET /login`, `/invite`, `/reset`, `/setup` | anyone | The pages (plain HTML, built like `server-auth-pages.ts`, in the app's standard dark theme, always: the owner's decision; the palette is the default theme's, read from the app's own theme definitions at build time, never from anyone's saved theme). |
 | `POST /api/server-auth/setup` | anyone, once | The first start: setup code, name, password → the owner's account, bound to the owner's copy. |
 | `POST /api/server-auth/login` | anyone | Name and password → the cookie. |
 | `POST /api/server-auth/invite` | anyone | Invite code, name, password → asks the maker for a copy, signs in, returns the recovery codes once. |
@@ -128,7 +129,7 @@ Slices 4 and 5 can be built side by side. Inside a slice, the lettered parts wit
   	handle /api/internal/* {
   		respond 404
   	}
-  	@gateway path /login /setup /invite /reset /api/accounts /api/sync/pair /api/server-auth/*
+  	@gateway path /login /setup /invite /reset /manifest.webmanifest /api/accounts /api/sync/pair /api/server-auth/*
   	@copyOwn path /api/server-auth/desktops
   	handle @copyOwn {
   		import to_copy
@@ -170,7 +171,7 @@ After it, the owner's server does what it does today, through the gateway, with 
 
 ### Slice 2: desktop sync through the gateway
 
-- **No questions for the owner** (no screen changes), unless the desktop app's code box turns out too narrow for 13 characters (`max-w-40` in `components/settings/cloud-section.tsx`): widening it is a desktop release, which is the owner's to approve.
+- **The desktop app's code box** (`max-w-40` in `components/settings/cloud-section.tsx`): check that a 13-character code shows whole. If it doesn't, widen the box; the owner allowed that, and nothing else on the form changes. Its placeholder stays `XXXX-XXXX`.
 - **2a. Tags in the copy** (`src/core/sync/devices.ts`): `startPairing` appends the tag to the code and `completePairing` puts it before the key, both only when a tag is given; callers in `src/server/sync/http.ts` pass `process.env.LH_ACCOUNT_TAG`. `pairResponse` must not require `state.password` in gateway mode (today it answers "This server isn't set up yet" without one).
 - **2b. The gateway's side:** the sync branch of `/gate`, and `POST /api/sync/pair` (read the JSON body once, at most a few kilobytes; pick the copy by the code's tag; forward with the gate secret and the client's address; a wrong code still counts toward the copy's own lockout, as now).
 - **Tests:** `tests/sync-tags.test.ts` (codes and keys with and without a tag; the existing pairing tests untouched), more cases in `tests/gateway-gate.test.ts` (a 43- and a 46-character key, a changed tag, a paused account → 503, a deleted one → 401 `not_paired`), and one in-process run: the real desktop client (`pairWithServer`, `syncRequest`) → the gateway's functions → the real copy's gate and routes, for the owner's copy (no tag) and a tagged one.
@@ -179,7 +180,7 @@ After it, the owner's server does what it does today, through the gateway, with 
 
 ### Slice 3: the maker, invites and new accounts
 
-- **Already answered:** the invite page and its refusals (no note about the owner's powers) and the recovery-codes page (Copy and Continue, nothing to tick). **Still to ask:** the sentence for a reserved name.
+- **Already answered:** the invite page and its refusals (no note about the owner's powers) and the recovery-codes page (Copy and Continue, nothing to tick).
 - **3a. The maker** (new `gateway/maker.ts` and `gateway/docker.ts`): the Docker Engine API over the socket with plain `node:http` (`socketPath`), no dependency. The fixed template; the per-account network and joining Caddy to it; start, stop, remove; at its own start, bring every `lh-acct-*` container whose image differs from `LH_IMAGE` onto it, one at a time.
   - Tests: `tests/maker.test.ts` against a stand-in Docker API on a socket: the exact create request (limits, no extra mounts, no privileges), a refused tag, the token check, the re-create on a new image.
 - **3b. Invites in the gateway:** `POST /api/server-auth/invite`, the cap, the tag's choice, the maker call, rolling back the account if the maker fails, the recovery codes returned once.
@@ -190,8 +191,8 @@ After it, the owner's server does what it does today, through the gateway, with 
 
 ### Slice 4: the owner's screen
 
-- **Already answered:** Settings → Accounts (a ⋯ menu per account), its four confirm boxes, and what a paused or removed person reads at sign-in. **Still to ask:** the menu item that undoes Pause, and how a reset code and a new invite code are shown once made.
-- **Build:** the gateway's `/api/accounts` (owner only, checked by the gateway; an `lh_owner=1` marker cookie only decides whether the row shows); the 30-day deletion (checked at the gateway's start and once a day; `DELETE /volumes/<tag>`); the unpair-all calls. New `components/settings/accounts-section.tsx`; one row in `components/settings/settings-dialog.tsx` (upstream's file; add it to the list in `docs/upstream-0.6.0.md`); the phone's Settings list (`components/phone/phone-plugins.ts`, `tests/phone-layout.test.ts` pin the rows).
+- **Already answered:** Settings → Accounts (a ⋯ menu per account), its four confirm boxes, and what a paused or removed person reads at sign-in.
+- **Build:** the gateway's `/api/accounts` (owner only, checked by the gateway; an `lh_owner=1` marker cookie only decides whether the row shows); the 30-day deletion (checked at the gateway's start and once a day; `DELETE /volumes/<tag>`); the unpair-all calls. New `components/settings/accounts-section.tsx`; one row in `components/settings/settings-dialog.tsx`, under Account, on a computer and a tablet (upstream's file; add it to the list in `docs/upstream-0.6.0.md`). **On a phone there is no row** (the owner's decision): the same component renders as a second group inside Account, under a divider, the way `components/settings/cloud-obsidian-group.tsx` puts Obsidian inside Cloud; the phone's list stays at eight rows (`tests/phone-layout.test.ts` and `tests/phone-plugins-ui.test.tsx` pin them).
 - **Tests:** `tests/gateway-accounts.test.ts` (each `op`, a non-owner refused, the cap, Restore with no free slot, the 30 days with a moved clock), `tests/accounts-ui.test.tsx` (every state with the approved words; the row absent for a member and in the desktop app).
 - **Risk:** moderate. Routine implementer for the screen, complex for the gateway part.
 
@@ -211,7 +212,8 @@ After it, the owner's server does what it does today, through the gateway, with 
 - **The crossing tests**, in `.github/workflows/server-image.yml` after the image is built (real Caddy, gateway, maker and three copies): with two accounts, each of these is tried and refused: the other's session cookie; the other's device key; a key with a changed tag; a forged `X-LH-Upstream` and `X-LH-Gate`; a direct call from inside one container to another; a pairing code redeemed with another account's tag; a removed account's cookie and key; `/api/internal/*` from outside; the maker's port from a copy.
 - **The unchanged tests:** the existing smoke test of a single copy (setup code, `reset-password`, `ob`, Chromium) stays as it is, beside the new one.
 - **The update:** build two images, start the stack on the first, switch to the second; every copy ends on the second, and a signed-in page and a paired desktop carry on.
-- **The switch-over guide** for the owner (an Artifact page; each command tagged with where it runs): the copy of the server's data by hand; swap (`free -h`, then the commands); `git pull` in the repo folder (files in `deploy/` changed); `./make-secrets.sh`; `./update.sh`; the setup code from `docker compose logs gateway`; the claim; checking the phone and the paired PC; the way back (the previous `deploy/` files and image tag: the copy's own password gate works again, because its login file was never touched).
+- **The screenshot page** for the owner (an Artifact page), which is the one stop of the build: every new screen at computer and phone size from the running test stack, the timings, what the crossing tests tried, and anything added beyond the plan. The owner chose pictures over a trial address on the server.
+- **The switch-over guide** for the owner (an Artifact page; each command tagged with where it runs), with a second short guide for changing the cap later (`LH_MAX_ACCOUNTS` in `deploy/.env`, then `./update.sh`): the copy of the server's data by hand; swap (`free -h`, then the commands); `git pull` in the repo folder (files in `deploy/` changed); `./make-secrets.sh`; `./update.sh`; the setup code from `docker compose logs gateway`; the claim; checking the phone and the paired PC; the way back (the previous `deploy/` files and image tag: the copy's own password gate works again, because its login file was never touched).
 - **Docs:** "what was built" into `docs/cloud-sync.md` (a new part under "Hosting"), the plan's status, `CLAUDE.md`'s list of docs, the upstream-file list in `docs/upstream-0.6.0.md`.
 - **Then, with the owner's approval:** the same commit to both branches. No protocol change, so no order is forced; the server gets it first so the owner can try it. A desktop release happens only because `side-tutor` moved.
 
