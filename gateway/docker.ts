@@ -253,8 +253,14 @@ export class DockerClient {
 		ok(answer, 201);
 	}
 
-	async connectNetwork(network: string, container: string): Promise<void> {
-		const answer = await this.send("POST", `/networks/${encodeURIComponent(network)}/connect`, { body: { Container: container } });
+	/**
+	 * `gwPriority` (Docker 28+, `EndpointConfig.GwPriority`): the endpoint's claim
+	 * on the container's default route; higher wins. Docker 29 honours it on this
+	 * client's API version; older engines ignore the field.
+	 */
+	async connectNetwork(network: string, container: string, gwPriority?: number): Promise<void> {
+		const body = gwPriority === undefined ? { Container: container } : { Container: container, EndpointConfig: { GwPriority: gwPriority } };
+		const answer = await this.send("POST", `/networks/${encodeURIComponent(network)}/connect`, { body });
 		ok(answer, 200);
 	}
 

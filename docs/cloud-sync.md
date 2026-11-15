@@ -652,10 +652,14 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 
 | Network | Members | Notes |
 |---|---|---|
-| `front` | Caddy (alias `caddy`), gateway | Nothing but Caddy reaches the gateway. |
-| `owner` | Caddy, the owner's copy `lh` | |
-| `maker` | gateway, maker | `internal: true`: no way in or out. |
-| `lh-acct-<tag>-net` | that account's copy, Caddy | Made by the maker, one per account, **not** internal (the copy needs outbound access for its model providers). No copy shares a network with another copy, the gateway or the maker. |
+| `front`, named `lh-0-front` | Caddy (alias `caddy`), gateway | Nothing but Caddy reaches the gateway. Caddy's default route and its published ports. |
+| `owner`, named `lh-1-owner` | Caddy, the owner's copy `lh` | |
+| `maker`, named `lh-2-maker` | gateway, maker | `internal: true`: no way in or out. |
+| `lh-acct-<tag>-net` | that account's copy, Caddy | Made by the maker, one per account, **not** internal (the copy needs outbound access for its model providers). No copy shares a network with another copy, the gateway or the maker. Caddy joins it with the lowest gateway priority (`GwPriority` −1). |
+
+- **Fixed network names, never the compose project's.** Docker gives a container on several networks its default route, and with it the published ports, through the network whose name sorts first in byte order (Docker 28 and later: the highest gateway priority first, then the name). With the project's name in front (CI copies `deploy/` to a folder named `stack`: `stack_front`), the first account network, `lh-acct-<tag>-net`, sorted first: joining Caddy to it moved ports 80 and 443 onto it and cut the request in flight (the first invite: "socket hang up"). A project named `deploy` only happened to sort first. Now `lh-0-front` sorts before every `lh-acct-` name, on every engine.
+- **Two locks beside the names:** the maker joins Caddy with `GwPriority` −1 (Docker 28 and later honour it, checked on 29; Docker 25 takes the field and ignores it, checked on 25.0); and it logs a warning when none of Caddy's own networks sorts before the account network it joins (it still joins). `tests/deploy-files.test.ts` pins the names and their order. Compose's own `gw_priority` key isn't used: older Compose refuses an unknown key.
+- **One stack per host.** The names are host-wide, as `lh-caddy` and every `lh-acct-*` name already were. A second stack on the same Docker would be given the first one's networks by compose; it stops only at `lh-caddy`'s name, already taken (tried), and its `down` would remove the networks once they are unused.
 
 **Processes:**
 
@@ -957,6 +961,7 @@ Caddy, the gateway, the maker and copies ran together in Docker in the developme
 - **A restore of the accounts file from its backup** loses what happened since the backup (up to a day). The file is the only record of who owns which copy.
 - **The gateway is one process with one thread** (scrypt checks hold it briefly).
 - **No usage per account, no renaming, no sleeping copies, no own address per person** (the plan's "Not in the first version").
+- **A stack started from the files before the fixed network names** (`<project>_front`, only ever in the development sandbox and in CI) gets new networks at its next `up`, and its containers are re-created on them (not tried; the sandbox and CI start fresh). The owner's server goes from the single copy's default network to these names at the switch-over; its old `deploy_default` network can be left behind, unused (`docker network prune` removes it).
 
 #### What only the real server can show
 

@@ -75,7 +75,31 @@ export function isTag(value: unknown): value is string {
 }
 
 export const containerName = (tag: string) => `lh-acct-${tag}`;
-export const networkName = (tag: string) => `lh-acct-${tag}-net`;
+/** Every account network's name starts with this (deploy/compose.yaml's own networks sort before it). */
+export const ACCOUNT_NETWORK_PREFIX = "lh-acct-";
+export const networkName = (tag: string) => `${ACCOUNT_NETWORK_PREFIX}${tag}-net`;
+
+/**
+ * Caddy's endpoint on an account network asks for the lowest gateway priority,
+ * so it never becomes Caddy's default route. Docker gives a container with
+ * several networks its default route, and with it the published ports, through
+ * the endpoint with the highest priority, ties broken by the network name in
+ * byte order (Docker 25 to 27: by name alone; they ignore the field). A move
+ * re-plumbs ports 80 and 443 and cuts the requests in flight through Caddy.
+ * The rule that holds on every engine is the names: Caddy's outward network
+ * (deploy/compose.yaml, `lh-0-front`) sorts before every `lh-acct-` network.
+ */
+export const CADDY_ACCOUNT_GW_PRIORITY = -1;
+
+/**
+ * True when none of Caddy's networks that isn't an account network sorts before
+ * `network`: by name, the account network would then take Caddy's default route
+ * on Docker 25 to 27. Caddy is on no internal network in deploy/compose.yaml, so
+ * the names alone decide here. A warning only; nothing is refused.
+ */
+export function accountNetworkWouldLead(caddyNetworks: readonly string[], network: string): boolean {
+	return !caddyNetworks.some((name) => !NETWORK_NAME_RE.test(name) && name < network);
+}
 export const volumeName = (tag: string) => `lh-acct-${tag}-data`;
 export const upstreamOf = (tag: string) => `${containerName(tag)}:${COPY_PORT}`;
 /** The name a container carries while it is being replaced, with its state before the swap. */
@@ -333,9 +357,17 @@ export class Maker {
 	private async ensureCaddy(network: string) {
 		const caddy = await this.docker.inspectContainer(this.config.caddyContainer);
 		if (!caddy) throw new MakerFailure("no_caddy");
-		if (caddy.NetworkSettings?.Networks?.[network]) return false;
+		const joined = caddy.NetworkSettings?.Networks ?? {};
+		if (joined[network]) return false;
+		if (accountNetworkWouldLead(Object.keys(joined), network)) {
+			this.say(
+				"join",
+				null,
+				`warning: none of Caddy's own networks sorts before ${network}, so on Docker before 28 it becomes Caddy's gateway network and requests in flight through Caddy are cut (name Caddy's networks as deploy/compose.yaml does)`,
+			);
+		}
 		try {
-			await this.docker.connectNetwork(network, this.config.caddyContainer);
+			await this.docker.connectNetwork(network, this.config.caddyContainer, CADDY_ACCOUNT_GW_PRIORITY);
 		} catch (error) {
 			const again = await this.docker.inspectContainer(this.config.caddyContainer);
 			if (again?.NetworkSettings?.Networks?.[network]) return false;

@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
 import { createRequire } from "node:module";
-import { COPY_MEMORY_BYTES, COPY_MEMORY_SWAP_BYTES, COPY_PIDS_LIMIT, TAG_ALPHABET, copyTemplate } from "../gateway/maker.ts";
+import { ACCOUNT_NETWORK_PREFIX, COPY_MEMORY_BYTES, COPY_MEMORY_SWAP_BYTES, COPY_PIDS_LIMIT, TAG_ALPHABET, accountNetworkWouldLead, copyTemplate, networkName } from "../gateway/maker.ts";
 import { sanitizeUserSettings } from "../src/core/settings.ts";
 
 // The multi-account build and deploy files (docs/multi-account-build.md,
@@ -40,7 +40,7 @@ type Service = {
 	stop_grace_period?: string;
 	logging?: { driver?: string; options?: Record<string, string> };
 };
-type Compose = { services: Record<"lh" | "gateway" | "maker" | "caddy", Service>; networks: Record<string, { internal?: boolean } | null>; volumes: Record<string, unknown> };
+type Compose = { services: Record<"lh" | "gateway" | "maker" | "caddy", Service>; networks: Record<string, { internal?: boolean; name?: string } | null>; volumes: Record<string, unknown> };
 const compose = yaml.load(read("deploy/compose.yaml")) as Compose;
 /** "1g", "128m", "10m" -> bytes (compose's own size suffixes). */
 const bytesOf = (size: string) => {
@@ -219,6 +219,27 @@ describe("deploy/compose.yaml", () => {
 		assert.deepEqual(networksOf(services.maker), ["maker"]);
 		assert.equal(compose.networks.maker?.internal, true, "the maker network has no way out or in");
 		assert.ok(!compose.networks.front?.internal && !compose.networks.owner?.internal, "the others are ordinary");
+	});
+
+	it("names Caddy's outward network so that it sorts before every account network and the owner's", () => {
+		// Docker gives a container with several networks its default route (and
+		// the published ports) through the network whose name sorts first in byte
+		// order (Docker 28+: after the gateway priority). With the project's name
+		// in front ("stack_front" in CI) a new account network took it and cut the
+		// requests in flight through Caddy. Fixed names make it independent of the
+		// folder the stack runs from.
+		const named: Record<string, string | undefined> = Object.fromEntries(Object.entries(compose.networks).map(([key, net]) => [key, net?.name]));
+		assert.deepEqual({ ...named }, { front: "lh-0-front", owner: "lh-1-owner", maker: "lh-2-maker" });
+		const front = named.front!;
+		assert.ok(!front.includes("${"), "a fixed name, never from a variable");
+		assert.ok(front < ACCOUNT_NETWORK_PREFIX, `${front} sorts before ${ACCOUNT_NETWORK_PREFIX}`);
+		for (const tag of [TAG_ALPHABET[0]!.repeat(3), TAG_ALPHABET.at(-1)!.repeat(3)]) {
+			assert.ok(front < networkName(tag), networkName(tag));
+		}
+		assert.ok(front < named.owner!, "front sorts before the owner's network, Caddy's other one");
+		// Caddy's other networks never lead over an account network either, so the maker's warning stays quiet.
+		assert.equal(accountNetworkWouldLead(networksOf(services.caddy).map((key) => named[key]!), networkName("000")), false);
+		for (const name of Object.values(named)) assert.ok(!name!.startsWith(ACCOUNT_NETWORK_PREFIX), "never mistaken for an account network");
 	});
 
 	it("keeps the existing volumes and the service name so the switch-over reuses the data", () => {

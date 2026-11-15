@@ -13,6 +13,15 @@
 # Each account copy gets a network of its own, made by the maker, that only
 # Caddy joins. Nothing but Caddy reaches the gateway or a copy; copies share
 # no network with each other, the gateway or the maker.
+#
+# The networks have fixed names, not the compose project's (which is the
+# folder's name). Docker gives a container with several networks its default
+# route, and with it the published ports 80 and 443, through the network whose
+# name sorts first (Docker 28+: the highest gateway priority first, then the
+# name). Caddy's "lh-0-front" sorts before every account network
+# ("lh-acct-<tag>-net"), so joining one never moves Caddy's ports or cuts the
+# requests in flight. One stack per host: lh-caddy and every lh-acct-* name
+# are host-wide already.
 
 x-lh-image: &lh-image ghcr.io/jaeky42/learnharnessside:${LH_CHANNEL:-latest}
 # Log files stay bounded (they live on the host's disk).
@@ -161,8 +170,11 @@ services:
 
 networks:
   front:
+    name: lh-0-front
   owner:
+    name: lh-1-owner
   maker:
+    name: lh-2-maker
     internal: true
 
 volumes:

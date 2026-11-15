@@ -13,12 +13,15 @@ import path from "node:path";
 import { after, before, beforeEach, describe, test } from "node:test";
 import { DockerClient, imageRefPath } from "../gateway/docker.ts";
 import {
+	ACCOUNT_NETWORK_PREFIX,
+	CADDY_ACCOUNT_GW_PRIORITY,
 	COPY_CPU_SHARES,
 	COPY_MEMORY_BYTES,
 	COPY_MEMORY_SWAP_BYTES,
 	COPY_PIDS_LIMIT,
 	Maker,
 	TAG_ALPHABET,
+	accountNetworkWouldLead,
 	copyTagOf,
 	copyTemplate,
 	createRequest,
@@ -356,6 +359,8 @@ beforeEach(async () => {
 	docker = new FakeDocker(path.join(dir, `docker-${Date.now()}-${Math.random().toString(16).slice(2)}.sock`));
 	docker.images.set("lh-image:test", OLD_IMAGE);
 	docker.addContainer("caddy", "sha256:" + "d".repeat(64));
+	// Caddy on deploy/compose.yaml's own two networks, as in the real stack.
+	for (const name of ["lh-0-front", "lh-1-owner"]) docker.findContainer("caddy")!.networks.add(name);
 	docker.addContainer("maker-self", NEW_IMAGE);
 	await docker.listen();
 	await startMaker();
@@ -503,7 +508,13 @@ describe("POST /copies", () => {
 			Driver: "local",
 			Labels: { "lh.account.tag": "K7Q", "lh.managed": "1" },
 		});
-		assert.deepEqual(docker.calls.find((c) => c.path.endsWith("/connect"))!.body, { Container: "caddy" });
+		// The account network never takes Caddy's default route (docs/cloud-sync.md, "Networks").
+		assert.deepEqual(docker.calls.find((c) => c.path.endsWith("/connect"))!.body, {
+			Container: "caddy",
+			EndpointConfig: { GwPriority: CADDY_ACCOUNT_GW_PRIORITY },
+		});
+		assert.ok(CADDY_ACCOUNT_GW_PRIORITY < 0);
+		assert.ok(!logs.some((l) => l.includes("warning")), logs.join("\n"));
 		assert.equal(docker.findContainer("lh-acct-K7Q")!.State.Running, true);
 	});
 
@@ -853,6 +864,35 @@ describe("GET /copies and reconcile", () => {
 		const all = logs.join("\n");
 		assert.ok(!all.includes(secret) && !all.includes(TOKEN), all);
 		assert.match(all, /\[redacted\]/);
+	});
+});
+
+describe("Caddy's default route", () => {
+	test("an account network sorts after Caddy's own networks only when they are named for it", () => {
+		assert.equal(ACCOUNT_NETWORK_PREFIX, "lh-acct-");
+		// deploy/compose.yaml's names: front sorts before every account network.
+		assert.equal(accountNetworkWouldLead(["lh-0-front", "lh-1-owner"], "lh-acct-000-net"), false);
+		assert.equal(accountNetworkWouldLead(["lh-0-front", "lh-acct-AAA-net"], "lh-acct-ZZZ-net"), false);
+		// The CI fault: a compose project named "stack" gave stack_front and stack_owner.
+		assert.equal(accountNetworkWouldLead(["stack_front", "stack_owner"], "lh-acct-S4R-net"), true);
+		// Other account networks don't count: the first one would already hold the route.
+		assert.equal(accountNetworkWouldLead(["stack_front", "lh-acct-AAA-net"], "lh-acct-BBB-net"), true);
+		assert.equal(accountNetworkWouldLead([], "lh-acct-AAA-net"), true);
+		// A project named "deploy" happened to sort first.
+		assert.equal(accountNetworkWouldLead(["deploy_front", "deploy_owner"], "lh-acct-AAA-net"), false);
+	});
+
+	test("joining Caddy to a network that would lead warns, and still joins", async () => {
+		const caddy = docker.findContainer("caddy")!;
+		caddy.networks.clear();
+		for (const name of ["stack_front", "stack_owner"]) caddy.networks.add(name);
+		const r = await call("POST", "/copies", { tag: "S4R" });
+		assert.equal(r.status, 200);
+		assert.ok(caddy.networks.has("lh-acct-S4R-net"));
+		assert.ok(
+			logs.some((l) => l.includes("warning") && l.includes("lh-acct-S4R-net")),
+			logs.join("\n"),
+		);
 	});
 });
 
