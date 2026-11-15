@@ -111,7 +111,7 @@ describe("the stored file", () => {
 
 describe("names", () => {
 	it("allows 3 to 20 letters, digits and dashes", () => {
-		for (const ok of ["sam", "Sam-2", "a-b", "x".repeat(20), "007"]) assert.equal(acc.checkName(fixture(), ok), null, ok);
+		for (const ok of ["sam", "Sam-2", "a-b", "x".repeat(20), "007"]) assert.equal(acc.checkName(acc.emptyGatewayState(), ok), null, ok);
 		for (const no of ["ab", "x".repeat(21), "sam smith", "sám", "sam_1", "sam.", "", " sam", "sam\n"]) assert.equal(acc.checkName(fixture(), no), "not-allowed", JSON.stringify(no));
 		for (const no of [null, undefined, 42, {}]) assert.equal(acc.checkName(fixture(), no), "not-allowed");
 	});

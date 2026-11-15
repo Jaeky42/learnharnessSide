@@ -124,7 +124,7 @@ export interface MakerConfig {
 }
 
 /** The config, or the reason the maker refuses to start (never naming a value). */
-export function readMakerConfig(env: NodeJS.ProcessEnv, hostname = os.hostname()): MakerConfig | { error: string } {
+export function readMakerConfig(env: Record<string, string | undefined>, hostname = os.hostname()): MakerConfig | { error: string } {
 	const token = env.LH_MAKER_TOKEN ?? "";
 	if (token.length < MIN_TOKEN_LENGTH) return { error: `LH_MAKER_TOKEN is missing or shorter than ${MIN_TOKEN_LENGTH} characters` };
 	const caddyContainer = (env.LH_CADDY_CONTAINER ?? "").trim();
@@ -578,7 +578,7 @@ export function makerServer(maker: Maker): http.Server {
 }
 
 /** The program: refuse to start without a token, listen, then one reconcile pass. */
-export async function main(env: NodeJS.ProcessEnv = process.env): Promise<void> {
+export async function main(env: Record<string, string | undefined> = process.env): Promise<void> {
 	const config = readMakerConfig(env);
 	if ("error" in config) {
 		console.error(`[LearnHarness] maker: not starting: ${config.error}.`);

@@ -554,7 +554,8 @@ describe("POST /copies", () => {
 		assert.equal(a.status, 200);
 		assert.equal(b.status, 200);
 		const lines = docker.lines();
-		assert.ok(lines.indexOf("POST /containers/lh-acct-ABC/start") < lines.findIndex((l) => l.endsWith("/stop")), lines.join("\n"));
+		// The stop's own look-up comes only after the create has started its copy.
+		assert.equal(lines.lastIndexOf("GET /containers/lh-acct-ABC/json"), lines.indexOf("POST /containers/lh-acct-ABC/start") + 1, lines.join("\n"));
 		assert.equal(docker.findContainer("lh-acct-ABC")!.State.Running, false);
 	});
 

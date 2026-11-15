@@ -15,6 +15,13 @@
  * Proposed in the plan and approved with it: the code looks like the setup
  * code (XXXX-XXXX), wrong codes count toward the login lockout, and at most
  * 10 desktops are paired at once.
+ *
+ * Multi-account (docs/multi-account-build.md, "Tags in codes and keys"): a
+ * copy that knows its account tag appends it to the code (XXXX-XXXX-TTT, 11
+ * characters normalized) and puts it before the key (46 characters). The
+ * stored hashes cover the whole code and key. No tag: exactly as before
+ * (8 and 43). The gateway sorts requests by the tag; the copy only checks
+ * its hashes.
  */
 
 import { randomBytes, timingSafeEqual } from "node:crypto";
@@ -35,6 +42,24 @@ const DEVICE_SEEN_RESOLUTION_MS = 5 * 60 * 1000;
 
 const DEVICE_ID = /^dev_[0-9a-f]{16}$/;
 
+/** The setup-code alphabet (CODE_ALPHABET in ../server-auth.ts, not exported
+ *  there; tests/sync-tags.test.ts pins the two equal). Every symbol is also
+ *  in base64url, so a tagged key still passes bearerKey. */
+const TAG_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+export const ACCOUNT_TAG_LENGTH = 3;
+
+/** Exactly three symbols of the setup-code alphabet, upper case. */
+export function isAccountTag(value: unknown): value is string {
+	return typeof value === "string" && value.length === ACCOUNT_TAG_LENGTH && [...value].every((c) => TAG_ALPHABET.includes(c));
+}
+
+/** null = untagged; a string must be a valid tag (a bad one throws, never an untagged code or key). */
+function checkedTag(tag: string | null | undefined): string | null {
+	if (tag === null || tag === undefined) return null;
+	if (!isAccountTag(tag)) throw new Error("Invalid account tag.");
+	return tag;
+}
+
 export function newDeviceId(): string {
 	return `dev_${randomBytes(8).toString("hex")}`;
 }
@@ -50,9 +75,11 @@ export function cleanDeviceName(value: unknown): string | null {
 	return name.length > 0 && [...name].length <= DEVICE_NAME_MAX ? name : null;
 }
 
-/** A fresh code replaces any code still waiting: only one is valid at a time. */
-export function startPairing(state: ServerAuthState, now: number): { state: ServerAuthState; code: string; expiresAt: number } {
-	const code = newSetupCode();
+/** A fresh code replaces any code still waiting: only one is valid at a time.
+ *  With a tag the code is XXXX-XXXX-TTT; the hash covers all 11 symbols. */
+export function startPairing(state: ServerAuthState, now: number, tag: string | null = null): { state: ServerAuthState; code: string; expiresAt: number } {
+	const accountTag = checkedTag(tag);
+	const code = accountTag === null ? newSetupCode() : `${newSetupCode()}-${accountTag}`;
 	const expiresAt = now + PAIRING_CODE_LIFETIME_MS;
 	return { state: { ...state, pairing: { codeHash: setupCodeHash(code), expiresAt } }, code, expiresAt };
 }
@@ -69,11 +96,13 @@ export type PairingOutcome =
  * Use up the waiting code (the caller has checked it with
  * pairingCodeMatches) and add the device. A device id that is already
  * paired gets a new key: that is the same desktop pairing again.
+ * With a tag the key is the tag plus 43 characters; the hash covers all 46.
  */
-export function completePairing(state: ServerAuthState, deviceId: string, name: string, now: number): PairingOutcome {
+export function completePairing(state: ServerAuthState, deviceId: string, name: string, now: number, tag: string | null = null): PairingOutcome {
+	const accountTag = checkedTag(tag);
 	const others = state.devices.filter((d) => d.id !== deviceId);
 	if (others.length >= MAX_DEVICES) return { ok: false, reason: "too_many" };
-	const key = randomBytes(32).toString("base64url");
+	const key = (accountTag ?? "") + randomBytes(32).toString("base64url");
 	const device: DeviceRecord = { id: deviceId, name, keyHash: sha256(key), pairedAt: now, lastSeenAt: now };
 	return { ok: true, state: { ...state, pairing: null, devices: [...others, device] }, key, device };
 }

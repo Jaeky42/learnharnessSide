@@ -43,6 +43,8 @@ services:
     depends_on:
       - maker
     environment:
+      # The image sets PORT=3000 for the copy; these two listen on their own ports.
+      PORT: "9000"
       LH_GATEWAY_FILE: /gateway/accounts.json
       LH_MAX_ACCOUNTS: ${LH_MAX_ACCOUNTS:-4}
       LH_OWNER_UPSTREAM: lh:3000
@@ -82,6 +84,7 @@ services:
     group_add:
       - ${LH_DOCKER_GID:?Run ./make-secrets.sh in deploy/ first}
     environment:
+      PORT: "9100"
       LH_MAKER_TOKEN: ${LH_MAKER_TOKEN:?Run ./make-secrets.sh in deploy/ first}
       # Every copy is made from this same image.
       LH_IMAGE: *lh-image
