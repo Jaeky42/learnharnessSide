@@ -4,11 +4,23 @@
  * pages, the screens and their tests agree. A change here is a change to
  * approved wording: ask the owner first. Quoted names take curly quotes.
  *
- * Pure text, like ./sync/screens.ts. Bundled into the gateway, so it imports
- * only from ./server-auth.ts.
+ * Pure text, like ./sync/screens.ts. Browser-safe: React components import it,
+ * so it imports nothing at all (no node built-ins, not ./server-auth.ts or
+ * ./accounts.ts; a test reads the source to keep it so). The gateway and
+ * ./accounts.ts may import it, never the other way round.
  */
 
-import { PASSWORD_MIN_LENGTH, formatWait } from "./server-auth.ts";
+/** Equal to PASSWORD_MIN_LENGTH in ./server-auth.ts (a test pins it). */
+const PASSWORD_MIN_LENGTH = 8;
+
+/** A copy of `formatWait` in ./server-auth.ts ("15 min", "2 h", "1 h 30 min"; a test pins them equal). */
+export function waitText(ms: number): string {
+	const minutes = Math.max(1, Math.ceil(ms / 60000));
+	if (minutes < 60) return `${minutes} min`;
+	const hours = Math.floor(minutes / 60);
+	const rest = minutes % 60;
+	return rest ? `${hours} h ${rest} min` : `${hours} h`;
+}
 
 // Equal to RECOVERY_CODE_COUNT and REMOVED_KEEP_MS in ./accounts.ts (a test pins it); not imported, to keep this file standalone.
 const RECOVERY_TOTAL = 4;
@@ -20,7 +32,7 @@ export const PASSWORDS_DONT_MATCH = "The two passwords don't match.";
 /** The same sentence `passwordProblem` gives. */
 export const USE_AT_LEAST = `Use at least ${PASSWORD_MIN_LENGTH} characters.`;
 /** Today's lockout sentence (src/server/server-auth.ts `lockedMessage`). */
-export const tooManyAttempts = (waitMs: number): string => `Too many attempts. Try again in ${formatWait(waitMs)}.`;
+export const tooManyAttempts = (waitMs: number): string => `Too many attempts. Try again in ${waitText(waitMs)}.`;
 /** Today's wrong setup code sentence. */
 export const SETUP_CODE_WRONG = "That setup code isn't right. Check the server log for the current code.";
 
@@ -163,7 +175,7 @@ export const pauseConfirm = (name: string): ConfirmText => ({
 	confirm: "Pause",
 });
 
-export const removeConfirm = (name: string): ConfirmText => ({
+export const removeAccountConfirm = (name: string): ConfirmText => ({
 	title: `Remove ${quoted(name)}?`,
 	body: "The account stops now. Its data is kept for 30 days, then deleted for good.",
 	cancel: "Cancel",

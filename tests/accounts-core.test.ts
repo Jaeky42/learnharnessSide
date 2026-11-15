@@ -11,7 +11,8 @@ import { describe, it } from "node:test";
 
 import * as acc from "../src/core/accounts.ts";
 import * as words from "../src/core/account-screens.ts";
-import { hashPassword, newSetupCode, normalizeSetupCode, passwordProblem, setupCodeHash, verifyPassword } from "../src/core/server-auth.ts";
+import fs from "node:fs";
+import { formatWait, hashPassword, newSetupCode, normalizeSetupCode, PASSWORD_MIN_LENGTH, passwordProblem, setupCodeHash, verifyPassword } from "../src/core/server-auth.ts";
 
 const MIN = 60 * 1000;
 const HOUR = 60 * MIN;
@@ -920,6 +921,29 @@ describe("the approved words", () => {
 		assert.equal(words.RESET_PAGE_TEXT.submit, "Set new password");
 	});
 
+	it("is browser-safe: imports nothing (no node built-in, not ./server-auth or ./accounts)", () => {
+		const source = fs.readFileSync(new URL("../src/core/account-screens.ts", import.meta.url), "utf-8");
+		assert.doesNotMatch(source, /\bfrom\s+["']node:/);
+		assert.doesNotMatch(source, /\bimport\s*\(?\s*["']node:/);
+		assert.doesNotMatch(source, /["']\.\/(server-auth|accounts)(\.ts)?["']/);
+		assert.doesNotMatch(source, /^\s*import\s/m);
+		assert.doesNotMatch(source, /\brequire\s*\(/);
+	});
+
+	it("its copies of the password rule and the wait text equal the originals", () => {
+		assert.equal(words.USE_AT_LEAST, `Use at least ${PASSWORD_MIN_LENGTH} characters.`);
+		assert.equal(words.INVITE_TEXT.passwordHelp, `At least ${PASSWORD_MIN_LENGTH} characters.`);
+		const SEC = 1000;
+		const durations = [0, 1, SEC, 30 * SEC, 59 * SEC, MIN, MIN + 1, 2 * MIN, 14 * MIN, 15 * MIN, 15 * MIN + 1, 59 * MIN, 59 * MIN + 1, HOUR - 1,
+			HOUR, HOUR + 1, HOUR + MIN, 90 * MIN, 2 * HOUR, 2 * HOUR + 59 * MIN, 23 * HOUR + 59 * MIN, 24 * HOUR - 1, 24 * HOUR, 24 * HOUR + 1, 48 * HOUR, -5];
+		for (const ms of durations) {
+			assert.equal(words.waitText(ms), formatWait(ms), String(ms));
+			assert.equal(words.tooManyAttempts(ms), `Too many attempts. Try again in ${formatWait(ms)}.`, String(ms));
+		}
+		assert.equal(words.waitText(15 * MIN), "15 min");
+		assert.equal(words.waitText(24 * HOUR), "24 h");
+	});
+
 	it("reuses today's two password sentences", () => {
 		assert.equal(words.PASSWORDS_DONT_MATCH, "The two passwords don't match.");
 		assert.equal(words.USE_AT_LEAST, passwordProblem("short"));
@@ -930,7 +954,7 @@ describe("the approved words", () => {
 		assert.equal(words.resetConfirm("sam").body, "You get a code to pass on. It works once, for 24 hours. When it is used, sam is signed out everywhere and pairs their desktop apps again.");
 		assert.equal(words.resetConfirm("sam").confirm, "Get reset code");
 		assert.deepEqual(words.pauseConfirm("sam"), { title: "Pause “sam”?", body: "sam can't sign in and their copy stops. Nothing is deleted.", cancel: "Cancel", confirm: "Pause" });
-		assert.deepEqual(words.removeConfirm("sam"), { title: "Remove “sam”?", body: "The account stops now. Its data is kept for 30 days, then deleted for good.", cancel: "Cancel", confirm: "Remove" });
+		assert.deepEqual(words.removeAccountConfirm("sam"), { title: "Remove “sam”?", body: "The account stops now. Its data is kept for 30 days, then deleted for good.", cancel: "Cancel", confirm: "Remove" });
 		assert.deepEqual(words.deleteNowConfirm("lee"), { title: "Delete “lee” now?", body: "This deletes the account's data for good.", cancel: "Cancel", confirm: "Delete" });
 		assert.equal(words.resetCodeBox("sam").title, "Reset code for “sam”");
 		assert.equal(words.resetCodeBox("sam").body, "Works once, for 24 hours.");
