@@ -15,6 +15,12 @@
 # no network with each other, the gateway or the maker.
 
 x-lh-image: &lh-image ghcr.io/jaeky42/learnharnessside:${LH_CHANNEL:-latest}
+# Log files stay bounded (they live on the host's disk).
+x-lh-logging: &lh-logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "3"
 
 services:
   lh:
@@ -34,6 +40,17 @@ services:
       - owner
     expose:
       - "3000"
+    # The same limits and hardening as an account's copy (the maker's template,
+    # gateway/maker.ts copyTemplate; a test keeps the numbers equal).
+    init: true
+    mem_limit: 1g
+    memswap_limit: 2g
+    pids_limit: 512
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging: *lh-logging
 
   gateway:
     image: *lh-image
@@ -73,6 +90,7 @@ services:
       - no-new-privileges:true
     mem_limit: 256m
     pids_limit: 128
+    logging: *lh-logging
 
   maker:
     image: *lh-image
@@ -80,7 +98,8 @@ services:
     restart: unless-stopped
     # The only service with Docker's socket, which is root on this server.
     # It stays the unprivileged image user; the socket's group is added
-    # instead (LH_DOCKER_GID, written by make-secrets.sh).
+    # instead (LH_DOCKER_GID, written by make-secrets.sh from the same socket path,
+    # LH_DOCKER_SOCKET).
     group_add:
       - ${LH_DOCKER_GID:?Run ./make-secrets.sh in deploy/ first}
     environment:
@@ -92,7 +111,7 @@ services:
       TZ: ${TZ:-UTC}
       HOME: /tmp
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
+      - ${LH_DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
     networks:
       - maker
     expose:
@@ -106,6 +125,10 @@ services:
       - no-new-privileges:true
     mem_limit: 128m
     pids_limit: 64
+    # A pass that is bringing copies onto a new image finishes before the maker
+    # exits on SIGTERM; Docker must not kill it sooner.
+    stop_grace_period: 120s
+    logging: *lh-logging
 
   caddy:
     image: caddy:2
@@ -131,6 +154,7 @@ services:
         aliases:
           - caddy
       owner: {}
+    logging: *lh-logging
 
 networks:
   front:

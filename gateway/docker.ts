@@ -153,6 +153,16 @@ export interface ImageInspect {
 	Id: string;
 }
 
+/**
+ * An image reference in a path: its slashes stay as they are (as the Docker CLI
+ * sends them; the daemon's route takes the rest of the path as the name), every
+ * other character is percent-encoded (`ghcr.io/owner/name%3Adev`). Checked on
+ * Docker 29: raw slashes, encoded slashes and an encoded colon all resolve.
+ */
+export function imageRefPath(ref: string): string {
+	return ref.split("/").map(encodeURIComponent).join("/");
+}
+
 /** The calls the maker makes. Names and ids go into the path encoded. */
 export class DockerClient {
 	constructor(private readonly send: DockerRequest) {}
@@ -162,7 +172,7 @@ export class DockerClient {
 	}
 
 	async inspectImage(ref: string): Promise<ImageInspect | null> {
-		const answer = await this.send("GET", `/images/${encodeURIComponent(ref)}/json`);
+		const answer = await this.send("GET", `/images/${imageRefPath(ref)}/json`);
 		if (answer.status === 404) return null;
 		ok(answer, 200);
 		return answer.data as ImageInspect;
@@ -206,6 +216,14 @@ export class DockerClient {
 		return answer.status === 204;
 	}
 
+	/** False: no such container. Docker answers 409 when the new name is taken. */
+	async renameContainer(nameOrId: string, name: string): Promise<boolean> {
+		const answer = await this.send("POST", `/containers/${encodeURIComponent(nameOrId)}/rename`, { query: { name } });
+		if (answer.status === 404) return false;
+		ok(answer, 204);
+		return true;
+	}
+
 	/** Removes the container only: `v` stays off, and named volumes are never removed with it anyway. */
 	async removeContainer(nameOrId: string): Promise<boolean> {
 		const answer = await this.send("DELETE", `/containers/${encodeURIComponent(nameOrId)}`, {
@@ -240,7 +258,10 @@ export class DockerClient {
 		ok(answer, 200);
 	}
 
-	/** False when either side is missing. */
+	/**
+	 * False when either side is missing. Docker 29 answers 500 ("is not connected
+	 * to the network") for a container that isn't attached: callers look first.
+	 */
 	async disconnectNetwork(network: string, container: string): Promise<boolean> {
 		const answer = await this.send("POST", `/networks/${encodeURIComponent(network)}/disconnect`, {
 			body: { Container: container, Force: true },

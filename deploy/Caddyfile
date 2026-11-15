@@ -1,4 +1,7 @@
 {
+	# Nothing here reloads the config (update.sh re-creates the container), and
+	# Caddy sits on every account's network: no admin endpoint at all.
+	admin off
 	servers {
 		# no trusted_proxies: client X-Forwarded-* is never trusted
 	}
@@ -16,8 +19,13 @@
 		uri /gate
 		copy_headers X-LH-Upstream X-LH-Gate
 	}
+	# Fail closed: a gateway answer with no upstream never proxies anywhere.
+	@noUpstream expression `{http.request.header.X-LH-Upstream} == ""`
+	respond @noUpstream 502
 	reverse_proxy {http.request.header.X-LH-Upstream} {
 		flush_interval -1
+		# All accounts share one origin: a copy must not plant a service worker.
+		header_down -Service-Worker-Allowed
 	}
 }
 
@@ -26,6 +34,13 @@
 
 	route {
 		import strip
+
+		# Browsers send this header when fetching a worker script. The app has
+		# no service worker, so none is ever served or registered.
+		@serviceWorker header Service-Worker *
+		handle @serviceWorker {
+			respond 403
+		}
 
 		handle /api/internal/* {
 			respond 404
@@ -49,11 +64,17 @@
 # Internal relay: plain HTTP, internal network only (never published).
 http://:9200 {
 	route {
-		@ok expression `"{$LH_RELAY_TOKEN}" != "" && {header.X-LH-Relay} == "{$LH_RELAY_TOKEN}"`
+		# The token, and an upstream that is the owner's copy or an account's
+		# (tag: the setup code's alphabet; a test keeps the class equal to it).
+		@ok {
+			expression `"{$LH_RELAY_TOKEN}" != "" && {header.X-LH-Relay} == "{$LH_RELAY_TOKEN}"`
+			header_regexp X-LH-Upstream ^(lh|lh-acct-[0-9A-HJKMNP-TV-Z]{3}):3000$
+		}
 		handle @ok {
 			reverse_proxy {http.request.header.X-LH-Upstream} {
 				flush_interval -1
 				header_up -X-LH-Relay
+				header_down -Service-Worker-Allowed
 				header_up X-Forwarded-For {http.request.header.X-LH-Client-Addr}
 				header_up -X-LH-Client-Addr
 			}

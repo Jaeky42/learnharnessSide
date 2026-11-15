@@ -5,7 +5,7 @@
  * server image runs with plain Node:
  *
  *   gateway/main.ts  -> gateway-dist/gateway.mjs   (`lh-gateway`)
- *   gateway/maker.ts -> gateway-dist/maker.mjs      (`lh-maker`)
+ *   gateway/maker-main.ts -> gateway-dist/maker.mjs  (`lh-maker`)
  *
  * No dependency but Node's own modules (they stay external). Run in the
  * image's build stage; the output folder is git-ignored. The desktop app's
@@ -26,7 +26,7 @@ const TARGET = "node26";
 
 const entries = [
 	{ name: "gateway", file: path.resolve(process.env.LH_GATEWAY_ENTRY_MAIN || path.join(ROOT, "gateway", "main.ts")) },
-	{ name: "maker", file: path.resolve(process.env.LH_GATEWAY_ENTRY_MAKER || path.join(ROOT, "gateway", "maker.ts")) },
+	{ name: "maker", file: path.resolve(process.env.LH_GATEWAY_ENTRY_MAKER || path.join(ROOT, "gateway", "maker-main.ts")) },
 ];
 
 for (const entry of entries) {

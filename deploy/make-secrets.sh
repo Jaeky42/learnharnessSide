@@ -8,12 +8,31 @@
 #   LH_MAKER_TOKEN   the gateway's key to the maker
 #   LH_RELAY_TOKEN   the gateway's key to Caddy's internal relay
 #   LH_DOCKER_GID    the group of Docker's socket (not a secret), for the maker
+# Run it as your own user, not with sudo: a root-owned .env can't be read by
+# your own `docker compose`.
 set -eu
 umask 077
 cd "$(dirname "$0")"
 env_file=".env"
 example=".env.example"
-socket="${LH_DOCKER_SOCKET:-/var/run/docker.sock}"
+
+owner_of() {
+	stat -c %u "$1" 2>/dev/null || stat -f %u "$1" 2>/dev/null || echo unknown
+}
+
+# Only a .env that root already owns may be added to as root.
+if [ "$(id -u)" = "0" ] && { [ ! -f "$env_file" ] || [ "$(owner_of "$env_file")" != "0" ]; }; then
+	echo "make-secrets: run this as your own user, not as root or with sudo (the new .env would be owned by root)." >&2
+	exit 1
+fi
+
+# The socket compose mounts (LH_DOCKER_SOCKET, the same variable and default
+# as compose.yaml): the shell's value, else .env's, else Docker's usual path.
+socket="${LH_DOCKER_SOCKET:-}"
+if [ -z "$socket" ] && [ -f "$env_file" ]; then
+	socket="$(sed -n 's/^LH_DOCKER_SOCKET=//p' "$env_file" | tail -n 1)"
+fi
+socket="${socket:-/var/run/docker.sock}"
 
 # A tracked .env would put the secrets in git.
 if command -v git >/dev/null 2>&1 && git ls-files --error-unmatch -- "$env_file" >/dev/null 2>&1; then
