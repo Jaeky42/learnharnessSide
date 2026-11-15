@@ -182,6 +182,27 @@ Five things the plan had left open, or that came out differently than the plan s
   - **Tests:** `tests/check-blank-space.test.ts` (the rules), `tests/dock-touch-reveal.test.tsx` (the scripted lesson with the real `use-stick-to-bottom`: folded and at rest on load and on arrival, never opening with no input, opening at the bottom with no change of the reserve and no fold after, a lesson too short to scroll, Open from rest and from far up, a stopped glide then a scroll to the bottom by hand, a taller viewport at rest and in the blank space, the reserve growing at rest, a normal question unchanged).
   - **Only the owner's iPhone can show:** Safari's momentum through the blank space (a hard flick can stop a few pixels short of the bottom, folded, as for any folded question); whether Safari keeps the view still when messages above take their real height (if not, the back-to-rest rule covers the lesson getting shorter); and how the opening looks at the moment of arrival. The first attempt passed every browser case too.
   - **Known limits:** a jump of the browser's own that moves the lesson down to within 16 px of the bottom with no change of the lesson's height could open the check by itself (not seen); a check arriving live from a model was run in the scripted lesson only.
+- **A research job that ends without a brief gets one wrap-up request** (owner's report: research agents fail to produce text).
+  - **The fault is upstream's**, unchanged in 0.6.1: the brief is the text of the run's **last** assistant message (`runSubagent` in `src/agent/subagents/pi-run.ts`), and a run with no text there fails with "Research failed: the researcher produced no text" (`src/agent/subagents/runner.ts`).
+  - **Four ways to get there, each reproduced** with the real researcher loop and scripted model replies (no real model):
+    1. **the call limit:** the run ends right after the model call that reaches the limit, also when that call was one more search, so the brief is never asked for;
+    2. **hidden text:** the last message has only thinking. Newer Claude models return text written next to a tool call as a thinking block, and the researcher has no tool to hand its brief in (the teacher and the Tutor have `send_to_user`);
+    3. **the brief too early:** the brief and one more tool call in one message, then a closing message without text;
+    4. **cut off:** the last message runs out of output room while thinking.
+    - A quiet variant of the first: a line such as "Let me check one more source." beside the last tool call was delivered as the brief, with no failure shown.
+  - **Which of these the owner met isn't known**: that needs a failed job's record (`usage.steps` at the limit means the first).
+  - **The owner's decisions** (one question each):
+    - **a wrap-up request**, over that plus a hand-in tool for the brief (sturdier on Claude models, but it changes the researcher's prompt for every run) and over no fix;
+    - **the limit is 16 model calls** (it was 12; the others offered were 12 and 20). With the wrap-up a job makes at most 17;
+    - **the wrap-up's words:** "Your research time is up. Do not call any more tools. Write your final brief now, in the required format, using only what you have already gathered. If something could not be established, say so under Gaps." (`RESEARCH_WRAP_UP_MESSAGE` in `src/agent/subagents/researcher.ts`; over a shorter text without the last sentence).
+  - **The rule** (`wrapUp` on `runSubagent`, used by the researcher only):
+    - when the run's last message made a tool call, or has no text, the researcher is sent the wrap-up message once, and that reply's text is the brief;
+    - a tool call in that reply is refused, not run. The tools stay declared: taking them away in the middle of a run invalidates the earlier thinking blocks on newer Claude models;
+    - still no text: the same failure as before;
+    - not after Stop or a provider's error. The wrap-up call is counted in the job's usage like any other;
+    - a run that ends with a brief makes no extra call, and nothing on screen changed.
+  - **Not changed:** the PDF reader (its own loop and limit) and every other helper.
+  - **Known limit:** a brief written beside one more tool call, followed by a closing message that has some text ("Done."), still delivers the closing text. A real brief can't be told from a closing remark without guessing.
 
 ### The Drawing Pad, as tried on a computer (nothing of upstream's changed)
 
@@ -315,4 +336,7 @@ Protocol 2 means both sides must be updated, or sync pauses (nothing is discarde
     - `.gitignore` and `.dockerignore`: `gateway-dist`.
     - The fork's own files, edited: `src/server/server-auth.ts` (`behindGateway`, `gatePasses`, `gateScopeOf`, `gatewayGate`, `unpairAllResponse`; `signedIn` returns a boolean and, behind a gateway, means the secret with scope `session`; the account routes and pages answer 404 behind a gateway), `src/core/sync/devices.ts` and `src/server/sync/http.ts` (a tag in pairing codes and device keys; `accountTag`), `components/settings/account-section.tsx` (the new parts, shown only when the gateway's answer has a `name`), `Dockerfile` (the two bundles, the `lh-gateway` and `lh-maker` wrappers, the `reset-password` wrapper's choice, `/gateway`), `deploy/compose.yaml`, `Caddyfile`, `update.sh`, `docker-entrypoint.sh` (the seed of "helpers at once"), `.env.example`, and both workflows (`server-image.yml`: the stack and crossing tests step; `side-tutor-windows.yml`: four more test files in the cloud-sync test step).
     - Not edited: `proxy.ts`, `components/chat.tsx`, `src/server/api-gate.ts`, `scripts/server-reset-password.mjs`, `scripts/build-server.mjs`. The desktop app's bundle carries the gateway's source files unused (Next's standalone output includes the source tree); nothing in it reads them.
+  - **Added by the research wrap-up** ("A research job that ends without a brief gets one wrap-up request" under "Asked for with the results"; each edit marked `FORK (research wrap-up)`):
+    - `src/agent/subagents/pi-run.ts`: the optional `wrapUp` on `runSubagent` (one more request when the run ended on a tool call or with no text; tool calls refused during it);
+    - `src/agent/subagents/researcher.ts`: `maxTurns` 16 (upstream: 12), `RESEARCH_WRAP_UP_MESSAGE`, and `wrapUp` passed to `runSubagent`.
   - The phone styling of Flashcards and Rich code blocks hangs on upstream's class names and markup from the fork's own stylesheets; `tests/phone-flashcards.test.ts`, `tests/phone-flashcards-structure.test.tsx` and `tests/phone-rich-code-blocks.test.tsx` fail when one of those names or structures changes upstream.

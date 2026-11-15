@@ -57,6 +57,11 @@ export interface SubagentRunOptions {
 	 *  "job:<role>"). Absent or env-off → no observer.
 	 *  Also identifies the source in opt-in LH_BACKGROUND_CAPTURE captures. */
 	chatId?: string;
+	/** FORK (research wrap-up): a run that hit its turn cap on a tool call, or
+	 *  whose last message has no text, gets ONE more request to write its
+	 *  deliverable. Tools stay declared but are refused while it runs. Unset =
+	 *  the run ends as before. */
+	wrapUp?: { message: string };
 }
 
 export interface SubagentRunResult {
@@ -79,6 +84,8 @@ export async function runSubagent(tools: AgentTool<any, any>[], opts: SubagentRu
 	if (opts.abortSignal?.aborted) throw Object.assign(new Error("aborted"), { name: "AbortError" });
 	const engine = subagentEngine(opts.role, opts.engine);
 	let turns = 0;
+	// FORK (research wrap-up): true while the single wrap-up request runs.
+	let wrappingUp = false;
 	// Debug recorder (owner, 2026-10-04): raw provider events per job run.
 	const providerEvents = opts.chatId && opts.role ? providerEventObserver(opts.chatId, `job:${opts.role}`) : undefined;
 	const sessionId = randomUUID();
@@ -105,10 +112,20 @@ export async function runSubagent(tools: AgentTool<any, any>[], opts: SubagentRu
 			await opts.beforeRequest?.();
 		},
 		...(providerEvents ? { onProviderStreamEvent: providerEvents } : {}),
+		// FORK (research wrap-up): refuse tool calls while the wrap-up request
+		// runs, so the model has to write its brief instead.
+		...(opts.wrapUp
+			? {
+					beforeToolCall: async () =>
+						wrappingUp ? { block: true, reason: "No more tool calls: the run is over." } : undefined,
+				}
+			: {}),
 		// 0.87.1: shouldStopAfterTurn → finishTurn (same call point; "end"
 		// exits before the steering poll, exactly the old boolean-true).
 		finishTurn: (turn) => {
 			turns++;
+			// FORK (research wrap-up): the wrap-up request is one turn only.
+			if (wrappingUp) return { action: "end" };
 			return turns >= opts.maxTurns || opts.shouldStop?.(turn.message, turn.toolResults) === true
 				? { action: "end" }
 				: undefined;
@@ -163,6 +180,25 @@ export async function runSubagent(tools: AgentTool<any, any>[], opts: SubagentRu
 			timestamp: Date.now(),
 		});
 		else await agent.continue();
+		// FORK (research wrap-up): a last message that is a tool call (turn cap)
+		// or has no text gets one request to write the deliverable.
+		if (opts.wrapUp && !aborted && !opts.abortSignal?.aborted && errorMessage === undefined) {
+			const lastRun = [...agent.state.messages]
+				.slice(before)
+				.reverse()
+				.find((m) => (m as { role?: string }).role === "assistant") as AssistantMessage | undefined;
+			if (lastRun) {
+				const hasToolCall = lastRun.content.some((c) => c.type === "toolCall");
+				const lastText = lastRun.content
+					.filter((c): c is { type: "text"; text: string } => c.type === "text")
+					.map((c) => c.text)
+					.join("");
+				if (hasToolCall || lastText.trim() === "") {
+					wrappingUp = true;
+					await agent.prompt({ role: "user", content: opts.wrapUp.message, timestamp: Date.now() });
+				}
+			}
+		}
 	} catch (error) {
 		runFailure = error;
 		throw error;

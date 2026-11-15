@@ -67,6 +67,10 @@ Numbered findings with inline source citations:
 ## Gaps
 What couldn't be answered. Suggested next steps.`;
 
+/** FORK (research wrap-up): sent once when the run ends without a written brief. */
+export const RESEARCH_WRAP_UP_MESSAGE =
+	"Your research time is up. Do not call any more tools. Write your final brief now, in the required format, using only what you have already gathered. If something could not be established, say so under Gaps.";
+
 export interface ResearcherRunOptions {
 	engine?: PiEngine;
 	/** The search seam (search port wave, 2026-09-20): resolves the LIVE
@@ -99,7 +103,9 @@ export async function runResearcherAgent(prompt: string, opts: ResearcherRunOpti
 		prompt,
 		engine: opts.engine,
 		systemPrompt: INSTRUCTIONS,
-		maxTurns: 12,
+		// FORK (research wrap-up): 16 turns, then one wrap-up request for the brief.
+		maxTurns: 16,
+		wrapUp: { message: RESEARCH_WRAP_UP_MESSAGE },
 		abortSignal: opts.abortSignal,
 		onUsage: opts.onUsage,
 		onToolStart: opts.onToolStart,
