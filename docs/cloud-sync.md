@@ -612,7 +612,7 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 - **Built on `claude/dazzling-maxwell-j6mfy1`** (the released `side-tutor` merged in first; the guide named `claude/upstream-0.6.0` as the start, which was at the same commit as this branch's start). The owner gave the word to build ("build my multi accounts feature"). The build ran straight through, as the owner decided; its one stop is the page of screenshots.
 - **Not shipped.** Nothing was pushed to `side-tutor` or `claude/pensive-goldberg-7dty2m`, so the owner's server and the Windows app are as they were. This branch isn't in `.github/workflows/server-image.yml`'s list, so a push to it builds nothing; both workflows can be started by hand (`workflow_dispatch`) for a dry run. **Nothing ships without the owner's approval after the screenshot page**, and then the same commit goes to both branches ("Which branch changes what" under "After the merge").
 - **The sync protocol stays 3 and no stored format changed.** Nothing on the wire changed shape, so the order of updating the server and a PC doesn't matter. A desktop app and a single-copy server (no gateway) behave as before: everything new is switched by `LH_GATE_SECRET` / `LH_ACCOUNT_TAG` being set, or lives in the gateway and the maker. No existing test file was edited.
-- **Dry runs:** see "The full run in the real stack" below.
+- **Dry runs:** both workflows passed on `eeecd2b`; see the end of "The full run in the real stack" below.
 - **Where to read:** the owner's decisions and every approved sentence are in `docs/multi-account-plan.md` (the sentences live in code in `src/core/account-screens.ts`). This part records what was built, where, and what the builder decided beyond the plan.
 
 #### What it does
@@ -949,7 +949,15 @@ Caddy, the gateway, the maker and copies ran together in Docker in the developme
   - The desktop app's pairing box fitted a 13-character code with no room to spare in Chromium's font (158 of 158 px). It was then widened one step (`max-w-44` in `components/settings/cloud-section.tsx`), which the owner allowed; the screenshot predates that.
   - `reset-password` unpairs the owner's desktop apps when its code is used (a reset does).
 - **Sandbox workarounds, in the scratch folder only:** a hosts entry for the test domain; account POSTs sent through Playwright's own client, because Chromium on the Docker host aborts requests in flight when Docker adds a network interface; the lockout table emptied between refusal screenshots.
-- **The two workflows started by hand on this branch** (`workflow_dispatch`; they publish nothing): TODO(lead): dry runs.
+- **The two workflows started by hand on this branch** (`workflow_dispatch`; they publish nothing): **both passed on `eeecd2b`**, the last code commit.
+  - **Server image** (its fifth run): typecheck, the plugin SDK type tests, every other test and lint, on Node 26; the real image built, Chromium included; the single-copy smoke test; then the new step, the whole stack started from a folder named `stack` with the crossing script: **111 of 111 refused**. The publish step was skipped.
+  - **Windows app:** its tests on Windows (the account rules and both account screens among them), the build, the packaged app's smoke test and the update-feed check. No release.
+  - **The four server runs that failed found three faults** the sandbox hadn't shown (it tests on Node 22, and ran its stack from a folder named `deploy`):
+    1. **A cancelled download left a file open** (`src/server/zip-writer.ts`). Cancelled right after an entry's header, the generator rested at a `yield` outside the `try` that closes the file. On Node 26 a file handle that reaches the garbage collector unclosed is an error, so the whole test file failed. Everything from opening a file to closing it is now in one `try` / `finally`.
+    2. **The cancel returned before the file was really closed.** A read stream made from a handle closes that handle itself when destroyed, and `handle.close()` then answers at once. Not a leak; the cancel now waits for the stream's own `close` event. On Node 26 under load: 16 of 18 runs failed before, 18 of 18 pass after.
+    3. **Caddy's outward network depended on the stack's folder name** ("Fixed network names" under "The pieces and how a request travels"): the first invite ended in "socket hang up".
+  - **And one wrong fix of the lead's own:** the first run failed on the download's memory check (61.3 MiB against a 48 MiB limit), which measured without a collection. The first repair switched `--expose-gc` on inside the running test process; that run then met fault 1. The check now runs in a child process started with the flag (`tests/helpers/account-export-memory.ts`): about 11 MiB against a 24 MiB limit.
+  - New tests from these: a cancel at every point of a download leaves no descriptor open (`tests/account-export.test.ts`), and the network names and their order (`tests/deploy-files.test.ts`, `tests/maker.test.ts`).
 
 #### Known limits
 
@@ -983,6 +991,8 @@ Caddy, the gateway, the maker and copies ran together in Docker in the developme
 - **A real Caddy with stand-in gateway and copies** (the Caddyfile unmodified, `LH_DOMAIN=localhost:<port>`) is the quick way to re-prove a Caddyfile change.
 - **The gateway's setup code** is in `docker compose logs gateway`; don't paste it anywhere.
 - **Node:** the image runs Node 26; the sandbox's tests run on Node 22. The four known sandbox failures are listed in "Development notes from the merge" in `docs/upstream-0.6.0.md`.
+  - **Check file-handling code on Node 26 before a dry run:** a file handle closed by the garbage collector is an error there and only a warning on 22. A Node 26 binary for one run: `npm install node@26` into a scratch folder, then `NODE_ENV=test <scratch>/node_modules/.bin/node --import tsx --test tests/<file>`.
+  - **Start a test stack from a folder that isn't named `deploy`** (CI uses `stack`): the folder's name is the compose project's, and a fault that depended on it stayed hidden under `deploy`.
 - **`reset-password` on a server with a gateway** is `docker compose exec gateway reset-password` (the gateway's container has `LH_GATEWAY_FILE`). In the owner's copy's container the same command is still the copy's own single-copy reset of `server-login.json`, which the gateway never uses.
 
 ### Updates
