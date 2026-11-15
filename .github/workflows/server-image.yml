@@ -222,7 +222,13 @@ jobs:
             sleep 2
           done
           [ "$(curl -s --cacert "$RUNNER_TEMP/caddy-root.crt" -o /dev/null -w '%{http_code}' https://localhost/)" = "303" ] || { echo "::error::the site did not answer again after a Docker restart"; dump; exit 1; }
-          sudo ./install-firewall.sh --status || { echo "::error::after a Docker restart the firewall's rules were not all back: the start-up unit did not put them back"; dump; exit 1; }
+          # systemd restarts the firewall's unit after Docker's own restart has finished, a moment after
+          # the site answers again: wait for it (quietly), then show and require the status.
+          for i in $(seq 1 30); do
+            sudo ./install-firewall.sh --status >/dev/null 2>&1 && break
+            sleep 1
+          done
+          sudo ./install-firewall.sh --status || { echo "::error::after a Docker restart the firewall's rules were not all back within 30 s: the start-up unit did not put them back"; dump; exit 1; }
           for i in $(seq 1 30); do
             [ -n "$(docker compose ps -q --status running lh)" ] && break
             sleep 2
