@@ -285,6 +285,15 @@ export class DockerClient {
 		return answer.data as VolumeInspect;
 	}
 
+	/** Volumes whose name contains `nameContains` (Docker's name filter is a substring match). */
+	async listVolumes(nameContains: string): Promise<VolumeInspect[]> {
+		const answer = await this.send("GET", "/volumes", { query: { filters: JSON.stringify({ name: [nameContains] }) } });
+		ok(answer, 200);
+		const volumes = (answer.data as { Volumes?: VolumeInspect[] | null } | null)?.Volumes;
+		return Array.isArray(volumes) ? volumes : [];
+	}
+
+	/** Docker's create is idempotent and returns an existing volume silently: inspect first. */
 	async createVolume(body: unknown): Promise<void> {
 		const answer = await this.send("POST", "/volumes/create", { body });
 		ok(answer, 201);

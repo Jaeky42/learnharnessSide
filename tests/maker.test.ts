@@ -246,6 +246,11 @@ class FakeDocker {
 				return [204];
 			}
 		}
+		if (method === "GET" && p === "/volumes") {
+			const filters = JSON.parse(query.filters ?? "{}") as Record<string, string[]>;
+			const names = filters.name ?? [];
+			return [200, { Volumes: [...this.volumes.values()].filter((v) => names.every((n) => v.Name.includes(n))), Warnings: null }];
+		}
 		if ((m = /^\/volumes\/(.+)$/.exec(p)) && m[1] !== "create") {
 			const v = this.volumes.get(m[1]!);
 			if (method === "GET") return v ? [200, v] : [404, { message: "no such volume" }];
@@ -418,10 +423,11 @@ describe("rules", () => {
 	});
 
 	test("the body: only tag, and start off only when literally false", () => {
-		assert.deepEqual(createRequest('{"tag":"ABC"}'), { tag: "ABC", start: true });
-		assert.deepEqual(createRequest('{"tag":"ABC","start":false}'), { tag: "ABC", start: false });
-		for (const start of ["true", "false", 0, null, "", [], {}]) {
-			assert.deepEqual(createRequest(JSON.stringify({ tag: "ABC", start })), { tag: "ABC", start: true }, JSON.stringify(start));
+		assert.deepEqual(createRequest('{"tag":"ABC"}'), { tag: "ABC", start: true, fresh: false });
+		assert.deepEqual(createRequest('{"tag":"ABC","start":false}'), { tag: "ABC", start: false, fresh: false });
+		assert.deepEqual(createRequest('{"tag":"ABC","fresh":true}'), { tag: "ABC", start: true, fresh: true });
+		for (const value of ["true", "false", 0, 1, null, "", [], {}]) {
+			assert.deepEqual(createRequest(JSON.stringify({ tag: "ABC", start: value, fresh: value })), { tag: "ABC", start: true, fresh: false }, JSON.stringify(value));
 		}
 	});
 
@@ -1101,5 +1107,72 @@ describe("partial states and the new body field", () => {
 		const inspect = docker.calls.find((c) => c.path.startsWith("/images/"))!;
 		assert.equal(inspect.raw, "/images/ghcr.io/owner/name%3Adev/json");
 		assert.equal((creates()[0]!.body as { Image: string }).Image, NEW_IMAGE);
+	});
+});
+
+describe("fresh copies and the taken tags", () => {
+	const changing = () => docker.calls.filter((c) => c.method !== "GET");
+
+	test("fresh on a free tag creates, with the same template", async () => {
+		const r = await call("POST", "/copies", { tag: "ABC", fresh: true });
+		assert.equal(r.status, 200);
+		assert.deepEqual(creates()[0]!.body, expectedBody("ABC", OLD_IMAGE, r.body.gateSecret as string));
+		assert.equal(docker.findContainer("lh-acct-ABC")!.State.Running, true);
+		assert.deepEqual(docker.lines().slice(0, 4), [
+			"GET /containers/lh-acct-ABC/json",
+			...settleLines("ABC"),
+			"GET /volumes/lh-acct-ABC-data",
+		]);
+	});
+
+	test("fresh with a volume left over → 409 volume_exists, nothing changed", async () => {
+		docker.volumes.set("lh-acct-ABC-data", { Name: "lh-acct-ABC-data", Labels: {} });
+		const r = await call("POST", "/copies", { tag: "ABC", fresh: true });
+		assert.deepEqual([r.status, r.body], [409, { code: "volume_exists" }]);
+		assert.deepEqual(changing(), [], "no create call of any kind");
+		// Without fresh (restore) the volume is reused, as before.
+		assert.equal((await call("POST", "/copies", { tag: "ABC" })).status, 200);
+		assert.ok(!docker.lines().includes("POST /volumes/create"));
+	});
+
+	test("fresh with a container or a swap's leftover → 409 copy_exists, nothing changed", async () => {
+		await call("POST", "/copies", { tag: "ABC" });
+		docker.volumes.clear();
+		docker.calls = [];
+		const r = await call("POST", "/copies", { tag: "ABC", fresh: true });
+		assert.deepEqual([r.status, r.body], [409, { code: "copy_exists" }]);
+		assert.deepEqual(changing(), []);
+		docker.findContainer("lh-acct-ABC")!.Name = "/lh-acct-ABC-old-stopped";
+		docker.calls = [];
+		assert.deepEqual((await call("POST", "/copies", { tag: "ABC", fresh: true })).body, { code: "copy_exists" });
+		assert.deepEqual(changing(), []);
+	});
+
+	test("two fresh calls for one tag: exactly one wins", async () => {
+		docker.delayMs = (c) => (c.method === "GET" ? 5 : 0);
+		const answers = await Promise.all([call("POST", "/copies", { tag: "ABC", fresh: true }), call("POST", "/copies", { tag: "ABC", fresh: true })]);
+		assert.deepEqual(answers.map((a) => a.status).sort(), [200, 409]);
+		assert.equal(creates().length, 1);
+		assert.equal(docker.calls.filter((c) => c.path === "/volumes/create").length, 1);
+	});
+
+	test("fresh that isn't literally true is ignored", async () => {
+		for (const fresh of ["true", 1]) {
+			docker.volumes.set("lh-acct-ABC-data", { Name: "lh-acct-ABC-data", Labels: {} });
+			assert.equal((await call("POST", "/copies", { tag: "ABC", fresh })).status, 200, JSON.stringify(fresh));
+		}
+	});
+
+	test("GET /volumes lists the tags whose volume exists", async () => {
+		await call("POST", "/copies", { tag: "BBB" });
+		docker.volumes.set("lh-acct-AAA-data", { Name: "lh-acct-AAA-data", Labels: {} });
+		docker.volumes.set("lh-acct-abc-data", { Name: "lh-acct-abc-data", Labels: {} });
+		docker.volumes.set("lh-acct-CCC-data-x", { Name: "lh-acct-CCC-data-x", Labels: {} });
+		docker.volumes.set("other", { Name: "other", Labels: {} });
+		docker.calls = [];
+		assert.deepEqual((await call("GET", "/volumes")).body, [{ tag: "AAA" }, { tag: "BBB" }]);
+		assert.deepEqual(JSON.parse(docker.calls[0]!.query.filters!), { name: ["lh-acct-"] });
+		assert.equal((await call("POST", "/volumes")).status, 405);
+		assert.equal((await call("GET", "/volumes", undefined, null)).status, 401);
 	});
 });

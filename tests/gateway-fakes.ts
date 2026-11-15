@@ -80,7 +80,9 @@ export class FakeMaker {
 			if (rule.kind === "hang") {
 				return new Promise<Response>((_, reject) => {
 					const signal = init?.signal;
-					const abort = () => reject(new DOMException("aborted", "TimeoutError"));
+					// AbortSignal.timeout's timer is unref'd; keep the test's event loop alive while hanging.
+					const keep = setInterval(() => undefined, 1000);
+					const abort = () => { clearInterval(keep); reject(new DOMException("aborted", "TimeoutError")); };
 					if (signal?.aborted) abort();
 					signal?.addEventListener("abort", abort, { once: true });
 				});

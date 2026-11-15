@@ -6,13 +6,15 @@
  * command, environment or name from a request ever reaches Docker.
  *
  * Calls (Bearer LH_MAKER_TOKEN; internal network only):
- *   POST   /copies {tag, start?} network + volume + container, Caddy joined, started
- *                               (unless `start` is literally false)
+ *   POST   /copies {tag, start?, fresh?} network + volume + container, Caddy joined, started
+ *                               (unless `start` is literally false). `fresh: true` (a new
+ *                               account): 409 if the tag's volume or a container exists.
  *   POST   /copies/<tag>/stop   pause
  *   POST   /copies/<tag>/start  resume
  *   DELETE /copies/<tag>        container and network go; the volume stays
  *   DELETE /volumes/<tag>       the final deletion (409 while a container uses it)
  *   GET    /copies              [{tag, state, image, upToDate}]
+ *   GET    /volumes             [{tag}] for every lh-acct-<tag>-data volume (tags taken)
  *   POST   /reconcile           every copy onto the current image; Caddy on every network
  *
  * A copy is moved onto a new container (a new image, or a new secret) by a
@@ -62,6 +64,7 @@ const TAG_RE = new RegExp(`^[${TAG_ALPHABET}]{3}$`);
 const COPY_NAME_RE = new RegExp(`^/?lh-acct-([${TAG_ALPHABET}]{3})$`);
 const OLD_NAME_RE = new RegExp(`^/?lh-acct-([${TAG_ALPHABET}]{3})-old-(running|stopped)$`);
 const NETWORK_NAME_RE = new RegExp(`^lh-acct-([${TAG_ALPHABET}]{3})-net$`);
+const VOLUME_NAME_RE = new RegExp(`^lh-acct-([${TAG_ALPHABET}]{3})-data$`);
 const SECRET_RE = /^[A-Za-z0-9_-]{43}$/;
 const TIME_ZONE_RE = /^[A-Za-z0-9_+\-/:]{1,64}$/;
 const MANAGED_LABEL = "lh.managed";
@@ -426,9 +429,18 @@ export class Maker {
 		}
 	}
 
-	/** POST /copies: a new copy, or the same volume under a new container and a new secret. */
-	createCopy(tag: string, start = true): Promise<{ upstream: string; gateSecret: string }> {
+	/**
+	 * POST /copies: a new copy, or the same volume under a new container and a new
+	 * secret. `fresh` (a new account) refuses, changing nothing, when anything of
+	 * the tag is left: its volume, its container or a swap's leftover. The check
+	 * runs inside the tag's chain, so two fresh calls for one tag can't both pass.
+	 */
+	createCopy(tag: string, start = true, fresh = false): Promise<{ upstream: string; gateSecret: string }> {
 		return this.serial(tag, async () => {
+			if (fresh) {
+				if ((await this.findCopy(tag)) || (await this.findOld(tag)).length > 0) throw new MakerFailure("copy_exists");
+				if (await this.docker.inspectVolume(volumeName(tag))) throw new MakerFailure("volume_exists");
+			}
 			await this.settle(tag);
 			const image = await this.currentImage();
 			await this.ensureNetwork(tag);
@@ -512,6 +524,16 @@ export class Maker {
 			}
 		}
 		return { copies, leftovers: [...leftovers].sort() };
+	}
+
+	/** Tags whose data volume exists (taken, whatever the gateway's records say). */
+	async listVolumeTags(): Promise<Array<{ tag: string }>> {
+		const tags = new Set<string>();
+		for (const volume of await this.docker.listVolumes("lh-acct-")) {
+			const tag = VOLUME_NAME_RE.exec(volume.Name)?.[1];
+			if (tag) tags.add(tag);
+		}
+		return [...tags].sort().map((tag) => ({ tag }));
 	}
 
 	/** Every copy's own container; a swap's leftover is not a copy. */
@@ -615,7 +637,11 @@ export class Maker {
 				if (method !== "POST") return allow("GET, POST");
 				const wanted = createRequest(body);
 				if (!wanted) return code(400, "bad_tag");
-				return json(200, await this.createCopy(wanted.tag, wanted.start));
+				return json(200, await this.createCopy(wanted.tag, wanted.start, wanted.fresh));
+			}
+			if (path === "/volumes") {
+				if (method !== "GET") return allow("GET");
+				return json(200, await this.listVolumeTags());
 			}
 			if (path === "/reconcile") {
 				if (method !== "POST") return allow("POST");
@@ -651,6 +677,7 @@ export class Maker {
 			const tag = /^\/(?:copies|volumes)\/([^/]*)/.exec(path)?.[1] ?? (path === "/copies" ? createRequest(body)?.tag : null);
 			this.say(`${method} ${route}`, isTag(tag) ? tag : null, `failed (${describe(error)})`);
 			if (error instanceof MakerFailure && error.code === "shutting_down") return code(503, error.code);
+			if (error instanceof MakerFailure && (error.code === "volume_exists" || error.code === "copy_exists")) return code(409, error.code);
 			if (error instanceof DockerError) return code(502, error.code);
 			if (error instanceof MakerFailure) return code(502, error.code);
 			return code(500, "internal");
@@ -658,8 +685,11 @@ export class Maker {
 	}
 }
 
-/** Only `tag` and `start` are read from a body; `start` is off only when it is literally false. */
-export function createRequest(body: string): { tag: string; start: boolean } | null {
+/**
+ * Only `tag`, `start` and `fresh` are read from a body: `start` is off only when
+ * literally false, `fresh` on only when literally true.
+ */
+export function createRequest(body: string): { tag: string; start: boolean; fresh: boolean } | null {
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(body);
@@ -667,8 +697,8 @@ export function createRequest(body: string): { tag: string; start: boolean } | n
 		return null;
 	}
 	if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
-	const { tag, start } = parsed as { tag?: unknown; start?: unknown };
-	return isTag(tag) ? { tag, start: start !== false } : null;
+	const { tag, start, fresh } = parsed as { tag?: unknown; start?: unknown; fresh?: unknown };
+	return isTag(tag) ? { tag, start: start !== false, fresh: fresh === true } : null;
 }
 
 // ─── The listener ────────────────────────────────────────────────────────────
