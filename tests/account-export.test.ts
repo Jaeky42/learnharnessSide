@@ -13,8 +13,6 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import v8 from "node:v8";
-import vm from "node:vm";
 import zlib from "node:zlib";
 import { after, afterEach, before, beforeEach, describe, it } from "node:test";
 
@@ -300,32 +298,18 @@ describe("Download my data: streaming and changing files", () => {
 		fs.closeSync(fd);
 		const size = fs.statSync(file).size;
 		assert.ok(size >= 80 * 1024 * 1024);
-		const response = await accountExportResponse(request("sam"), { dataDir: data });
-		const reader = response.body!.getReader();
-		// Measure what the writer RETAINS, not garbage the collector hasn't reached
-		// yet: collect before each reading. (Without it the reading depends on the
-		// machine's load: 61 MiB on a busy CI runner, with nothing retained.)
-		v8.setFlagsFromString("--expose-gc");
-		const collect = vm.runInNewContext("gc") as () => void;
-		collect();
-		const baseline = process.memoryUsage().arrayBuffers;
-		let peak = 0;
-		let sinceReading = 0;
-		// Keep the archive on disk, not in memory, so the check measures the writer.
+		// Measured in a child process started with --expose-gc, which collects before
+		// each reading: what the writer RETAINS, not garbage the collector hasn't
+		// reached yet (that lag read 61 MiB on a busy CI runner with nothing retained).
 		const out = path.join(root, "big.zip");
-		const handle = fs.openSync(out, "w");
-		for (;;) {
-			const { done, value } = await reader.read();
-			if (done) break;
-			fs.writeSync(handle, value);
-			sinceReading += value.byteLength;
-			if (sinceReading >= 4 * 1024 * 1024) {
-				sinceReading = 0;
-				collect();
-				peak = Math.max(peak, process.memoryUsage().arrayBuffers - baseline);
-			}
-		}
-		fs.closeSync(handle);
+		const child = spawnSync(process.execPath, ["--expose-gc", "--import", "tsx", "tests/helpers/account-export-memory.ts", data, out], {
+			cwd: process.cwd(),
+			env: { ...process.env, NODE_ENV: "test", LH_SERVER_MODE: "1", LH_GATE_SECRET: SECRET },
+			encoding: "utf8",
+			timeout: 120000,
+		});
+		assert.equal(child.status, 0, `the export child failed: ${child.stderr.slice(-400)}`);
+		const { peak } = JSON.parse(child.stdout.trim().split("\n").pop()!) as { peak: number };
 		// A writer that kept the file would retain 80 MiB; a streaming one a few buffers.
 		assert.ok(peak < 24 * 1024 * 1024, `peak ${(peak / 1048576).toFixed(1)} MiB retained against a ${(size / 1048576).toFixed(0)} MiB file`);
 		const zip = fs.readFileSync(out);
@@ -408,10 +392,37 @@ describe("Download my data: streaming and changing files", () => {
 		write("chats/aaa.jsonl", Buffer.from(crypto.randomBytes(4 * 1024 * 1024).toString("hex")));
 		const response = await accountExportResponse(request("sam"), { dataDir: data });
 		const reader = response.body!.getReader();
+		// One read is the entry's header: the file is open and nothing of it is read yet.
 		await reader.read();
 		await reader.cancel();
+		// No descriptor of the process still points at the file (Linux: /proc/self/fd).
+		// An open handle left to the garbage collector is an error on Node 26.
+		if (fs.existsSync("/proc/self/fd")) {
+			const open = fs.readdirSync("/proc/self/fd").map((fd) => { try { return fs.readlinkSync(`/proc/self/fd/${fd}`); } catch { return ""; } });
+			assert.deepEqual(open.filter((target) => target.endsWith(path.join("chats", "aaa.jsonl"))), [], "the cancelled download left the file open");
+		}
 		// the lock is free again at once
-		assert.equal((await accountExportResponse(request("sam"), { dataDir: data })).status, 200);
+		const again = await accountExportResponse(request("sam"), { dataDir: data });
+		assert.equal(again.status, 200);
+		await again.body?.cancel();
+	});
+
+	it("cancelling at every point of a download leaves no file open", async () => {
+		if (!fs.existsSync("/proc/self/fd")) return;
+		write("chats/aaa.jsonl", Buffer.from(crypto.randomBytes(300 * 1024).toString("hex")));
+		write("chats/bbb.jsonl", Buffer.from(crypto.randomBytes(300 * 1024).toString("hex")));
+		const openHere = () => fs.readdirSync("/proc/self/fd").map((fd) => { try { return fs.readlinkSync(`/proc/self/fd/${fd}`); } catch { return ""; } }).filter((target) => target.startsWith(data));
+		// Count the chunks of a whole download, then cancel after 0, 1, 2, … of them.
+		let total = 0;
+		for await (const _chunk of (await accountExportResponse(request("sam"), { dataDir: data })).body as unknown as AsyncIterable<Uint8Array>) total += 1;
+		assert.ok(total > 6);
+		for (let stop = 0; stop <= total; stop++) {
+			resetExportLock();
+			const reader = (await accountExportResponse(request("sam"), { dataDir: data })).body!.getReader();
+			for (let i = 0; i < stop; i++) await reader.read();
+			await reader.cancel();
+			assert.deepEqual(openHere(), [], `cancelled after ${stop} of ${total} chunks: a file stayed open`);
+		}
 	});
 });
 

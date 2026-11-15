@@ -201,28 +201,34 @@ export async function* zipChunks(sources: ZipSource[], options: ZipOptions = {})
 		if (!isSafeEntryName(source.name)) { skipped += 1; continue; }
 		const opened = await openRegular(source.path, root);
 		if (!opened) continue; // vanished (or swapped for a link) since it was listed
-		if (done.length >= HARD_FILES) { await opened.handle.close().catch(() => {}); throw new ZipLimitError(); }
 		const name = Buffer.from(source.name, "utf8");
 		const stamp = dosTime(opened.mtime);
 		const start = offset;
-		const head = localHeader(name, stamp);
-		offset += head.length;
-		yield head;
-
 		let crc = 0;
 		let size = 0;
 		let compressed = 0;
-		const counter = new Transform({
-			transform(chunk: Buffer, _encoding, callback) {
-				crc = crc32(chunk, crc);
-				size += chunk.length;
-				callback(size > HARD_BYTES ? new ZipLimitError() : null, chunk);
-			},
-		});
-		const deflate = zlib.createDeflateRaw({ level: 6 });
-		const read = opened.handle.createReadStream({ highWaterMark: 64 * 1024 });
-		pipeline(read, counter, deflate, () => { /* the error, if any, reaches the loop below through deflate */ });
+		let deflate: zlib.DeflateRaw | undefined;
+		let read: fs.ReadStream | undefined;
+		// The handle is open from here on, so EVERYTHING up to its close sits in
+		// this try: a download cancelled while the generator rests at a yield (the
+		// header's too) ends it there, and only a finally runs. An open handle left
+		// to the garbage collector is an error on Node 26, not a warning.
 		try {
+			if (done.length >= HARD_FILES) throw new ZipLimitError();
+			const head = localHeader(name, stamp);
+			offset += head.length;
+			yield head;
+
+			const counter = new Transform({
+				transform(chunk: Buffer, _encoding, callback) {
+					crc = crc32(chunk, crc);
+					size += chunk.length;
+					callback(size > HARD_BYTES ? new ZipLimitError() : null, chunk);
+				},
+			});
+			deflate = zlib.createDeflateRaw({ level: 6 });
+			read = opened.handle.createReadStream({ highWaterMark: 64 * 1024 });
+			pipeline(read, counter, deflate, () => { /* the error, if any, reaches the loop below through deflate */ });
 			for await (const piece of deflate as AsyncIterable<Buffer>) {
 				compressed += piece.length;
 				offset += piece.length;
@@ -230,8 +236,8 @@ export async function* zipChunks(sources: ZipSource[], options: ZipOptions = {})
 				yield piece;
 			}
 		} finally {
-			deflate.destroy();
-			read.destroy();
+			deflate?.destroy();
+			read?.destroy();
 			await opened.handle.close().catch(() => {});
 		}
 		const descriptor = dataDescriptor(crc, compressed, size);
