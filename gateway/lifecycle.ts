@@ -20,6 +20,15 @@
  *     hides a copy while it swaps it onto a new container. Only an absence
  *     seen in two passes in a row leads to a POST /copies.
  *   - A copy whose tag belongs to no account is left alone (logged once).
+ *   - A NEW account's copy is asked for with `fresh: true` (the maker makes
+ *     nothing when that tag's volume or container exists, e.g. after a lost
+ *     state file); on that refusal another tag is tried. An abandoned
+ *     reservation's container is removed but its volume kept: whether the
+ *     volume was this attempt's own can't be known.
+ *   - Only a member's own `lh-acct-<tag>:3000` is ever saved as its upstream.
+ *   - Pause and Remove end the browser sessions and stop or remove the copy;
+ *     they never unpair (the PC gets 503, keeps its key, carries on after
+ *     Resume or Restore).
  *   - Log lines name an account's id or tag and the step; never a secret,
  *     code, password or token.
  */
@@ -33,12 +42,14 @@ import {
 	findAccount,
 	isReady,
 	markCopyPending,
-	markUnpairPending,
+	memberUpstream,
 	pauseAccount,
 	pendingDeletions,
 	removeAccount,
 	restoreAccount,
 	resumeAccount,
+	retagReservation,
+	rollbackReservation,
 	saveCopy,
 	unfinishedReservations,
 	type AccountRecord,
@@ -47,7 +58,7 @@ import {
 import { restoreFullText } from "../src/core/account-screens.ts";
 import type { GatewayConfig } from "./config.ts";
 import type { Unpairer } from "./copies.ts";
-import { MakerRefused, MakerUnavailable, type CopySummary, type MakerClient } from "./maker-client.ts";
+import { MakerRefused, MakerUnavailable, TagTaken, type CopySummary, type MakerClient } from "./maker-client.ts";
 import type { GatewayStore } from "./state.ts";
 
 /** The loop's rhythm. */
@@ -56,6 +67,11 @@ export const LIFECYCLE_INTERVAL_MS = 5 * 60_000;
 export const RESERVATION_STALE_MS = 2 * 60_000;
 /** After a failure or an absence, the loop looks again this soon (only while it runs on its timer). */
 export const FOLLOW_UP_MS = 30_000;
+/** A new account tries at most this many tags whose volume turns out to exist. */
+export const MAX_TAG_TRIES = 5;
+
+/** The maker's answer is for this tag's copy, or it is not saved. */
+class WrongUpstream extends Error {}
 
 export type OpResult = { ok: true } | { ok: false; status: number; code: string; error?: string };
 
@@ -99,7 +115,12 @@ export interface Lifecycle {
 	idle(): Promise<void>;
 }
 
-const isMakerTrouble = (error: unknown): boolean => error instanceof MakerUnavailable || error instanceof MakerRefused;
+const isMakerTrouble = (error: unknown): boolean => error instanceof MakerUnavailable || error instanceof MakerRefused || error instanceof TagTaken || error instanceof WrongUpstream;
+
+function checked(tag: string, copy: { upstream: string; gateSecret: string }): { upstream: string; gateSecret: string } {
+	if (copy.upstream !== memberUpstream(tag)) throw new WrongUpstream();
+	return copy;
+}
 const running = (summary: CopySummary): boolean => summary.state === "running" || summary.state === "restarting";
 
 /** What a pass compares before acting on what it saw earlier. */
@@ -167,7 +188,7 @@ export function createLifecycle(deps: LifecycleDeps): Lifecycle {
 		store.update((state) => ({ state: markCopyPending(state, accountId), result: undefined }));
 		for (let attempt = 0; attempt < 2; attempt += 1) {
 			try {
-				const copy = await maker.createCopy(tag, { start });
+				const copy = checked(tag, await maker.createCopy(tag, { start }));
 				store.update((state) => ({ state: findAccount(state, accountId) ? saveCopy(state, accountId, copy) : null, result: undefined }));
 				fixed(`create:${accountId}`);
 				return true;
@@ -191,7 +212,7 @@ export function createLifecycle(deps: LifecycleDeps): Lifecycle {
 		if (target.tag) {
 			try {
 				await maker.removeCopy(target.tag);
-				if (await maker.removeVolume(target.tag) === "in-use") {
+				if (!target.keepVolume && await maker.removeVolume(target.tag) === "in-use") {
 					say(`delete:${accountId}`, `Account ${accountId}: its data volume is still in use; deleting it later.`);
 					scheduleFollowUp();
 					return "later";
@@ -211,11 +232,9 @@ export function createLifecycle(deps: LifecycleDeps): Lifecycle {
 	const pause = (accountId: string): Promise<OpResult> => serial(accountId, async () => {
 		const paused = store.update((state) => {
 			const p = pauseAccount(state, accountId);
-			return { state: p.ok ? markUnpairPending(p.state, accountId) : null, result: p };
+			return { state: p.ok ? p.state : null, result: p };
 		});
 		if (!paused.ok) return refusal(paused.code);
-		// The copy is told while it still runs; if it can't be, the mark stays until it next runs.
-		await unpairer.attempt(accountId);
 		if (paused.account.tag) {
 			try {
 				await maker.stopCopy(paused.account.tag);
@@ -261,10 +280,9 @@ export function createLifecycle(deps: LifecycleDeps): Lifecycle {
 	const remove = (accountId: string): Promise<OpResult> => serial(accountId, async () => {
 		const removed = store.update((state) => {
 			const r = removeAccount(state, accountId, deps.now());
-			return { state: r.ok ? markUnpairPending(r.state, accountId) : null, result: r };
+			return { state: r.ok ? r.state : null, result: r };
 		});
 		if (!removed.ok) return refusal(removed.code);
-		await unpairer.attempt(accountId);
 		if (removed.account.tag) {
 			try {
 				await maker.removeCopy(removed.account.tag);
@@ -304,22 +322,51 @@ export function createLifecycle(deps: LifecycleDeps): Lifecycle {
 
 	function makeReservedCopy<T>(accountId: string, finish: (state: GatewayState, copy: { upstream: string; gateSecret: string }) => { state: GatewayState; result: T }): Promise<{ ok: true; result: T } | { ok: false; cleaned: boolean }> {
 		return serial(accountId, async () => {
-			const reserved = account(accountId);
-			if (!reserved || !reserved.tag || isReady(reserved) || reserved.state !== "active") return { ok: false as const, cleaned: false };
-			try {
-				const copy = await maker.createCopy(reserved.tag);
-				const result = store.update((state) => {
-					const current = findAccount(state, accountId);
-					if (!current || current.state !== "active") return { state: null, result: null };
-					const done = finish(saveCopy(state, accountId, copy), copy);
-					return { state: done.state, result: { value: done.result } };
-				});
-				if (result) return { ok: true as const, result: result.value };
-			} catch (error) {
-				if (!isMakerTrouble(error)) throw error;
+			const first = account(accountId);
+			if (!first || !first.tag || isReady(first) || first.state !== "active") return { ok: false as const, cleaned: false };
+			// Tags whose volume exists (a lost state file) are avoided up front; best effort,
+			// `fresh: true` is the maker's authoritative check.
+			let avoid = new Set<string>();
+			try { avoid = new Set(await maker.listVolumes()); } catch (error) { if (!isMakerTrouble(error)) throw error; }
+			const retag = (): string | null => store.update((state) => {
+				const r = retagReservation(state, accountId, avoid);
+				return { state: r ? r.state : null, result: r ? r.tag : null };
+			});
+			let tag: string | null = avoid.has(first.tag) ? retag() : first.tag;
+			/** A create whose outcome isn't known (no answer, or made but not saved). */
+			let unknown = false;
+			for (let tries = 0; tag !== null && tries < MAX_TAG_TRIES; tries += 1) {
+				const tried: string = tag;
+				try {
+					const copy = checked(tried, await maker.createCopy(tried, { fresh: true }));
+					const result = store.update((state) => {
+						const current = findAccount(state, accountId);
+						if (!current || current.state !== "active" || current.tag !== tried) return { state: null, result: null };
+						const done = finish(saveCopy(state, accountId, copy), copy);
+						return { state: done.state, result: { value: done.result } };
+					});
+					if (result) return { ok: true as const, result: result.value };
+					unknown = true;
+					break;
+				} catch (error) {
+					if (!(error instanceof TagTaken)) {
+						if (!isMakerTrouble(error)) throw error;
+						unknown = true;
+						break;
+					}
+					// Nothing was made under that tag; it isn't this attempt's to clean up.
+					avoid.add(tried);
+					tag = retag();
+					if (tag === null) break;
+					continue;
+				}
 			}
-			// Whatever the maker made under this fresh tag goes, the volume too: no
-			// other account ever had this tag, so the volume is this attempt's own.
+			if (!unknown) {
+				// Every tag tried was refused before anything was made: just undo the reservation.
+				store.update((state) => ({ state: rollbackReservation(state, accountId), result: undefined }));
+				return { ok: false as const, cleaned: true };
+			}
+			// The outcome under the current tag is unknown: its container goes, its volume stays.
 			store.update((state) => {
 				const a = abandonReservation(state, accountId);
 				return { state: a.ok ? a.state : null, result: undefined };

@@ -67,9 +67,9 @@ describe("deploy/Caddyfile", () => {
 	const route = caddyfile.slice(caddyfile.indexOf("route {"), caddyfile.indexOf("# Internal relay"));
 	const relay = caddyfile.slice(caddyfile.indexOf("http://:9200"));
 
-	it("strips the four X-LH-* headers before anything else is done", () => {
+	it("strips the five X-LH-* headers before anything else is done", () => {
 		const strip = /\(strip\) \{([^}]*)\}/.exec(caddyfile)?.[1] ?? "";
-		for (const header of ["X-LH-Upstream", "X-LH-Gate", "X-LH-Relay", "X-LH-Client-Addr"]) {
+		for (const header of ["X-LH-Upstream", "X-LH-Gate", "X-LH-Relay", "X-LH-Client-Addr", "X-LH-Scope"]) {
 			assert.ok(strip.includes(`request_header -${header}`), `${header} is stripped`);
 		}
 		const body = route.slice("route {".length).trim();
@@ -96,7 +96,7 @@ describe("deploy/Caddyfile", () => {
 		const toCopy = /\(to_copy\) \{([\s\S]*?)\n\}/.exec(caddyfile)?.[1] ?? "";
 		assert.match(toCopy, /forward_auth gateway:9000/);
 		assert.match(toCopy, /uri \/gate/);
-		assert.match(toCopy, /copy_headers X-LH-Upstream X-LH-Gate/);
+		assert.match(toCopy, /copy_headers X-LH-Upstream X-LH-Gate X-LH-Scope\n/);
 		assert.match(toCopy, /reverse_proxy \{http\.request\.header\.X-LH-Upstream\}/);
 		assert.match(toCopy, /flush_interval -1/);
 		assert.ok(caddyfile.indexOf("(to_copy)") < caddyfile.indexOf("import to_copy"), "a snippet is defined before it is imported");
@@ -118,19 +118,64 @@ describe("deploy/Caddyfile", () => {
 		assert.ok(toCopy.indexOf("forward_auth") < toCopy.indexOf("@noUpstream") && toCopy.indexOf("@noUpstream") < toCopy.indexOf("reverse_proxy"));
 	});
 
+	it("fails closed unless the gateway's answer names a copy and a scope (review: X-LH-Scope, the upstream allow-list)", () => {
+		const toCopy = /\(to_copy\) \{([\s\S]*?)\n\}/.exec(caddyfile)?.[1] ?? "";
+		assert.match(toCopy, /@notACopy not \{\s*import copy_upstream\s*\}\s*respond @notACopy 502/);
+		assert.match(toCopy, /@noScope expression `\{http\.request\.header\.X-LH-Scope\} == ""`\s*respond @noScope 502/);
+		for (const guard of ["@notACopy", "@noScope"]) {
+			assert.ok(toCopy.indexOf("forward_auth") < toCopy.indexOf(guard) && toCopy.indexOf(guard) < toCopy.indexOf("reverse_proxy"), `${guard} sits between forward_auth and the proxy`);
+		}
+		assert.ok(!/request_header[^\n]*X-LH-Scope/.test(relay) && !/header_up[^\n]*X-LH-Scope/.test(relay), "the relay passes X-LH-Scope through untouched");
+	});
+
+	describe("never hands the gateway's session cookie to a copy", () => {
+		const toCopy = /\(to_copy\) \{([\s\S]*?)\n\}/.exec(caddyfile)?.[1] ?? "";
+		const proxy = toCopy.slice(toCopy.indexOf("reverse_proxy"));
+		const forwardAuth = toCopy.slice(toCopy.indexOf("forward_auth"), toCopy.indexOf("}"));
+		// The proxy's Cookie replacements, in order (Caddy applies each as a Go regexp, ReplaceAll).
+		const rules = [...proxy.matchAll(/header_up Cookie "((?:[^"\\]|\\.)*)" "((?:[^"\\]|\\.)*)"/g)]
+			.map((m) => ({ search: new RegExp(m[1]!.replace(/\\\\/g, "\\"), "g"), replace: m[2]! }));
+		const apply = (value: string) => rules.reduce((v, rule) => v.replace(rule.search, rule.replace), value);
+		const S = "__Host-lh_session=tok_en-123";
+
+		it("has the two replacements on the copy's proxy and none on forward_auth", () => {
+			assert.equal(rules.length, 2);
+			assert.ok(!/Cookie/.test(forwardAuth), "the gateway still gets the full header");
+			assert.ok(!/header_up[^\n]*Cookie/.test(caddyfile.slice(caddyfile.indexOf("handle @gateway"))), "nor on the gateway's routes or the relay");
+		});
+
+		for (const [name, given, want] of [
+			["alone", S, ""],
+			["first", `${S}; lh_server=1; b=2`, "lh_server=1; b=2"],
+			["middle", `lh_server=1; ${S}; lh_cloud=1`, "lh_server=1; lh_cloud=1"],
+			["last", `lh_server=1; lh_owner=1; ${S}`, "lh_server=1; lh_owner=1"],
+			["first, no space", `${S};lh_cloud=1;x=y`, "lh_cloud=1;x=y"],
+			["middle, no space", `a=1;${S};b=2`, "a=1;b=2"],
+			["last, no space", `a=1;${S}`, "a=1"],
+			["twice", `${S}; a=1; ${S}`, "a=1"],
+			["look-alike names stay", `x__Host-lh_session=1; __Host-lh_session2=2; ${S}`, "x__Host-lh_session=1; __Host-lh_session2=2"],
+			["no session cookie", "lh_server=1; lh_cloud=1; lh_owner=1; any=thing", "lh_server=1; lh_cloud=1; lh_owner=1; any=thing"],
+		] as const) {
+			it(`${name}`, () => assert.equal(apply(given), want));
+		}
+	});
+
 	it("turns Caddy's admin endpoint off (nothing reloads it, and it sits on every account's network)", () => {
 		assert.match(caddyfile.slice(0, caddyfile.indexOf("(strip)")), /^\{[\s\S]*\n\tadmin off\n/);
 	});
 
 	it("lets the relay reach only the owner's copy or an account's copy, tag in the setup code's alphabet", () => {
-		const cls = /header_regexp X-LH-Upstream \^\(lh\|lh-acct-(\[[^\]]+\])\{3\}\):3000\$/.exec(relay)?.[1];
-		assert.ok(cls, "the relay matches the upstream with the pattern");
+		const snippet = /\(copy_upstream\) \{\n([\s\S]*?)\n\}/.exec(caddyfile)?.[1] ?? "";
+		const cls = /^\s*header_regexp X-LH-Upstream \^\(lh\|lh-acct-(\[[^\]]+\])\{3\}\):3000\$\s*$/.exec(snippet)?.[1];
+		assert.ok(cls, "the shared snippet matches the upstream with the pattern, and nothing else");
+		assert.ok(caddyfile.indexOf("(copy_upstream)") < caddyfile.indexOf("import copy_upstream"), "defined before it is imported");
+		assert.equal((caddyfile.match(/header_regexp X-LH-Upstream/g) ?? []).length, 1, "one pattern, in one place");
 		const source = read("src/core/server-auth.ts");
 		const alphabet = /const CODE_ALPHABET = "([0-9A-Z]+)"/.exec(source)?.[1];
 		assert.ok(alphabet, "the setup code's alphabet");
 		assert.equal(expandClass(cls), [...alphabet].sort().join(""), "the character class is exactly the alphabet");
 		assert.equal(TAG_ALPHABET, alphabet, "and the maker's tag alphabet");
-		assert.match(relay, /@ok \{\s*expression [^\n]*\n\s*header_regexp/, "both conditions are in the one matcher");
+		assert.match(relay, /@ok \{\s*expression [^\n]*\n\s*import copy_upstream\s*\}/, "both conditions are in the one matcher");
 	});
 
 	it("has the relay on a plain internal port, guarded by the token, 404 otherwise", () => {

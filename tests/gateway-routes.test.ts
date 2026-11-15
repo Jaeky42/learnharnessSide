@@ -391,7 +391,7 @@ describe("Settings → Account", () => {
 		assert.equal((await call(gateAsk("/", cookie))).status, 200);
 		assert.equal((await call(gateAsk("/", other))).status, 303);
 		assert.equal(relayCalls.length, 1);
-		assert.deepEqual({ ...relayCalls[0], body: undefined, headers: undefined }, { upstream: "lh:3000", gateSecret: OWNER_SECRET, method: "POST", path: "/api/internal/unpair-all", body: undefined, headers: undefined });
+		assert.deepEqual({ ...relayCalls[0], body: undefined, headers: undefined }, { upstream: "lh:3000", gateSecret: OWNER_SECRET, method: "POST", scope: "internal", path: "/api/internal/unpair-all", body: undefined, headers: undefined });
 		assert.equal(acc.ownerAccount(state())!.unpairPending, undefined);
 		assert.equal((await call(post("/api/server-auth/login", { name: "Boss", password: "a new password" }))).status, 200);
 	});

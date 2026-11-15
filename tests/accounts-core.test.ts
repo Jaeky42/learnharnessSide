@@ -74,7 +74,7 @@ describe("the stored file", () => {
 		state = acc.createAccountSession(state, idOf(state, "sam"), "Safari on iPhone", NOW).state;
 		state = good(acc.createInvite(state, 4, NOW)).state;
 		state = good(acc.issueResetCode(state, idOf(state, "kim"), NOW)).state;
-		state = { ...state, lockouts: { [ADDR]: { failures: 2, level: 0, lockedUntil: 0, lastFailureAt: NOW } }, setupCodeHash: setupCodeHash("ZZZZ-ZZZZ") };
+		state = { ...state, lockouts: { [ADDR]: { failures: 2, level: 0, lockedUntil: 0, lastFailureAt: NOW, against: "*" } }, setupCodeHash: setupCodeHash("ZZZZ-ZZZZ") };
 		const text = JSON.parse(JSON.stringify(state));
 		assert.deepEqual(acc.parseGatewayState(text), state);
 		const noisy = { ...text, extra: 1, accounts: text.accounts.map((a: object) => ({ ...a, extra: 2 })), sessions: text.sessions.map((s: object) => ({ ...s, extra: 3 })) };
@@ -367,11 +367,13 @@ describe("redeeming an invite", () => {
 		assert.equal(full.state.invites.length, 1);
 	});
 
-	it("a success clears the address's failures", () => {
+	// Changed with the review (E): a code success never clears the address's failures; they age out.
+	it("a success does not clear the address's code failures", () => {
 		const made = good(acc.createInvite(fixture(), 4, NOW));
 		const failed = deepFreeze(refused(acc.reserveMember(deepFreeze(made.state), input("AAAA-AAAA"), 4, ADDR, NOW), "invite-invalid").state);
 		assert.equal(failed.lockouts[ADDR]?.failures, 1);
-		assert.equal(good(acc.reserveMember(failed, input(made.code), 4, ADDR, NOW)).state.lockouts[ADDR], undefined);
+		assert.equal(failed.lockouts[ADDR]?.against, "*");
+		assert.equal(good(acc.reserveMember(failed, input(made.code), 4, ADDR, NOW)).state.lockouts[ADDR]?.failures, 1);
 	});
 });
 
@@ -395,8 +397,13 @@ describe("sign-in", () => {
 		const state = fixture();
 		const wrongName = refused(acc.signIn(state, SIGN("nobody"), "ua", ADDR, NOW), "wrong");
 		const wrongPassword = refused(acc.signIn(state, SIGN("sam", "not the password"), "ua", ADDR, NOW), "wrong");
-		assert.deepEqual(wrongName.state, wrongPassword.state);
+		// The same answer and the same count; only the never-shown `against` differs (review item E).
+		const counts = (s: acc.GatewayState) => { const { against: _a, ...rest } = s.lockouts[ADDR]!; return rest; };
+		assert.deepEqual(counts(wrongName.state), counts(wrongPassword.state));
+		assert.deepEqual({ ...wrongName.state, lockouts: {} }, { ...wrongPassword.state, lockouts: {} });
 		assert.equal(wrongName.state.lockouts[ADDR]?.failures, 1);
+		assert.equal(wrongName.state.lockouts[ADDR]?.against, "*");
+		assert.equal(wrongPassword.state.lockouts[ADDR]?.against, idOf(state, "sam"));
 		refused(acc.signIn(state, SIGN(null, null), "ua", ADDR, NOW), "wrong");
 		refused(acc.signIn(state, SIGN("sam", 5), "ua", ADDR, NOW), "wrong");
 	});
@@ -456,7 +463,67 @@ describe("sign-in", () => {
 		// Another address is untouched, and the pause ends.
 		good(acc.signIn(state, SIGN("sam"), "ua", "198.51.100.1", NOW + MIN));
 		const open = good(acc.signIn(state, SIGN("sam"), "ua", ADDR, NOW + 15 * MIN));
-		assert.equal(open.state.lockouts[ADDR], undefined);
+		// Changed with the review (E): mixed failures are not cleared by a success; the doubling level stays.
+		assert.equal(open.state.lockouts[ADDR]?.level, 1);
+		assert.equal(acc.lockWait(open.state, ADDR, NOW + 15 * MIN), 0);
+	});
+
+	it("review E: four wrong tries against another account, then one's own success, no longer resets the count", () => {
+		let state = fixture();
+		const kim = idOf(state, "kim");
+		for (let round = 0; round < 2; round += 1) {
+			for (let i = 0; i < 4 && acc.lockWait(state, ADDR, NOW) === 0; i += 1) {
+				const r = acc.signIn(state, SIGN("sam", "guess guess guess"), "ua", ADDR, NOW);
+				state = deepFreeze(r.state);
+			}
+			if (acc.lockWait(state, ADDR, NOW)) break;
+			state = deepFreeze(good(acc.signIn({ ...state, accounts: state.accounts }, SIGN("kim", PASSWORD), "ua", ADDR, NOW)).state);
+		}
+		assert.ok(kim);
+		assert.ok(acc.lockWait(state, ADDR, NOW) > 0, "the 5th wrong try locks");
+	});
+
+	it("review E: one's own typo, then the right password, clears it; a code failure then a sign-in doesn't", () => {
+		const state = fixture();
+		const typo = deepFreeze(refused(acc.signIn(state, SIGN("sam", "typo typo typo"), "ua", ADDR, NOW), "wrong").state);
+		assert.equal(good(acc.signIn(typo, SIGN("sam"), "ua", ADDR, NOW)).state.lockouts[ADDR], undefined);
+		const two = deepFreeze(refused(acc.signIn(typo, SIGN("kim", "typo typo typo"), "ua", ADDR, NOW), "wrong").state);
+		assert.equal(two.lockouts[ADDR]?.against, "*", "two accounts: mixed");
+		assert.equal(good(acc.signIn(two, SIGN("sam"), "ua", ADDR, NOW)).state.lockouts[ADDR]?.failures, 2);
+		const code = deepFreeze(refused(acc.resetPassword(state, { name: "sam", code: "CCCC-CCCC", password: PASSWORD }, ADDR, NOW), "reset-invalid").state);
+		assert.equal(good(acc.signIn(code, SIGN("sam"), "ua", ADDR, NOW)).state.lockouts[ADDR]?.failures, 1);
+		// Mixed failures age out by the existing rule.
+		assert.equal(acc.lockWait(two, ADDR, NOW + DAY), 0);
+		const later = refused(acc.signIn(two, SIGN("sam", "typo typo typo"), "ua", ADDR, NOW + DAY), "wrong").state;
+		assert.equal(later.lockouts[ADDR]?.failures, 1);
+		assert.equal(later.lockouts[ADDR]?.against, idOf(state, "sam"));
+	});
+
+	it("review I: IPv6 addresses share a lockout by /64; IPv4-mapped is the IPv4 address", () => {
+		assert.equal(acc.lockoutKey("2001:db8:1:2:3:4:5:6"), "2001:db8:1:2::/64");
+		assert.equal(acc.lockoutKey("2001:0db8:0001:0002::9"), "2001:db8:1:2::/64");
+		assert.equal(acc.lockoutKey("2001:db8::1"), "2001:db8:0:0::/64");
+		assert.equal(acc.lockoutKey("::1"), "0:0:0:0::/64");
+		assert.equal(acc.lockoutKey("::ffff:203.0.113.7"), "203.0.113.7");
+		assert.equal(acc.lockoutKey("0:0:0:0:0:ffff:203.0.113.7"), "203.0.113.7");
+		assert.equal(acc.lockoutKey("203.0.113.7"), "203.0.113.7");
+		assert.equal(acc.lockoutKey("unknown"), "unknown");
+		let state = fixture();
+		for (let i = 0; i < 5; i += 1) state = deepFreeze(acc.signIn(state, SIGN("nobody"), "ua", `2001:db8:1:2::${i + 1}`, NOW).state);
+		assert.ok(acc.lockWait(state, "2001:db8:1:2:ffff::1", NOW) > 0);
+		assert.equal(acc.lockWait(state, "2001:db8:1:3::1", NOW), 0);
+		assert.equal(acc.lockWait(state, "::ffff:203.0.113.7", NOW), 0);
+	});
+
+	it("review I: at most MAX_LOCKOUT_ENTRIES addresses are remembered, the oldest dropped first", () => {
+		const many: Record<string, acc.GatewayLockout> = {};
+		for (let i = 0; i < acc.MAX_LOCKOUT_ENTRIES; i += 1) many[`10.${i >> 16 & 255}.${i >> 8 & 255}.${i & 255}`] = { failures: 1, level: 0, lockedUntil: 0, lastFailureAt: NOW - DAY / 2 + i, against: "*" };
+		const full = { ...fixture(), lockouts: many };
+		const next = acc.recordWrongAttempt(full, ADDR, NOW).state;
+		assert.equal(Object.keys(next.lockouts).length, acc.MAX_LOCKOUT_ENTRIES);
+		assert.ok(next.lockouts[ADDR]);
+		assert.equal(next.lockouts["10.0.0.0"], undefined, "the oldest went");
+		assert.ok(next.lockouts["10.0.0.1"]);
 	});
 
 	it("doubles the pause each time", () => {

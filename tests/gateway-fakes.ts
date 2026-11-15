@@ -65,12 +65,12 @@ export class FakeMaker {
 		this.volumes.add(tag);
 	}
 
-	readonly fetch = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+	fetch = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
 		const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
 		const method = (init?.method ?? "GET").toUpperCase();
 		assert.equal(new Headers(init?.headers).get("authorization"), `Bearer ${MAKER_TOKEN}`);
-		const body = typeof init?.body === "string" ? JSON.parse(init.body) as { tag?: string; start?: boolean } : {};
-		const label = `${method} ${url.pathname}${method === "POST" && url.pathname === "/copies" ? ` ${body.tag}${body.start === false ? " start=false" : ""}` : ""}`;
+		const body = typeof init?.body === "string" ? JSON.parse(init.body) as { tag?: string; start?: boolean; fresh?: boolean } : {};
+		const label = `${method} ${url.pathname}${method === "POST" && url.pathname === "/copies" ? ` ${body.tag}${body.fresh === true ? " fresh" : ""}${body.start === false ? " start=false" : ""}` : ""}`;
 		this.calls.push(label);
 		const rule = this.rules.find((r) => r.times > 0 && r.match.test(label));
 		if (rule) {
@@ -93,12 +93,24 @@ export class FakeMaker {
 		return this.act(method, url.pathname, body);
 	};
 
-	private act(method: string, pathname: string, body: { tag?: string; start?: boolean }): Response {
+	/** Every answer gets this many bytes of padding in a field (a tampered peer). */
+	padAnswers = 0;
+
+	private act(method: string, pathname: string, body: { tag?: string; start?: boolean; fresh?: boolean }): Response {
+		const answer = this.answer(method, pathname, body);
+		if (!this.padAnswers) return answer;
+		return new Response(JSON.stringify({ pad: "x".repeat(this.padAnswers) }), { status: answer.status, headers: { "content-type": "application/json" } });
+	}
+
+	private answer(method: string, pathname: string, body: { tag?: string; start?: boolean; fresh?: boolean }): Response {
+		if (pathname === "/volumes" && method === "GET") return Response.json([...this.volumes].sort().map((tag) => ({ tag })));
 		if (pathname === "/copies" && method === "GET") {
 			return Response.json([...this.copies].filter(([tag]) => !this.hidden.has(tag)).sort(([a], [b]) => (a < b ? -1 : 1)).map(([tag, c]) => ({ tag, state: c.state, image: c.image, upToDate: true })));
 		}
 		if (pathname === "/copies" && method === "POST") {
 			const tag = body.tag!;
+			if (body.fresh === true && this.volumes.has(tag)) return Response.json({ code: "volume_exists" }, { status: 409 });
+			if (body.fresh === true && this.copies.has(tag)) return Response.json({ code: "copy_exists" }, { status: 409 });
 			this.n += 1;
 			const secret = `S${this.n}`.padEnd(43, "k");
 			this.secrets.push(secret);
@@ -186,7 +198,8 @@ export function harness(root: string, over: Partial<GatewayConfig> = {}): Harnes
 	const log = (line: string) => { logs.push(line); };
 	const now = () => clock.now;
 	const unpairer = createUnpairer({ store, relay, config: cfg, log });
-	const makerClient = createMakerClient(cfg, maker.fetch, { create: 40, call: 40 });
+	// Late-bound, so a test can wrap `maker.fetch` in place.
+	const makerClient = createMakerClient(cfg, (input, init) => maker.fetch(input, init), { create: 40, call: 40 });
 	const lifecycle = createLifecycle({ store, maker: makerClient, unpairer, config: cfg, now, log });
 	const deps: AccountDeps = { store, config: cfg, relay, unpairer, lifecycle, now, log };
 

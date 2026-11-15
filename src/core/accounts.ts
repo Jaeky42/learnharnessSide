@@ -331,11 +331,20 @@ function randomTag(): string {
 	return normalizeSetupCode(newSetupCode()).slice(0, TAG_LENGTH);
 }
 
-/** A fresh tag, unique among all account records of any state; null only if the space is exhausted. */
-export function newTag(state: GatewayState): string | null {
-	const taken = new Set(state.accounts.map((a) => a.tag));
+/** A fresh tag, unique among all account records of any state and not in `avoid`; null only if the space is exhausted. */
+export function newTag(state: GatewayState, avoid: Iterable<string> = []): string | null {
+	const taken = new Set<string | null>([...state.accounts.map((a) => a.tag), ...avoid]);
 	for (let attempt = 0; attempt < 200; attempt += 1) {
 		const tag = randomTag();
+		if (!taken.has(tag)) return tag;
+	}
+	// A crowded space: every tag once, from a random start.
+	const alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+	const total = alphabet.length ** TAG_LENGTH;
+	const start = randomBytes(2).readUInt16BE(0) % total;
+	for (let i = 0; i < total; i += 1) {
+		const n = (start + i) % total;
+		const tag = alphabet[Math.floor(n / 1024)]! + alphabet[Math.floor(n / 32) % 32]! + alphabet[n % 32]!;
 		if (!taken.has(tag)) return tag;
 	}
 	return null;
@@ -638,6 +647,18 @@ export function abandonReservation(state: GatewayState, accountId: string): { ok
 	const marked = markDeleting(state, account);
 	const kept: AccountRecord = { ...marked.account, keepVolume: true };
 	return { ok: true, state: withAccount(marked.state, kept), account: kept };
+}
+
+/**
+ * A reservation not yet made gets another tag (its tag's volume or container
+ * already exists: a lost state file). Same object when there is no new tag.
+ */
+export function retagReservation(state: GatewayState, accountId: string, avoid: Iterable<string>): { state: GatewayState; tag: string } | null {
+	const account = findAccount(state, accountId);
+	if (!account || account.role !== "member" || account.state !== "active" || isReady(account)) return null;
+	const tag = newTag(state, avoid);
+	if (!tag) return null;
+	return { state: withAccount(state, { ...account, tag }), tag };
 }
 
 /** Member accounts that were reserved but never got a copy (a crash between steps 1 and 3). */

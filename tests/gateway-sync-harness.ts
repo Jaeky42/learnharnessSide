@@ -81,6 +81,7 @@ export function makeWorld(stateDir: string, copy: { upstream: string; secret: st
 			const headers = new Headers(req.headers ?? {});
 			headers.set("host", "caddy:9200");
 			headers.set(server.GATE_HEADER, req.gateSecret);
+			headers.set(server.SCOPE_HEADER, req.scope);
 			headers.set("x-forwarded-for", req.clientAddress ?? "");
 			return toCopy(req.upstream, new Request(`http://caddy:9200${req.path}`, { method: req.method, headers, body: req.body as BodyInit | undefined }));
 		},
@@ -91,7 +92,7 @@ export function makeWorld(stateDir: string, copy: { upstream: string; secret: st
 	async function caddy(original: Request, address: string): Promise<Response> {
 		const url = new URL(original.url);
 		const headers = new Headers(original.headers);
-		for (const name of ["x-lh-upstream", "x-lh-gate", "x-lh-relay", "x-lh-client-addr"]) headers.delete(name);
+		for (const name of ["x-lh-upstream", "x-lh-gate", "x-lh-scope", "x-lh-relay", "x-lh-client-addr"]) headers.delete(name);
 		headers.set("host", HOST);
 		headers.set("x-forwarded-for", address);
 		headers.set("x-forwarded-proto", "https");
@@ -105,6 +106,7 @@ export function makeWorld(stateDir: string, copy: { upstream: string; secret: st
 		const answer = await routes.handleRequest(new Request("http://gateway:9000/gate", { headers: ask }), deps);
 		if (answer.status !== 200) return answer;
 		headers.set(server.GATE_HEADER, answer.headers.get("x-lh-gate")!);
+		headers.set(server.SCOPE_HEADER, answer.headers.get("x-lh-scope")!);
 		try {
 			return await toCopy(answer.headers.get("x-lh-upstream")!, new Request(original.url, { method: original.method, headers, body }));
 		} catch {

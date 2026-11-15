@@ -49,8 +49,12 @@ export function isSyncPath(pathname: string): boolean {
 // dark colours), and of the build files only the static ones. Everything else
 // under /_next/ (/_next/image, /_next/data, ...) needs a session and goes to
 // the caller's OWN copy.
-const PUBLIC_PREFIXES = ["/_next/static/", "/fonts/", "/icons/"];
-const PUBLIC_FILES = new Set(["/favicon.ico", "/robots.txt"]);
+/** Exact paths needing no session (a test on the copy's side compares with its own list). */
+export const PUBLIC_FILE_PATHS: readonly string[] = ["/favicon.ico", "/robots.txt"];
+/** Path prefixes needing no session. */
+export const PUBLIC_PATH_PREFIXES: readonly string[] = ["/_next/static/", "/fonts/", "/icons/"];
+const PUBLIC_PREFIXES = PUBLIC_PATH_PREFIXES;
+const PUBLIC_FILES = new Set(PUBLIC_FILE_PATHS);
 
 /** A static build file or icon that needs no session; served from the owner's copy. */
 export function isPublicFile(pathname: string): boolean {

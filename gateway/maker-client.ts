@@ -5,6 +5,8 @@
  * Outcomes the callers act on:
  *   - "missing"  start/stop of a container that isn't there (404 no_copy);
  *   - "in-use"   a volume still used by a container (409; retry later);
+ *   - TagTaken   POST /copies {fresh: true} found that tag's volume or
+ *                container already there (409) and made nothing;
  *   - MakerUnavailable  no answer, a timeout, or a 5xx (the maker is busy,
  *                restarting or shutting down for an update): try again later,
  *                and never read it as "the copy doesn't exist". After a
@@ -16,6 +18,7 @@
  */
 
 import type { GatewayConfig } from "./config.ts";
+import { AnswerTooLarge, readCapped } from "./copies.ts";
 
 export const MAKER_CREATE_TIMEOUT_MS = 60_000;
 export const MAKER_CALL_TIMEOUT_MS = 20_000;
@@ -26,6 +29,11 @@ const TAG = /^[0-9A-HJKMNP-TV-Z]{3}$/;
 
 export class MakerUnavailable extends Error {
 	constructor(what: string) { super(`The maker didn't answer (${what}).`); }
+}
+
+/** A fresh copy's tag is already used by a volume or container; nothing was made. */
+export class TagTaken extends Error {
+	constructor() { super("That tag's volume or container already exists."); }
 }
 
 export class MakerRefused extends Error {
@@ -41,7 +49,8 @@ export interface CopySummary {
 }
 
 export interface MakerClient {
-	createCopy(tag: string, options?: { start?: boolean }): Promise<{ upstream: string; gateSecret: string }>;
+	/** `fresh`: only for a NEW account; refused (TagTaken) when the tag's volume or container exists. */
+	createCopy(tag: string, options?: { start?: boolean; fresh?: boolean }): Promise<{ upstream: string; gateSecret: string }>;
 	stopCopy(tag: string): Promise<"ok" | "missing">;
 	startCopy(tag: string): Promise<"ok" | "missing">;
 	/** Container and network; the volume stays. Idempotent. */
@@ -49,6 +58,8 @@ export interface MakerClient {
 	/** The final deletion. Idempotent when the volume is already gone. */
 	removeVolume(tag: string): Promise<"ok" | "in-use">;
 	listCopies(): Promise<CopySummary[]>;
+	/** Every tag that has a data volume. */
+	listVolumes(): Promise<string[]>;
 }
 
 /** A maker that was never configured: every call is "not available". */
@@ -59,6 +70,7 @@ export const NO_MAKER: MakerClient = {
 	removeCopy: async () => { throw new MakerUnavailable("not configured"); },
 	removeVolume: async () => { throw new MakerUnavailable("not configured"); },
 	listCopies: async () => { throw new MakerUnavailable("not configured"); },
+	listVolumes: async () => { throw new MakerUnavailable("not configured"); },
 };
 
 function checkTag(tag: string): string {
@@ -87,7 +99,12 @@ export function createMakerClient(config: Pick<GatewayConfig, "makerUrl" | "make
 			throw new MakerUnavailable(what);
 		}
 		let data: unknown = null;
-		try { data = await response.json(); } catch { data = null; }
+		try {
+			data = JSON.parse(new TextDecoder().decode(await readCapped(response)));
+		} catch (error) {
+			if (error instanceof AnswerTooLarge) throw new MakerUnavailable(`${what}: answer too large`);
+			data = null;
+		}
 		if (response.status >= 500) throw new MakerUnavailable(`${what}: ${response.status}`);
 		return { status: response.status, data };
 	}
@@ -96,8 +113,11 @@ export function createMakerClient(config: Pick<GatewayConfig, "makerUrl" | "make
 
 	return {
 		async createCopy(tag, options = {}) {
-			const body = options.start === false ? { tag: checkTag(tag), start: false } : { tag: checkTag(tag) };
+			const body: Record<string, unknown> = { tag: checkTag(tag) };
+			if (options.start === false) body.start = false;
+			if (options.fresh === true) body.fresh = true;
 			const { status, data } = await call("POST", "/copies", "create", body, createTimeout);
+			if (status === 409 && (codeOf(data) === "volume_exists" || codeOf(data) === "copy_exists")) throw new TagTaken();
 			if (status !== 200) throw new MakerRefused("create", status);
 			const answer = data as { upstream?: unknown; gateSecret?: unknown } | null;
 			if (!answer || typeof answer.upstream !== "string" || !UPSTREAM.test(answer.upstream) || typeof answer.gateSecret !== "string" || !SECRET.test(answer.gateSecret)) {
@@ -136,6 +156,14 @@ export function createMakerClient(config: Pick<GatewayConfig, "makerUrl" | "make
 				const { tag, state, image, upToDate } = item as Record<string, unknown>;
 				if (typeof tag !== "string" || !TAG.test(tag) || typeof state !== "string") return [];
 				return [{ tag, state, image: typeof image === "string" ? image : "", upToDate: upToDate === true }];
+			});
+		},
+		async listVolumes() {
+			const { status, data } = await call("GET", "/volumes", "list volumes");
+			if (status !== 200 || !Array.isArray(data)) throw new MakerRefused("list volumes", status);
+			return data.flatMap((item): string[] => {
+				const tag = item && typeof item === "object" ? (item as { tag?: unknown }).tag : null;
+				return typeof tag === "string" && TAG.test(tag) ? [tag] : [];
 			});
 		},
 	};

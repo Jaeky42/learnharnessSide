@@ -84,10 +84,10 @@ function decide(over: Partial<import("../gateway/gate.ts").GateInput>, state: im
 	return gate.decideGate(input(over), state, CONFIG, now);
 }
 
-function routed(decision: import("../gateway/gate.ts").GateDecision): { upstream: string; gateSecret: string } {
+function routed(decision: import("../gateway/gate.ts").GateDecision): { upstream: string; gateSecret: string; scope: string } {
 	assert.equal(decision.status, 200);
 	assert.ok("upstream" in decision);
-	return { upstream: decision.upstream, gateSecret: decision.gateSecret };
+	return { upstream: decision.upstream, gateSecret: decision.gateSecret, scope: decision.scope };
 }
 
 function refused(decision: import("../gateway/gate.ts").GateDecision, status: number): { headers: Record<string, string>; body: string } {
@@ -116,16 +116,23 @@ describe("step 2: sync paths are sorted by the key's tag", () => {
 		decide({ uri: "/api/sync/hello", method: "POST", authorization, ...extra }, state === undefined ? fixture().state : state);
 
 	it("a 43-character key goes to the owner's copy, with the secret from the settings (not a stored one)", () => {
-		assert.deepEqual(routed(sync(`Bearer ${OWNER_KEY}`)), { upstream: OWNER_UP, gateSecret: OWNER_SECRET });
+		assert.deepEqual(routed(sync(`Bearer ${OWNER_KEY}`)), { upstream: OWNER_UP, gateSecret: OWNER_SECRET, scope: "sync" });
 	});
 
 	it("an older key keeps working before the owner has claimed the gateway (the PC paired before the switch)", () => {
-		assert.deepEqual(routed(sync(`Bearer ${OWNER_KEY}`, {}, acc.emptyGatewayState())), { upstream: OWNER_UP, gateSecret: OWNER_SECRET });
+		assert.deepEqual(routed(sync(`Bearer ${OWNER_KEY}`, {}, acc.emptyGatewayState())), { upstream: OWNER_UP, gateSecret: OWNER_SECRET, scope: "sync" });
+	});
+
+	it("review F: while no owner exists (a new or lost file), a tagged key answers 503, never 401 (the PC keeps its key)", () => {
+		refused(sync(`Bearer ${keyFor("7KQ")}`, {}, acc.emptyGatewayState()), 503);
+		refused(sync(`Bearer ${keyFor("ZZZ")}`, {}, acc.emptyGatewayState()), 503);
+		// With an owner, an unknown tag is a real "not paired".
+		refused(sync(`Bearer ${keyFor("ZZZ")}`), 401);
 	});
 
 	it("a 46-character key goes to its tag's copy, and only there", () => {
-		assert.deepEqual(routed(sync(`Bearer ${keyFor("7KQ")}`)), { upstream: sam().upstream, gateSecret: sam().gateSecret });
-		assert.deepEqual(routed(sync(`Bearer ${keyFor("M9X")}`)), { upstream: kim().upstream, gateSecret: kim().gateSecret });
+		assert.deepEqual(routed(sync(`Bearer ${keyFor("7KQ")}`)), { upstream: sam().upstream, gateSecret: sam().gateSecret, scope: "sync" });
+		assert.deepEqual(routed(sync(`Bearer ${keyFor("M9X")}`)), { upstream: kim().upstream, gateSecret: kim().gateSecret, scope: "sync" });
 	});
 
 	it("a key with its tag changed to another account's goes to THAT account's copy, never to the first one's", () => {
@@ -170,12 +177,22 @@ describe("step 2: sync paths are sorted by the key's tag", () => {
 	});
 });
 
-describe("step 3: icons and build files", () => {
+describe("step 3: icons and static build files", () => {
 	it("go to the owner's copy signed out; the manifest is not among them", () => {
 		for (const uri of ["/favicon.ico", "/robots.txt", "/_next/static/chunks/app/chat/%5Bid%5D/page.js", "/fonts/a.woff2", "/icons/icon-192.png?v=2"]) {
-			assert.deepEqual(routed(decide({ uri })), { upstream: OWNER_UP, gateSecret: OWNER_SECRET }, uri);
+			assert.deepEqual(routed(decide({ uri })), { upstream: OWNER_UP, gateSecret: OWNER_SECRET, scope: "public" }, uri);
 		}
 		assert.equal(decide({ uri: "/manifest.webmanifest" }).status, 303);
+	});
+
+	it("review D: the rest of /_next/ needs a session and goes to the caller's OWN copy", () => {
+		const { state, tokens } = fixture();
+		for (const uri of ["/_next/image?url=%2Fx.png&w=64&q=75", "/_next/data/build/chat.json", "/_next/x", "/_next/staticx/a.js"]) {
+			assert.equal(decide({ uri }, state).status, 303, `${uri}: signed out, the sign-in page`);
+			assert.deepEqual(routed(decide({ uri, cookie: cookieOf(tokens.sam!) }, state)), { upstream: sam().upstream, gateSecret: sam().gateSecret, scope: "session" }, uri);
+		}
+		assert.deepEqual([...gate.PUBLIC_FILE_PATHS], ["/favicon.ico", "/robots.txt"]);
+		assert.deepEqual([...gate.PUBLIC_PATH_PREFIXES], ["/_next/static/", "/fonts/", "/icons/"]);
 	});
 
 	it("are served while the state file is damaged, as the copy serves them (they hold nothing)", () => {
@@ -198,10 +215,10 @@ describe("step 5: a signed-in browser reaches its own account's copy only", () =
 	it("each cookie yields its own copy and secret, and never another's", () => {
 		const { state, tokens } = fixture();
 		const samR = routed(decide({ uri: "/chat/1", cookie: cookieOf(tokens.sam!) }, state));
-		assert.deepEqual(samR, { upstream: sam().upstream, gateSecret: sam().gateSecret });
+		assert.deepEqual(samR, { upstream: sam().upstream, gateSecret: sam().gateSecret, scope: "session" });
 		const kimR = routed(decide({ uri: "/chat/1", cookie: cookieOf(tokens.kim!) }, state));
-		assert.deepEqual(kimR, { upstream: kim().upstream, gateSecret: kim().gateSecret });
-		assert.deepEqual(routed(decide({ uri: "/", cookie: cookieOf(tokens.boss!) }, state)), { upstream: OWNER_UP, gateSecret: OWNER_SECRET });
+		assert.deepEqual(kimR, { upstream: kim().upstream, gateSecret: kim().gateSecret, scope: "session" });
+		assert.deepEqual(routed(decide({ uri: "/", cookie: cookieOf(tokens.boss!) }, state)), { upstream: OWNER_UP, gateSecret: OWNER_SECRET, scope: "session" });
 		// The cookie is read by name; another cookie of the same value elsewhere doesn't count.
 		assert.equal(decide({ uri: "/", cookie: `x=${tokens.sam}; lh_server=1` }, state).status, 303);
 		assert.deepEqual(routed(decide({ uri: "/", cookie: `lh_server=1; ${cookieOf(tokens.sam!)}; lh_owner=1` }, state)).upstream, sam().upstream);
@@ -273,23 +290,61 @@ describe("what a client can't do", () => {
 		refused(decide({ method: null }), 400);
 	});
 
+	it("review B: a fragment, the absolute form, encoded #, dot segments, odd bytes or a reparse that differs: refused", () => {
+		for (const uri of [
+			"/_next/a#/../../api/chats", "/_next/static/a#x", "/api/sync/hello#x", "/a?b#c", "#", "/#",
+			"http://evil.example/api/chats", "https://learn.example.com/api/chats", "*",
+			"/api/chats%23x", "/_next/static/a%23/x", "/icons/%2e%2e/api", "/_next/static/%2E%2e/x",
+			"/a/../b?x", "/a/./b?x=1", "/_next/static/a;/../../api/chats", "/api/sync/;/../chats",
+			"/" + "a".repeat(9000), "/a?" + "b".repeat(9000), "/é", "/a?x=é", "/a?x=<b>", "/a?x=\"y\"", "/a\tb", "/a\u007f",
+		]) {
+			refused(decide({ uri, authorization: `Bearer ${OWNER_KEY}` }), 400);
+		}
+	});
+
+	it("review B: `;` stays part of the segment, so /api/sync;x is not a sync path", () => {
+		assert.equal(refused(decide({ uri: "/api/sync;x/hello", method: "GET", authorization: `Bearer ${OWNER_KEY}` }), 401).body, JSON.stringify({ error: gate.SIGN_IN_FIRST }));
+		assert.equal(gate.canonicalPath("/a;b?c=d"), "/a;b");
+		assert.equal(gate.canonicalPath("/a?"), "/a");
+		assert.equal(gate.canonicalPath("/chat/x?y=../z&w=%2F"), "/chat/x");
+	});
+
+	it("review L: two Cookie headers joined, or the session cookie twice, read as no cookie; two Authorization headers as no key", () => {
+		const { state, tokens } = fixture();
+		for (const cookie of [
+			`${cookieOf(tokens.sam!)}; ${cookieOf(tokens.kim!)}`,
+			`${cookieOf(tokens.sam!)}, ${cookieOf(tokens.kim!)}`,
+			`${cookieOf(tokens.sam!)}; ${cookieOf(tokens.sam!)}`,
+			`${cookieOf(tokens.sam!)},x=1; lh_server=1`,
+		]) {
+			assert.equal(decide({ uri: "/", cookie }, state).status, 303, cookie);
+			assert.equal(gate.findSessionCookie(cookie), null, cookie);
+		}
+		refused(decide({ uri: "/api/sync/hello", method: "POST", authorization: `Bearer ${keyFor("7KQ")}, Bearer ${keyFor("M9X")}` }, state), 401);
+	});
+
 	it("get a decision from paths that are fine", () => {
 		for (const uri of ["/", "/chat/abc?x=../y", "/api/chats/c_1/side-chats/t_2", "/_next/static/chunks/%5Bid%5D.js"]) assert.notEqual(decide({ uri }).status, 400, uri);
 	});
 });
 
 describe("the rules repeated from the copy agree with the copy's own", () => {
-	const PATHS = ["/", "/login", "/setup", "/invite", "/favicon.ico", "/favicon.icox", "/robots.txt", "/manifest.webmanifest", "/_next/static/x.js", "/_next", "/fonts/a", "/fontsx",
+	const PATHS = ["/", "/login", "/setup", "/invite", "/favicon.ico", "/favicon.icox", "/robots.txt", "/manifest.webmanifest", "/_next/static/x.js", "/_next", "/_next/image", "/_next/data/b/x.json", "/fonts/a", "/fontsx",
 		"/icons/i.png", "/icons", "/api/server-auth/login", "/api/server-auth/setup", "/api/server-auth/account", "/api/chats", "/api/sync", "/api/sync/hello", "/api/sync/pair",
 		"/api/syncx", "/api/internal", "/api/internal/unpair-all", "/api/internalx", "/chat/1"];
 	// The copy's pages and APIs that the gateway answers itself, and the manifest it serves in dark.
 	const GATEWAY_OWN = new Set(["/login", "/setup", "/api/server-auth/login", "/api/server-auth/setup", "/manifest.webmanifest"]);
 
-	it("public files: the copy's list without the gateway's own paths", () => {
+	// Review D: the gateway's list is a SUBSET of the copy's; the difference is pinned here.
+	const COPY_PUBLIC_ONLY = new Set(["/_next/image", "/_next/data/b/x.json"]);
+
+	it("public files: a subset of the copy's list (without the gateway's own paths and the non-static build paths)", () => {
 		for (const pathname of PATHS) {
 			if (copyAuth.isSyncPath(pathname) || copyAuth.isInternalPath(pathname)) continue;
 			const passes = copyAuth.serverGate({ method: "GET", pathname, headers: new Headers({ host: HOST }), env: { LH_SERVER_MODE: "1" }, readState: () => ({ ...core.emptyServerAuthState(), password: PW }), touch: () => {} }) === null;
-			assert.equal(gate.isPublicFile(pathname), passes && !GATEWAY_OWN.has(pathname), pathname);
+			if (gate.isPublicFile(pathname)) assert.ok(passes, `${pathname}: the gateway's public list must be within the copy's`);
+			assert.equal(gate.isPublicFile(pathname), passes && !GATEWAY_OWN.has(pathname) && !COPY_PUBLIC_ONLY.has(pathname), pathname);
+			if (COPY_PUBLIC_ONLY.has(pathname)) assert.ok(passes, `${pathname} is public at the copy`);
 		}
 	});
 

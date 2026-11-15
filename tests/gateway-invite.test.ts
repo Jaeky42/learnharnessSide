@@ -91,7 +91,7 @@ describe("redeeming", () => {
 		assert.equal(sam.state, "active");
 		assert.equal(sam.role, "member");
 		assert.ok(acc.isTag(sam.tag));
-		assert.deepEqual(h.maker.calls, [`POST /copies ${sam.tag}`]);
+		assert.deepEqual(h.maker.calls, ["GET /volumes", `POST /copies ${sam.tag} fresh`]);
 		assert.equal(sam.upstream, `lh-acct-${sam.tag}:3000`);
 		assert.equal(sam.gateSecret, h.maker.copies.get(sam.tag!)!.secret);
 		assert.equal(sam.lastSeenAt, h.clock.now);
@@ -173,7 +173,8 @@ describe("when the maker fails", () => {
 		assert.equal(acc.usedSlots(s), 1, "no slot stranded");
 		assert.equal(s.invites.length, 1, "the invite works again");
 		assert.equal(h.maker.copies.size, 0, "no container left");
-		assert.equal(h.maker.volumes.size, 0, "no volume left");
+		// Review G: a volume under the tag may not be this attempt's own, so it is never deleted here.
+		assert.ok(h.maker.calls.every((c) => !c.startsWith("DELETE /volumes")), "no volume deleted");
 		h.maker.heal();
 		h.maker.calls = [];
 		const retry = await redeem(code);
@@ -184,8 +185,8 @@ describe("when the maker fails", () => {
 		const code = await invite();
 		h.maker.fail(/^POST \/copies /, "503");
 		const r = await redeem(code);
-		const tagged = h.maker.calls.map((c) => c.replace(/[0-9A-Z]{3}$/, "TAG").replace(/ [0-9A-Z]{3}$/, " TAG"));
-		assert.deepEqual(tagged, ["POST /copies TAG", "DELETE /copies/TAG", "DELETE /volumes/TAG"]);
+		const tagged = h.maker.calls.map((c) => c.replace(/\/[0-9A-Z]{3}$/, "/TAG").replace(/ [0-9A-Z]{3} fresh$/, " TAG fresh"));
+		assert.deepEqual(tagged, ["GET /volumes", "POST /copies TAG fresh", "DELETE /copies/TAG"]);
 		await expectRolledBack(code, r);
 	});
 
@@ -218,8 +219,10 @@ describe("when the maker fails", () => {
 		await h.deps.lifecycle.pass();
 		assert.equal(acc.findAccountByName(h.state(), "sam"), null);
 		assert.equal(h.maker.copies.size, 0);
-		assert.equal(h.maker.volumes.size, 0);
-		assert.equal((await redeem(code)).status, 200, "the name and the code work");
+		assert.ok(h.maker.volumes.has(sam.tag!), "its volume is kept (it may not be this attempt's own)");
+		const retry = await redeem(code);
+		assert.equal(retry.status, 200, "the name and the code work");
+		assert.notEqual(acc.findAccountByName(h.state(), "sam")!.tag, sam.tag, "the kept volume's tag is not given out again");
 	});
 
 	it("no maker configured: 503, nothing kept", async () => {
@@ -230,6 +233,76 @@ describe("when the maker fails", () => {
 		assert.equal(r.status, 503);
 		assert.equal(acc.findAccountByName(bare.state(), "sam"), null);
 		assert.equal(bare.state().invites.length, 1);
+	});
+});
+
+describe("review G: a new account never gets a tag whose volume exists", () => {
+	/** The harness with the maker's fetch wrapped. */
+	async function withMaker(wrap: (original: typeof fetch) => typeof fetch) {
+		const makerClient = (await import("../gateway/maker-client.ts")).createMakerClient(h.deps.config, wrap(h.maker.fetch as typeof fetch), { create: 40, call: 40 });
+		const lifecycle = (await import("../gateway/lifecycle.ts")).createLifecycle({ store: h.deps.store, maker: makerClient, unpairer: h.deps.unpairer, config: h.deps.config, now: () => h.clock.now, log: () => {} });
+		const deps = { ...h.deps, lifecycle };
+		const routesMod = await import("../gateway/routes.ts");
+		const main = await import("../gateway/main.ts");
+		return (request: Request) => routesMod.handleRequest(request, deps, main.ALL_ROUTES);
+	}
+	const pathOf = (input: string | URL | Request) => new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url).pathname;
+
+	it("GET /volumes is asked first: a reserved tag whose volume exists is changed before any create", async () => {
+		const code = await invite();
+		let reservedTag = "";
+		const call = await withMaker((original) => async (input, init) => {
+			if (pathOf(input) === "/volumes") {
+				reservedTag = acc.findAccountByName(h.state(), "sam")!.tag!;
+				h.maker.volumes.add(reservedTag);
+				h.maker.calls.push("GET /volumes");
+				return Response.json([...h.maker.volumes].sort().map((tag) => ({ tag })));
+			}
+			return original(input, init);
+		});
+		const r = await call(h.post("/api/server-auth/invite", { code, name: "sam", password: NEW_PASSWORD }));
+		assert.equal(r.status, 200);
+		const sam = acc.findAccountByName(h.state(), "sam")!;
+		assert.notEqual(sam.tag, reservedTag);
+		assert.deepEqual(h.maker.calls, ["GET /volumes", `POST /copies ${sam.tag} fresh`], "no 409 needed");
+		assert.ok(h.maker.volumes.has(reservedTag), "the old volume is untouched");
+	});
+
+	it("fresh: true's 409 that the list didn't predict: the next tag", async () => {
+		const code = await invite();
+		let first = true;
+		const call = await withMaker((original) => async (input, init) => {
+			if (pathOf(input) === "/copies" && init?.method === "POST" && first) {
+				first = false;
+				h.maker.calls.push("POST /copies (taken)");
+				return Response.json({ code: "volume_exists" }, { status: 409 });
+			}
+			return original(input, init);
+		});
+		const r = await call(h.post("/api/server-auth/invite", { code, name: "sam", password: NEW_PASSWORD }));
+		assert.equal(r.status, 200);
+		const sam = acc.findAccountByName(h.state(), "sam")!;
+		assert.deepEqual(h.maker.calls, ["GET /volumes", "POST /copies (taken)", `POST /copies ${sam.tag} fresh`]);
+		assert.equal(sam.gateSecret, h.maker.copies.get(sam.tag!)!.secret);
+	});
+
+	it("every tag refused: rolled back after a bounded number, 503, nothing deleted", async () => {
+		const code = await invite();
+		let refusedCalls = 0;
+		const call = await withMaker((original) => async (input, init) => {
+			if (pathOf(input) === "/copies" && init?.method === "POST") {
+				refusedCalls += 1;
+				h.maker.calls.push("POST /copies (taken)");
+				return Response.json({ code: refusedCalls % 2 ? "volume_exists" : "copy_exists" }, { status: 409 });
+			}
+			return original(input, init);
+		});
+		const r = await call(h.post("/api/server-auth/invite", { code, name: "sam", password: NEW_PASSWORD }));
+		assert.equal(r.status, 503);
+		assert.equal(refusedCalls, 5, "a bounded number of tags");
+		assert.equal(acc.findAccountByName(h.state(), "sam"), null);
+		assert.equal(h.state().invites.length, 1);
+		assert.ok(h.maker.calls.every((c) => !c.startsWith("DELETE")), "nothing it didn't make is removed");
 	});
 });
 

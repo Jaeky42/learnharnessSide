@@ -124,7 +124,7 @@ describe("Reset password", () => {
 });
 
 describe("Pause and Resume", () => {
-	it("pause: sessions end, the copy is told to unpair BEFORE it stops, the slot stays taken", async () => {
+	it("pause: sessions end, the copy stops, the slot stays taken", async () => {
 		h.addMember("sam", "ABC");
 		const sam = await h.signIn("sam");
 		const r = await op({ op: "pause", id: "acct_sam" });
@@ -132,9 +132,8 @@ describe("Pause and Resume", () => {
 		assert.deepEqual(r.body, { view: view() });
 		const a = acc.findAccount(h.state(), "acct_sam")!;
 		assert.equal(a.state, "paused");
-		assert.equal(a.unpairPending, undefined, "the copy confirmed");
 		assert.equal(acc.liveSessionsOf(h.state(), "acct_sam", h.clock.now).length, 0);
-		assert.deepEqual(h.relayCalls.map((c) => `${c.upstream} ${c.path}`), ["lh-acct-ABC:3000 /api/internal/unpair-all"]);
+		assert.deepEqual(h.relayCalls, [], "review A: no unpair");
 		assert.deepEqual(h.maker.calls, ["POST /copies/ABC/stop"]);
 		assert.equal(h.maker.copies.get("ABC")!.state, "exited");
 		assert.equal(view().used, 2);
@@ -144,20 +143,26 @@ describe("Pause and Resume", () => {
 		assert.equal((await op({ op: "pause", id: "acct_sam" })).status, 409, "already paused");
 	});
 
-	it("pause with the copy unreachable: the unpair stays owed and is done once the copy runs again", async () => {
+	it("review A: pause → resume and remove → restore never unpair; the same device key works again", async () => {
 		h.addMember("sam", "ABC");
-		h.relayDown.value = true;
+		const key = `Bearer ABC${"k".repeat(43)}`;
+		const syncAsk = () => h.call(h.get("/gate", { "x-forwarded-method": "POST", "x-forwarded-uri": "/api/sync/hello", authorization: key }));
+		assert.equal((await syncAsk()).status, 200);
 		assert.equal((await op({ op: "pause", id: "acct_sam" })).status, 200);
-		assert.equal(acc.findAccount(h.state(), "acct_sam")!.unpairPending, true);
-		assert.deepEqual(h.maker.calls, ["POST /copies/ABC/stop"]);
-		h.relayDown.value = false;
-		const resumed = await op({ op: "resume", id: "acct_sam" });
-		assert.equal(resumed.status, 200);
+		assert.equal((await syncAsk()).status, 503, "paused: the PC reads offline and keeps its key");
+		assert.equal((await op({ op: "resume", id: "acct_sam" })).status, 200);
 		assert.deepEqual(h.maker.calls, ["POST /copies/ABC/stop", "POST /copies/ABC/start"]);
+		assert.equal((await syncAsk()).status, 200);
+		assert.equal((await op({ op: "remove", id: "acct_sam" })).status, 200);
+		assert.equal((await syncAsk()).status, 503, "removed and kept: still 503");
+		assert.equal((await op({ op: "restore", id: "acct_sam" })).status, 200);
+		const answer = await syncAsk();
+		assert.equal(answer.status, 200);
+		assert.equal(answer.headers.get("x-lh-scope"), "sync");
+		assert.equal(answer.headers.get("x-lh-gate"), h.maker.copies.get("ABC")!.secret, "the restored copy's new secret");
 		await h.deps.lifecycle.idle();
-		await h.deps.unpairer.retryPending();
 		assert.equal(acc.findAccount(h.state(), "acct_sam")!.unpairPending, undefined);
-		assert.equal(acc.findAccount(h.state(), "acct_sam")!.state, "active");
+		assert.deepEqual(h.relayCalls, [], "no unpair-all call at all");
 	});
 
 	it("resume on a missing container makes the copy again and saves its new secret", async () => {
@@ -191,7 +196,7 @@ describe("Remove, Restore, Delete now", () => {
 		const a = acc.findAccount(h.state(), "acct_sam")!;
 		assert.equal(a.state, "removed");
 		assert.equal(a.removedAt, h.clock.now);
-		assert.deepEqual(h.relayCalls.map((c) => c.path), ["/api/internal/unpair-all"]);
+		assert.deepEqual(h.relayCalls, [], "review A: no unpair");
 		assert.deepEqual(h.maker.calls, ["DELETE /copies/ABC"]);
 		assert.ok(!h.maker.copies.has("ABC"));
 		assert.ok(h.maker.volumes.has("ABC"));
