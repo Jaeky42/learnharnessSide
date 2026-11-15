@@ -182,6 +182,9 @@ async function openRegular(file: string, root: string | null): Promise<{ handle:
 	}
 }
 
+/** The archive's note that something was left out. */
+export const SKIPPED_NOTE = "skipped-files.txt";
+
 export interface ZipOptions {
 	/** Entries the caller already left out (unsafe names); counted in skipped-files.txt. */
 	skipped?: number;
@@ -195,9 +198,6 @@ export async function* zipChunks(sources: ZipSource[], options: ZipOptions = {})
 	let offset = 0;
 	let skipped = options.skipped ?? 0;
 	const root = options.root === undefined ? null : await fs.promises.realpath(/* turbopackIgnore: true */ options.root).catch(() => options.root!);
-	const note = skipped > 0 || sources.some((s) => !isSafeEntryName(s.name))
-		? null : undefined; // computed below; see `files`
-	void note;
 	for (const source of sources) {
 		if (!isSafeEntryName(source.name)) { skipped += 1; continue; }
 		const opened = await openRegular(source.path, root);
@@ -241,6 +241,21 @@ export async function* zipChunks(sources: ZipSource[], options: ZipOptions = {})
 		done.push({ name, stamp, crc, compressed, size, offset: start });
 	}
 
+	if (skipped > 0) {
+		// One plain note, never the names: those could be what made them unsafe.
+		const text = Buffer.from(`${skipped} ${skipped === 1 ? "file or folder was" : "files or folders were"} left out because ${skipped === 1 ? "its name" : "their names"} can't be used safely on every system.\n`, "utf8");
+		const name = Buffer.from(SKIPPED_NOTE, "utf8");
+		const stamp = dosTime(new Date());
+		const packed = zlib.deflateRawSync(text);
+		const head = localHeader(name, stamp);
+		const crc = crc32(text, 0);
+		const descriptor = dataDescriptor(crc, packed.length, text.length);
+		const start = offset;
+		offset += head.length + packed.length + descriptor.length;
+		yield head; yield packed; yield descriptor;
+		done.push({ name, stamp, crc, compressed: packed.length, size: text.length, offset: start });
+	}
+
 	const directoryStart = offset;
 	for (const entry of done) {
 		const record = centralHeader(entry);
@@ -252,8 +267,8 @@ export async function* zipChunks(sources: ZipSource[], options: ZipOptions = {})
 }
 
 /** The same, as a web ReadableStream a route can return. `onEnd` runs once, whichever way it ends. */
-export function zipStream(sources: ZipSource[], onEnd?: () => void): ReadableStream<Uint8Array> {
-	const iterator = zipChunks(sources);
+export function zipStream(sources: ZipSource[], onEnd?: () => void, options: ZipOptions = {}): ReadableStream<Uint8Array> {
+	const iterator = zipChunks(sources, options);
 	let ended = false;
 	const finish = () => { if (!ended) { ended = true; onEnd?.(); } };
 	return new ReadableStream<Uint8Array>({

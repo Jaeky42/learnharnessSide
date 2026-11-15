@@ -20,7 +20,7 @@ import path from "node:path";
 import { PATHS } from "../../config.ts";
 import { nameShapeProblem } from "../core/accounts.ts";
 import { behindGateway } from "./server-auth.ts";
-import { ZIP_LIMITS, zipStream, type ZipSource } from "./zip-writer.ts";
+import { isSafeEntryName, ZIP_LIMITS, zipStream, type ZipSource } from "./zip-writer.ts";
 
 /** What goes in, relative to the data folder. Everything else stays out. */
 export const EXPORT_PARTS: readonly string[] = [
@@ -38,13 +38,17 @@ export const EXPORT_PARTS: readonly string[] = [
 /** A temporary file the atomic writers leave beside a target (src/store/atomic-write.ts). */
 const TEMP_MARKER = ".tmp-";
 
-export interface ExportList { files: ZipSource[]; bytes: number }
+export interface ExportList { files: ZipSource[]; bytes: number; skipped: number }
 
 /** The files to send: the allowed parts, no links, sorted so the archive is the same each time. */
 export async function listExportFiles(dataDir: string): Promise<ExportList> {
 	const files: ZipSource[] = [];
 	let bytes = 0;
+	let skipped = 0;
 	const visit = async (full: string, name: string): Promise<void> => {
+		// A name that isn't safe to unzip anywhere is left out, never renamed (a renamed file would be a broken restore);
+		// for a folder that means its whole subtree. Each counts once.
+		if (!isSafeEntryName(name)) { skipped += 1; return; }
 		let info: fs.Stats;
 		try { info = await fs.promises.lstat(/* turbopackIgnore: true */ full); } catch { return; }
 		if (info.isSymbolicLink()) return;
@@ -60,7 +64,7 @@ export async function listExportFiles(dataDir: string): Promise<ExportList> {
 		for (const entry of entries.sort()) await visit(path.join(/* turbopackIgnore: true */ full, entry), `${name}/${entry}`);
 	};
 	for (const part of EXPORT_PARTS) await visit(path.join(/* turbopackIgnore: true */ dataDir, ...part.split("/")), part);
-	return { files, bytes };
+	return { files, bytes, skipped };
 }
 
 /** `learnharness-<name>-<date>.zip`; the name only when it has an account name's shape. */
@@ -90,7 +94,7 @@ export async function accountExportResponse(request: Request, options: { dataDir
 		const list = await listExportFiles(options.dataDir ?? PATHS.data);
 		if (list.files.length > ZIP_LIMITS.maxFiles || list.bytes > ZIP_LIMITS.maxBytes) return json({ error: GENERIC }, 413);
 		const stamp = running;
-		const body = zipStream(list.files, () => { if (running === stamp) running = null; });
+		const body = zipStream(list.files, () => { if (running === stamp) running = null; }, { skipped: list.skipped, root: options.dataDir ?? PATHS.data });
 		handedOn = true;
 		const name = new URL(request.url).searchParams.get("name");
 		return new Response(body, {
