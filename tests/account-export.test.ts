@@ -13,6 +13,8 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import v8 from "node:v8";
+import vm from "node:vm";
 import zlib from "node:zlib";
 import { after, afterEach, before, beforeEach, describe, it } from "node:test";
 
@@ -300,8 +302,15 @@ describe("Download my data: streaming and changing files", () => {
 		assert.ok(size >= 80 * 1024 * 1024);
 		const response = await accountExportResponse(request("sam"), { dataDir: data });
 		const reader = response.body!.getReader();
+		// Measure what the writer RETAINS, not garbage the collector hasn't reached
+		// yet: collect before each reading. (Without it the reading depends on the
+		// machine's load: 61 MiB on a busy CI runner, with nothing retained.)
+		v8.setFlagsFromString("--expose-gc");
+		const collect = vm.runInNewContext("gc") as () => void;
+		collect();
 		const baseline = process.memoryUsage().arrayBuffers;
 		let peak = 0;
+		let sinceReading = 0;
 		// Keep the archive on disk, not in memory, so the check measures the writer.
 		const out = path.join(root, "big.zip");
 		const handle = fs.openSync(out, "w");
@@ -309,11 +318,16 @@ describe("Download my data: streaming and changing files", () => {
 			const { done, value } = await reader.read();
 			if (done) break;
 			fs.writeSync(handle, value);
-			peak = Math.max(peak, process.memoryUsage().arrayBuffers - baseline);
+			sinceReading += value.byteLength;
+			if (sinceReading >= 4 * 1024 * 1024) {
+				sinceReading = 0;
+				collect();
+				peak = Math.max(peak, process.memoryUsage().arrayBuffers - baseline);
+			}
 		}
 		fs.closeSync(handle);
-		// Loose: garbage collection lags a little; a writer that kept the file would pass 80 MiB.
-		assert.ok(peak < 48 * 1024 * 1024, `peak ${(peak / 1048576).toFixed(1)} MiB against a ${(size / 1048576).toFixed(0)} MiB file`);
+		// A writer that kept the file would retain 80 MiB; a streaming one a few buffers.
+		assert.ok(peak < 24 * 1024 * 1024, `peak ${(peak / 1048576).toFixed(1)} MiB retained against a ${(size / 1048576).toFixed(0)} MiB file`);
 		const zip = fs.readFileSync(out);
 		const entries = readZip(zip);
 		assert.equal(entries.length, 1);
