@@ -1,0 +1,220 @@
+/**
+ * Accounts on one server: the owner-approved words of the new screens
+ * (docs/multi-account-plan.md, "The approved words"), in one place so the
+ * pages, the screens and their tests agree. A change here is a change to
+ * approved wording: ask the owner first. Quoted names take curly quotes.
+ *
+ * Pure text, like ./sync/screens.ts. Bundled into the gateway, so it imports
+ * only from ./server-auth.ts.
+ */
+
+import { PASSWORD_MIN_LENGTH, formatWait } from "./server-auth.ts";
+import { RECOVERY_CODE_COUNT, REMOVED_KEEP_MS } from "./accounts.ts";
+
+// ─── Reused as they are today ────────────────────────────────────────────────
+
+export const PASSWORDS_DONT_MATCH = "The two passwords don't match.";
+/** The same sentence `passwordProblem` gives. */
+export const USE_AT_LEAST = `Use at least ${PASSWORD_MIN_LENGTH} characters.`;
+/** Today's lockout sentence (src/server/server-auth.ts `lockedMessage`). */
+export const tooManyAttempts = (waitMs: number): string => `Too many attempts. Try again in ${formatWait(waitMs)}.`;
+/** Today's wrong setup code sentence. */
+export const SETUP_CODE_WRONG = "That setup code isn't right. Check the server log for the current code.";
+
+// ─── Times ───────────────────────────────────────────────────────────────────
+
+const timeOf = (ms: number): string => new Date(ms).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+
+/** "9 Nov": the device's own format. */
+export const dayText = (ms: number): string => new Date(ms).toLocaleDateString(undefined, { day: "numeric", month: "short" });
+
+/** "9 Nov, 18:20", or "today, 18:20" when `now` is given and it is the same day (as Settings → Obsidian words it). */
+export function dayTimeText(ms: number, now?: number): string {
+	if (now !== undefined && new Date(ms).toDateString() === new Date(now).toDateString()) return `today, ${timeOf(ms)}`;
+	return `${dayText(ms)}, ${timeOf(ms)}`;
+}
+
+// ─── Quoted names ────────────────────────────────────────────────────────────
+
+export const quoted = (name: string): string => `“${name}”`;
+/** `“sam”’s` */
+export const quotedPossessive = (name: string): string => `“${name}”’s`;
+
+// ─── The pages before sign-in ────────────────────────────────────────────────
+
+export const SIGN_IN_TEXT = {
+	title: "LearnHarness",
+	nameLabel: "Name",
+	passwordLabel: "Password",
+	submit: "Sign in",
+	inviteLink: "Have an invite code?",
+	forgotLink: "Forgot your password?",
+	wrong: "That name or password isn't right.",
+	/** Only after a correct name and password. */
+	paused: "This account is paused. Ask this server's owner.",
+	removed: "This account was removed. Ask this server's owner.",
+} as const;
+
+export const SETUP_TEXT = {
+	title: "Set up LearnHarness",
+	intro: `Enter the setup code from the server log, then choose a name and a password of at least ${PASSWORD_MIN_LENGTH} characters.`,
+	codeLabel: "Setup code",
+	nameLabel: "Name",
+	nameHelp: "3 to 20 letters, digits or dashes.",
+	passwordLabel: "New password",
+	confirmLabel: "Type it again",
+	submit: "Create account",
+	wrongCode: SETUP_CODE_WRONG,
+	nameNotAllowed: "Use 3 to 20 letters, digits or dashes.",
+} as const;
+
+export const INVITE_TEXT = {
+	title: "Create your account",
+	codeLabel: "Invite code",
+	nameLabel: "Name",
+	nameHelp: "3 to 20 letters, digits or dashes.",
+	nameHelpSignIn: "You sign in with it.",
+	passwordLabel: "Password",
+	passwordHelp: `At least ${PASSWORD_MIN_LENGTH} characters.`,
+	confirmLabel: "Type it again",
+	submit: "Create account",
+	invalid: "That invite code isn't right, or it has run out.",
+	taken: "That name is taken. Choose another.",
+	full: "This server is full. Ask its owner.",
+	/** A reserved name. */
+	reserved: "That name can't be used. Choose another.",
+	notAllowed: SETUP_TEXT.nameNotAllowed,
+} as const;
+
+export const RECOVERY_PAGE_TEXT = {
+	title: "Your recovery codes",
+	body: "If you forget your password, any one of these lets you choose a new one. Each works once. They won't be shown again.",
+	copy: "Copy",
+	continue: "Continue",
+} as const;
+
+export const RESET_PAGE_TEXT = {
+	title: "Choose a new password",
+	intro: "Enter one of your recovery codes, or a reset code from this server's owner.",
+	nameLabel: "Name",
+	codeLabel: "Code",
+	passwordLabel: "New password",
+	confirmLabel: "Type it again",
+	submit: "Set new password",
+	invalid: "That name or code isn't right, or the code has been used or has run out.",
+} as const;
+
+// ─── Settings → Accounts (the owner only) ────────────────────────────────────
+
+export const ACCOUNTS_TEXT = {
+	group: "Accounts",
+	menu: { reset: "Reset password", pause: "Pause", resume: "Resume", remove: "Remove" },
+	invitesGroup: "Invite codes",
+	newInvite: "New invite code",
+	cancelInvite: "Cancel",
+	removedGroup: "Removed",
+	restore: "Restore",
+	deleteNow: "Delete now",
+	cancel: "Cancel",
+	copy: "Copy",
+	done: "Done",
+} as const;
+
+export const usedText = (used: number, cap: number): string => `${used} of ${cap} accounts used.`;
+/** The invite button is greyed. */
+export const serverFullText = (cap: number): string => `All ${cap} accounts are used. Remove one to invite someone.`;
+/** Restore with no room. */
+export const restoreFullText = (cap: number): string => `All ${cap} accounts are used. Remove one first.`;
+
+/**
+ * An account line's second part: "Owner · signed in now", "Last seen 9 Nov, 18:20",
+ * "Paused". The owner's line is prefixed "Owner · ".
+ */
+export function accountStatusText(account: { role: "owner" | "member"; state: "active" | "paused"; signedInNow: boolean; lastSeenAt: number | null }, now?: number): string {
+	let status: string;
+	if (account.state === "paused") status = "Paused";
+	else if (account.signedInNow) status = account.role === "owner" ? "signed in now" : "Signed in now";
+	else status = account.lastSeenAt === null ? "Never signed in" : `Last seen ${dayTimeText(account.lastSeenAt, now)}`;
+	return account.role === "owner" ? `Owner · ${status}` : status;
+}
+
+/** A waiting invite: "Works once, until 22 Nov". */
+export const inviteUntilText = (expiresAt: number): string => `Works once, until ${dayText(expiresAt)}`;
+
+/** A removed account: "Removed 9 Nov · deleted for good on 9 Dec". */
+export const removedText = (removedAt: number, deletedAt: number = removedAt + REMOVED_KEEP_MS): string => `Removed ${dayText(removedAt)} · deleted for good on ${dayText(deletedAt)}`;
+
+export interface ConfirmText { title: string; body: string; cancel: string; confirm: string }
+
+export const resetConfirm = (name: string): ConfirmText => ({
+	title: `Reset ${quotedPossessive(name)} password?`,
+	body: `You get a code to pass on. It works once, for 24 hours. When it is used, ${name} is signed out everywhere and pairs their desktop apps again.`,
+	cancel: "Cancel",
+	confirm: "Get reset code",
+});
+
+export const pauseConfirm = (name: string): ConfirmText => ({
+	title: `Pause ${quoted(name)}?`,
+	body: `${name} can't sign in and their copy stops. Nothing is deleted.`,
+	cancel: "Cancel",
+	confirm: "Pause",
+});
+
+export const removeConfirm = (name: string): ConfirmText => ({
+	title: `Remove ${quoted(name)}?`,
+	body: "The account stops now. Its data is kept for 30 days, then deleted for good.",
+	cancel: "Cancel",
+	confirm: "Remove",
+});
+
+export const deleteNowConfirm = (name: string): ConfirmText => ({
+	title: `Delete ${quoted(name)} now?`,
+	body: "This deletes the account's data for good.",
+	cancel: "Cancel",
+	confirm: "Delete",
+});
+
+/** After New invite code. */
+export const inviteBox = (expiresAt: number): { title: string; body: string; copy: string; done: string } => ({
+	title: "Invite code",
+	body: `Works once, until ${dayText(expiresAt)}. Send it to the person with this site's address.`,
+	copy: "Copy",
+	done: "Done",
+});
+
+/** After Get reset code. */
+export const resetCodeBox = (name: string): { title: string; body: string; copy: string; done: string } => ({
+	title: `Reset code for ${quoted(name)}`,
+	body: "Works once, for 24 hours.",
+	copy: "Copy",
+	done: "Done",
+});
+
+// ─── Each person's Settings → Account, the new parts ─────────────────────────
+
+export const signedInAs = (name: string): string => `Signed in as ${name}`;
+
+export const ACCOUNT_TEXT = {
+	recoveryGroup: "Recovery codes",
+	newRecoveryCodes: "New recovery codes",
+	recoveryBox: {
+		title: "New recovery codes?",
+		body: "Your old codes stop working.",
+		passwordLabel: "Password",
+		cancel: "Cancel",
+		confirm: "Make new codes",
+	},
+	dataGroup: "Your data",
+	download: "Download my data",
+	downloadHelp: "Your sessions, graph and settings as one file.",
+	deleteAccount: "Delete my account",
+	deleteBox: {
+		title: "Delete your account?",
+		body: "Your account and everything in it are deleted now, for good. This can't be undone. Download your data first if you want to keep it.",
+		passwordLabel: "Password",
+		cancel: "Cancel",
+		confirm: "Delete my account",
+	},
+} as const;
+
+export const recoveryLeftText = (left: number, total: number = RECOVERY_CODE_COUNT): string => `${left} of ${total} left.`;

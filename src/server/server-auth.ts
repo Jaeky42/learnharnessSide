@@ -18,8 +18,18 @@
  * Client address for the lockout: with LH_TRUST_PROXY=1 (set in
  * deploy/compose.yaml, where Caddy is the only way in) the LAST
  * X-Forwarded-For entry, which Caddy writes; otherwise one shared bucket.
+ *
+ * Behind a gateway (multi-account, docs/multi-account-plan.md "A copy behind
+ * the gateway"): server mode plus a non-empty LH_GATE_SECRET. The gateway
+ * owns the login; this copy only checks that every request carries its
+ * secret in X-LH-Gate (constant time), then runs the sync device-key gate as
+ * before. Its own account routes and pages answer 404, no setup code is
+ * printed, and server-login.json is left as it is, so taking the gateway
+ * away gives the old login back. A secret under 32 characters refuses every
+ * request (fail closed). /api/internal/* exists only in this mode.
  */
 
+import { createHash, timingSafeEqual } from "node:crypto";
 import {
 	clearFailures,
 	createSession,
@@ -41,7 +51,6 @@ import {
 	touchSession,
 	verifyPassword,
 	type ServerAuthState,
-	type SessionRecord,
 } from "../core/server-auth.ts";
 import { readServerAuthState, updateServerAuthState } from "../store/server-auth.ts";
 import { loginPageHtml, setupPageHtml } from "./server-auth-pages.ts";
@@ -58,6 +67,38 @@ export function serverModeEnabled(env: Env = process.env): boolean {
 }
 
 const NO_STORE = { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" } as const;
+
+// ─── Behind a gateway (multi-account) ────────────────────────────────────────
+
+/** The request header Caddy fills from the gateway's answer (and strips from clients). */
+export const GATE_HEADER = "x-lh-gate";
+/** A configured secret shorter than this refuses every request. */
+export const GATE_SECRET_MIN_LENGTH = 32;
+
+/** Server mode with LH_GATE_SECRET set: this copy stands behind the gateway.
+ *  Outside server mode (the desktop app) the variable is ignored. */
+export function behindGateway(env: Env = process.env): boolean {
+	return serverModeEnabled(env) && typeof env.LH_GATE_SECRET === "string" && env.LH_GATE_SECRET !== "";
+}
+
+function gateSecretTooShort(env: Env): boolean {
+	return (env.LH_GATE_SECRET ?? "").length < GATE_SECRET_MIN_LENGTH;
+}
+
+/** Does the request carry this copy's gate secret? Both sides are hashed
+ *  first, so the comparison takes the same time whatever their lengths. */
+export function gatePasses(headers: Headers, env: Env = process.env): boolean {
+	if (!behindGateway(env) || gateSecretTooShort(env)) return false;
+	const given = headers.get(GATE_HEADER);
+	if (given === null) return false;
+	const digest = (value: string) => createHash("sha256").update(value, "utf8").digest();
+	return timingSafeEqual(digest(given), digest(env.LH_GATE_SECRET!));
+}
+
+/** The copy's internal routes, for the gateway only (docs/multi-account-build.md). */
+export function isInternalPath(pathname: string): boolean {
+	return pathname === "/api/internal" || pathname.startsWith("/api/internal/");
+}
 
 /** Paths reachable without a session. Everything else needs one. */
 const PUBLIC_PAGES = new Set(["/login", "/setup"]);
@@ -163,8 +204,12 @@ export interface GateInput {
 /** null = let the request through; otherwise the response to send instead. */
 export function serverGate(input: GateInput): Response | null {
 	const env = input.env ?? process.env;
+	// Multi-account: /api/internal/* exists only behind a gateway, never on
+	// the desktop app or a single-copy server, signed in or not.
+	if (isInternalPath(input.pathname) && !behindGateway(env)) return notFound();
 	if (!serverModeEnabled(env)) return null;
 	const now = input.now ?? Date.now();
+	if (behindGateway(env)) return gatewayGate(input, env, now);
 	const isApi = input.pathname.startsWith("/api/");
 	// The desktop app's sync API (cloud sync Phase 5) has its own door: a
 	// device key, never the login cookie. Checked before the same-site rule,
@@ -190,6 +235,31 @@ export function serverGate(input: GateInput): Response | null {
 	}
 	if (isApi) return json({ error: "Sign in to LearnHarness first." }, 401);
 	return redirect(state.password ? "/login" : "/setup", input.url && publicUrl(input.url, input.headers, env));
+}
+
+/**
+ * Multi-account: the gate of a copy behind the gateway. The secret decides,
+ * for pages, APIs and public files alike; no cookie, password or setup page
+ * here. Refusals: 503 for a too-short secret (misconfigured, fail closed) and
+ * on sync paths (a desktop app reads 5xx as "offline" and keeps its key);
+ * 401 for any other API; 403 for a page or file. Then the sync paths run the
+ * device-key gate as before, and the same-site write rule stays as a second
+ * lock (the gateway applies it first; /api/internal/* is called by the
+ * gateway itself, with no Origin).
+ */
+function gatewayGate(input: GateInput, env: Env, now: number): Response | null {
+	if (gateSecretTooShort(env)) return new Response(null, { status: 503, headers: NO_STORE });
+	if (!gatePasses(input.headers, env)) {
+		if (isSyncPath(input.pathname)) return new Response(null, { status: 503, headers: NO_STORE });
+		if (input.pathname.startsWith("/api/")) return json({ error: "Sign in to LearnHarness first." }, 401);
+		return new Response(null, { status: 403, headers: NO_STORE });
+	}
+	if (isSyncPath(input.pathname)) return syncGate(input, now);
+	if (isInternalPath(input.pathname)) return null;
+	if (!sameOrigin(input.method, input.headers)) {
+		return json({ error: "This request must come from the LearnHarness site itself." }, 403);
+	}
+	return null;
 }
 
 export function isSyncPath(pathname: string): boolean {
@@ -236,12 +306,15 @@ function touchStored(sessionId: string, now: number): void {
 
 // ─── Pages ───────────────────────────────────────────────────────────────────
 
-export function signedIn(request: Request, state: ServerAuthState, now: number): SessionRecord | null {
-	return findSession(state, readSessionCookie(request.headers), now);
+/** Is the request from a signed-in browser? Behind a gateway its secret is
+ *  the proof (the gateway checked the login); otherwise this copy's cookie. */
+export function signedIn(request: Request, state: ServerAuthState, now: number): boolean {
+	if (behindGateway()) return gatePasses(request.headers);
+	return findSession(state, readSessionCookie(request.headers), now) !== null;
 }
 
 export function loginPageResponse(request: Request): Response {
-	if (!serverModeEnabled()) return new Response("Not found", { status: 404 });
+	if (!serverModeEnabled() || behindGateway()) return new Response("Not found", { status: 404 });
 	const state = readServerAuthState();
 	if (!state.password) return redirect("/setup", publicUrl(request.url, request.headers));
 	if (signedIn(request, state, Date.now())) return redirect("/", publicUrl(request.url, request.headers));
@@ -249,7 +322,7 @@ export function loginPageResponse(request: Request): Response {
 }
 
 export function setupPageResponse(request: Request): Response {
-	if (!serverModeEnabled()) return new Response("Not found", { status: 404 });
+	if (!serverModeEnabled() || behindGateway()) return new Response("Not found", { status: 404 });
 	const state = readServerAuthState();
 	if (state.password) return redirect(signedIn(request, state, Date.now()) ? "/" : "/login", publicUrl(request.url, request.headers));
 	return html(setupPageHtml());
@@ -282,7 +355,7 @@ export function notFound(): Response {
 
 /** POST {code, password}: first-time setup. */
 export async function setupResponse(request: Request, now = Date.now()): Promise<Response> {
-	if (!serverModeEnabled()) return notFound();
+	if (!serverModeEnabled() || behindGateway()) return notFound();
 	const body = await readBody(request);
 	if (!body) return json({ error: "Expected JSON." }, 400);
 	const address = clientAddress(request.headers);
@@ -310,7 +383,7 @@ export async function setupResponse(request: Request, now = Date.now()): Promise
 
 /** POST {password}: sign in. */
 export async function loginResponse(request: Request, now = Date.now()): Promise<Response> {
-	if (!serverModeEnabled()) return notFound();
+	if (!serverModeEnabled() || behindGateway()) return notFound();
 	const body = await readBody(request);
 	if (!body) return json({ error: "Expected JSON." }, 400);
 	const address = clientAddress(request.headers);
@@ -333,7 +406,7 @@ export async function loginResponse(request: Request, now = Date.now()): Promise
 
 /** POST: sign out this device. */
 export async function logoutResponse(request: Request, now = Date.now()): Promise<Response> {
-	if (!serverModeEnabled()) return notFound();
+	if (!serverModeEnabled() || behindGateway()) return notFound();
 	const token = readSessionCookie(request.headers);
 	updateServerAuthState((state) => {
 		const session = findSession(state, token, now);
@@ -342,11 +415,13 @@ export async function logoutResponse(request: Request, now = Date.now()): Promis
 	return json({ ok: true }, 200, { "Set-Cookie": clearedCookie() });
 }
 
-/** GET: the Account tab's data. 404 outside server mode (the tab hides). */
+/** GET: the Account tab's data. 404 outside server mode (the tab hides), and
+ *  behind a gateway, which answers the account paths itself (as for the
+ *  other account routes here). */
 export function accountResponse(request: Request, now = Date.now()): Response {
-	if (!serverModeEnabled()) return notFound();
+	if (!serverModeEnabled() || behindGateway()) return notFound();
 	const state = readServerAuthState();
-	const current = signedIn(request, state, now);
+	const current = findSession(state, readSessionCookie(request.headers), now);
 	if (!current) return json({ error: "Sign in to LearnHarness first." }, 401);
 	const devices = liveSessions(state, now)
 		.sort((a, b) => b.lastSeenAt - a.lastSeenAt)
@@ -361,7 +436,7 @@ export function accountResponse(request: Request, now = Date.now()): Response {
 
 /** POST {current, next}: change the password; other devices are signed out. */
 export async function changePasswordResponse(request: Request, now = Date.now()): Promise<Response> {
-	if (!serverModeEnabled()) return notFound();
+	if (!serverModeEnabled() || behindGateway()) return notFound();
 	const body = await readBody(request);
 	if (!body) return json({ error: "Expected JSON." }, 400);
 	const address = clientAddress(request.headers);
@@ -387,7 +462,7 @@ export async function changePasswordResponse(request: Request, now = Date.now())
 
 /** POST: end every login, this device included. */
 export async function signOutEverywhereResponse(request: Request, now = Date.now()): Promise<Response> {
-	if (!serverModeEnabled()) return notFound();
+	if (!serverModeEnabled() || behindGateway()) return notFound();
 	const token = readSessionCookie(request.headers);
 	const ok = updateServerAuthState((state) => {
 		if (!findSession(state, token, now)) return { state: null, result: false };
@@ -397,11 +472,30 @@ export async function signOutEverywhereResponse(request: Request, now = Date.now
 	return json({ ok: true }, 200, { "Set-Cookie": clearedCookie() });
 }
 
+// ─── Internal routes (behind a gateway only) ─────────────────────────────────
+
+/** POST /api/internal/unpair-all: the gateway unpairs every desktop app of
+ *  this copy (after a password change, a reset, Sign out everywhere, Pause,
+ *  Remove). The gate checked the secret already; it is checked again here. */
+export function unpairAllResponse(request: Request): Response {
+	if (!behindGateway() || !gatePasses(request.headers)) return notFound();
+	try {
+		updateServerAuthState((state) => ({
+			state: state.devices.length > 0 || state.pairing ? removeAllDevices(state) : null,
+			result: undefined,
+		}));
+	} catch {
+		return json({ error: "The server login file is damaged. Run reset-password on the server." }, 503);
+	}
+	return json({ ok: true });
+}
+
 // ─── Startup ─────────────────────────────────────────────────────────────────
 
-/** While no password is set, store a fresh setup code and print it. */
+/** While no password is set, store a fresh setup code and print it.
+ *  Behind a gateway nothing: the gateway has its own first start. */
 export function announceSetupCode(log: (line: string) => void = console.log): void {
-	if (!serverModeEnabled()) return;
+	if (!serverModeEnabled() || behindGateway()) return;
 	try {
 		const code = updateServerAuthState((state) => {
 			if (state.password) return { state: null, result: null };
