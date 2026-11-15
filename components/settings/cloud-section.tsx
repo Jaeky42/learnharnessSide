@@ -106,7 +106,7 @@ function PairForm({ view, notice, onPaired }: { view: CloudView; notice: string 
 				<input id="cloud-address" name="cloud-address" type="url" inputMode="url" autoCapitalize="none" autoCorrect="off" spellCheck={false} autoComplete="off" placeholder="https://" className={fieldClass} value={address} onChange={(e) => setAddress(e.target.value)} />
 			</label>
 			<label className="flex flex-col gap-1 text-xs text-muted-foreground" htmlFor="cloud-code">{CLOUD_TEXT.codeLabel}
-				<input id="cloud-code" name="cloud-code" type="text" autoCapitalize="characters" autoCorrect="off" spellCheck={false} autoComplete="off" placeholder="XXXX-XXXX" className={`${fieldClass} max-w-40 tracking-wider`} value={code} onChange={(e) => setCode(e.target.value)} />
+				<input id="cloud-code" name="cloud-code" type="text" autoCapitalize="characters" autoCorrect="off" spellCheck={false} autoComplete="off" placeholder="XXXX-XXXX" className={`${fieldClass} max-w-44 tracking-wider`} value={code} onChange={(e) => setCode(e.target.value)} />
 				<span>{CLOUD_TEXT.codeHelp}</span>
 			</label>
 			<label className="flex flex-col gap-1 text-xs text-muted-foreground" htmlFor="cloud-name">{CLOUD_TEXT.nameLabel}
