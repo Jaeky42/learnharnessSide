@@ -499,7 +499,7 @@ export class Maker {
 			return code(404, "not_found");
 		} catch (error) {
 			const route = path.startsWith("/volumes") ? "/volumes" : path.startsWith("/copies") ? "/copies" : "/reconcile";
-			const tag = /^\/(?:copies|volumes)\/([^/]*)/.exec(path)?.[1];
+			const tag = /^\/(?:copies|volumes)\/([^/]*)/.exec(path)?.[1] ?? (path === "/copies" ? tagFromBody(body) : null);
 			this.say(`${method} ${route}`, isTag(tag) ? tag : null, `failed (${describe(error)})`);
 			if (error instanceof DockerError) return code(502, error.code);
 			if (error instanceof MakerFailure) return code(502, error.code);

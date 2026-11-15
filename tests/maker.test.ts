@@ -545,8 +545,12 @@ describe("POST /copies", () => {
 	});
 
 	test("two calls for one tag run one after the other", async () => {
+		await call("POST", "/copies", { tag: "ABC" });
+		docker.calls = [];
 		docker.delayMs = (c) => (c.path === "/containers/create" ? 40 : 0);
-		const [a, b] = await Promise.all([call("POST", "/copies", { tag: "ABC" }), call("POST", "/copies/ABC/stop")]);
+		const first = call("POST", "/copies", { tag: "ABC" });
+		while (docker.calls.length === 0) await new Promise((r) => setTimeout(r, 1));
+		const [a, b] = await Promise.all([first, call("POST", "/copies/ABC/stop")]);
 		assert.equal(a.status, 200);
 		assert.equal(b.status, 200);
 		const lines = docker.lines();
@@ -577,6 +581,7 @@ describe("POST /copies", () => {
 	});
 
 	test("LH_IMAGE unset: the maker's own container's image", async () => {
+		docker.images.set("lh-image:new", NEW_IMAGE);
 		await startMaker({ image: null });
 		const r = await call("POST", "/copies", { tag: "ABC" });
 		assert.equal(r.status, 200);
