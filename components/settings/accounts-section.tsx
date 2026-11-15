@@ -18,10 +18,6 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { CheckIcon, MoreHorizontalIcon } from "lucide-react";
 import { MenuShell } from "@/components/menu-shell";
 import type { CloseOutcome } from "@/components/interaction-layers";
-// TODO(barrel): the browser shell imports only "@/src/core", which doesn't export these yet
-// (and `removeConfirm` would collide with the sync screens' one); drop the disables when it does.
-/* eslint-disable import/no-restricted-paths */
-import type { AccountsView } from "@/src/core/accounts";
 import {
 	ACCOUNTS_TEXT,
 	accountStatusText,
@@ -29,16 +25,16 @@ import {
 	inviteBox,
 	inviteUntilText,
 	pauseConfirm,
-	removeConfirm,
+	removeAccountConfirm,
 	removedText,
 	resetCodeBox,
 	resetConfirm,
 	restoreFullText,
 	serverFullText,
 	usedText,
+	type AccountsView,
 	type ConfirmText,
-} from "@/src/core/account-screens";
-/* eslint-enable import/no-restricted-paths */
+} from "@/src/core";
 import { ConnectionDialog } from "./connection-controls.tsx";
 import { SettingsGroup } from "./controls.tsx";
 import { isOwnerMode } from "./owner-mode";
@@ -89,7 +85,7 @@ function confirmFor(confirm: Confirm): ConfirmText {
 	switch (confirm.op) {
 		case "reset": return resetConfirm(confirm.name);
 		case "pause": return pauseConfirm(confirm.name);
-		case "remove": return removeConfirm(confirm.name);
+		case "remove": return removeAccountConfirm(confirm.name);
 		case "delete-now": return deleteNowConfirm(confirm.name);
 	}
 }

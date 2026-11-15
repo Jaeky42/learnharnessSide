@@ -26,7 +26,7 @@ import {
 	inviteBox,
 	inviteUntilText,
 	pauseConfirm,
-	removeConfirm,
+	removeAccountConfirm,
 	removedText,
 	resetCodeBox,
 	resetConfirm,
@@ -280,7 +280,7 @@ describe("Settings → Accounts: the owner's confirm boxes", () => {
 		await click(menuItem("Remove"));
 		assert.equal(text(byTest(document, "accounts-confirm-title")), "Remove “sam”?");
 		assert.equal(text(byTest(document, "accounts-confirm-body")), "The account stops now. Its data is kept for 30 days, then deleted for good.");
-		assert.equal(text(byTest(document, "accounts-confirm-body")), removeConfirm("sam").body);
+		assert.equal(text(byTest(document, "accounts-confirm-body")), removeAccountConfirm("sam").body);
 		assert.match(dialogButton("Remove")!.className, /bg-destructive/, "red");
 		await click(dialogButton("Remove"));
 		assert.deepEqual(posts, [{ op: "remove", id: "acc_sam" }]);

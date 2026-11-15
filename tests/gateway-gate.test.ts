@@ -300,7 +300,7 @@ describe("the rules repeated from the copy agree with the copy's own", () => {
 		}
 	});
 
-	const ORIGINS = [
+	const ORIGINS: Array<Record<string, string>> = [
 		{}, { origin: ORIGIN }, { origin: "https://evil.example" }, { origin: "http://learn.example.com" }, { origin: "https://learn.example.com:444" }, { origin: "nonsense" },
 		{ origin: ORIGIN, "sec-fetch-site": "cross-site" }, { origin: ORIGIN, "sec-fetch-site": "same-origin" }, { "sec-fetch-site": "cross-site" }, { origin: "null" },
 	];

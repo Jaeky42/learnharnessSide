@@ -17,9 +17,7 @@
 
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { HostDialog } from "@/components/host-dialog";
-// The core barrel (src/core/index.ts) doesn't export the accounts' words yet; switch to it when it does.
-// eslint-disable-next-line import/no-restricted-paths
-import { ACCOUNT_TEXT, ACCOUNTS_TEXT, RECOVERY_PAGE_TEXT, recoveryLeftText, signedInAs } from "@/src/core/account-screens";
+import { ACCOUNT_TEXT, ACCOUNTS_TEXT, RECOVERY_PAGE_TEXT, recoveryLeftText, signedInAs } from "@/src/core";
 import { SettingsGroup } from "./controls.tsx";
 import { isServerMode } from "./server-mode";
 import { clearAccountContent } from "./sign-out-storage.ts";

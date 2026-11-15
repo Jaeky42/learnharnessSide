@@ -4,14 +4,14 @@
  * stand-in Docker Engine API on a unix socket that records every request.
  */
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { after, before, beforeEach, describe, test } from "node:test";
-import { DockerClient } from "../gateway/docker.ts";
+import { DockerClient, imageRefPath } from "../gateway/docker.ts";
 import {
 	COPY_CPU_SHARES,
 	COPY_MEMORY_BYTES,
@@ -19,9 +19,13 @@ import {
 	COPY_PIDS_LIMIT,
 	Maker,
 	TAG_ALPHABET,
+	copyTagOf,
 	copyTemplate,
+	createRequest,
 	makerServer,
+	oldTagOf,
 	readMakerConfig,
+	shutdownMaker,
 	type MakerConfig,
 } from "../gateway/maker.ts";
 
@@ -45,6 +49,8 @@ interface FakeContainer {
 interface Call {
 	method: string;
 	path: string;
+	/** The path as sent (not decoded), the version left out. */
+	raw: string;
 	query: Record<string, string>;
 	body: unknown;
 }
@@ -58,6 +64,9 @@ class FakeDocker {
 	/** Return a status to fail that call instead of playing it. */
 	failWith: ((call: Call) => number | null) | null = null;
 	delayMs: ((call: Call) => number) | null = null;
+	/** Stands in for the maker being killed: after this many changing calls, every call is cut off unplayed. */
+	deadAfter: number | null = null;
+	mutations = 0;
 	server: http.Server;
 	private seq = 0;
 
@@ -73,6 +82,7 @@ class FakeDocker {
 				const call: Call = {
 					method: req.method ?? "",
 					path: decodeURIComponent(url.pathname.slice(version.length)),
+					raw: url.pathname.slice(version.length),
 					query: Object.fromEntries(url.searchParams),
 					body: text ? JSON.parse(text) : undefined,
 				};
@@ -83,6 +93,11 @@ class FakeDocker {
 					res.end(out);
 				};
 				const play = () => {
+					if (this.deadAfter !== null && this.mutations >= this.deadAfter) {
+						req.socket.destroy();
+						return;
+					}
+					if (call.method !== "GET") this.mutations += 1;
 					const failure = this.failWith?.(call) ?? null;
 					if (failure) return reply(failure, { message: `injected failure ${failure}` });
 					const [status, data] = this.route(call);
@@ -175,7 +190,7 @@ class FakeDocker {
 			c.networks.add(b.HostConfig.NetworkMode as string);
 			return [201, { Id: c.Id, Warnings: [] }];
 		}
-		if ((m = /^\/containers\/([^/]+)(\/json|\/start|\/stop)?$/.exec(p))) {
+		if ((m = /^\/containers\/([^/]+)(\/json|\/start|\/stop|\/rename)?$/.exec(p))) {
 			const c = this.findContainer(m[1]!);
 			if (!c) return [404, { message: "No such container" }];
 			if (method === "GET" && m[2] === "/json") return [200, this.inspect(c)];
@@ -187,6 +202,11 @@ class FakeDocker {
 			if (method === "POST" && m[2] === "/stop") {
 				if (!c.State.Running) return [304];
 				c.State = { Status: "exited", Running: false };
+				return [204];
+			}
+			if (method === "POST" && m[2] === "/rename") {
+				if (this.findContainer(query.name!)) return [409, { message: "name in use" }];
+				c.Name = `/${query.name}`;
 				return [204];
 			}
 			if (method === "DELETE" && !m[2]) {
@@ -213,15 +233,15 @@ class FakeDocker {
 			if (method === "GET" && !m[2]) return [200, n];
 			if (method === "POST") {
 				const c = this.findContainer((body as { Container: string }).Container);
-				if (!c) return [404, { message: "No such container" }];
-				if (m[2] === "/connect") {
-					if (c.networks.has(n.Name)) return [403, { message: "already exists" }];
-					c.networks.add(n.Name);
-				} else c.networks.delete(n.Name);
+				if (!c) return [404, { message: `endpoint ${(body as { Container: string }).Container} not found` }];
+				// As Docker 29 answers: connecting twice is fine, disconnecting what isn't connected is a 500.
+				if (m[2] === "/connect") c.networks.add(n.Name);
+				else if (!c.networks.has(n.Name)) return [500, { message: `container ${c.Id} is not connected to the network ${n.Name}` }];
+				else c.networks.delete(n.Name);
 				return [200];
 			}
 			if (method === "DELETE" && !m[2]) {
-				if ([...this.containers.values()].some((c) => c.networks.has(n.Name))) return [403, { message: "active endpoints" }];
+				if ([...this.containers.values()].some((c) => c.State.Running && c.networks.has(n.Name))) return [403, { message: "active endpoints" }];
 				this.networks.delete(n.Name);
 				return [204];
 			}
@@ -307,11 +327,16 @@ function expectedBody(tag: string, image: string, secret: string, tz?: string) {
 			RestartPolicy: { Name: "unless-stopped" },
 			Privileged: false,
 			PublishAllPorts: false,
+			Init: true,
+			LogConfig: { Type: "json-file", Config: { "max-size": "10m", "max-file": "3" } },
 			NetworkMode: `lh-acct-${tag}-net`,
 		},
 		NetworkingConfig: { EndpointsConfig: { [`lh-acct-${tag}-net`]: {} } },
 	};
 }
+
+/** A call's first two look-ups: the leftovers of an interrupted swap. */
+const settleLines = (tag: string) => [`GET /containers/lh-acct-${tag}-old-running/json`, `GET /containers/lh-acct-${tag}-old-stopped/json`];
 
 function creates() {
 	return docker.calls.filter((c) => c.method === "POST" && c.path === "/containers/create");
@@ -368,16 +393,42 @@ describe("rules", () => {
 		assert.ok("error" in refused && !refused.error.includes("secret-but-short"));
 	});
 
-	test("the program refuses to start without a token", () => {
+	test("the program refuses to start without a token; maker.ts alone never starts", () => {
 		const env = { ...process.env, LH_MAKER_TOKEN: "", LH_CADDY_CONTAINER: "caddy", PORT: "0", DOCKER_SOCKET: path.join(dir, "none.sock") };
-		const run = spawnSync(process.execPath, ["--import", "tsx", path.join(import.meta.dirname, "..", "gateway", "maker.ts")], {
-			env,
-			encoding: "utf8",
-			timeout: 60_000,
-		});
-		assert.equal(run.status, 1);
-		assert.match(run.stderr, /maker: not starting: LH_MAKER_TOKEN/);
-		assert.doesNotMatch(run.stdout, /listening/);
+		const run = (file: string) =>
+			spawnSync(process.execPath, ["--import", "tsx", path.join(import.meta.dirname, "..", "gateway", file)], { env, encoding: "utf8", timeout: 60_000 });
+		const entry = run("maker-main.ts");
+		assert.equal(entry.status, 1);
+		assert.match(entry.stderr, /maker: not starting: LH_MAKER_TOKEN/);
+		assert.doesNotMatch(entry.stdout, /listening/);
+		const library = run("maker.ts");
+		assert.equal(library.status, 0);
+		assert.equal(library.stdout + library.stderr, "", "importing or running maker.ts starts nothing");
+	});
+
+	test("names: a copy, a swap's leftover, nothing else", () => {
+		assert.equal(copyTagOf("/lh-acct-ABC"), "ABC");
+		assert.equal(copyTagOf("lh-acct-ABC"), "ABC");
+		for (const name of ["/lh-acct-ABC-old-running", "/lh-acct-ABC-old-stopped", "/lh-acct-ABC-net", "/lh-acct-abc", "/lh-acct-ILU", "/x/lh-acct-ABC"]) {
+			assert.equal(copyTagOf(name), null, name);
+		}
+		assert.deepEqual(oldTagOf("/lh-acct-ABC-old-running"), { tag: "ABC", wasRunning: true });
+		assert.deepEqual(oldTagOf("/lh-acct-ABC-old-stopped"), { tag: "ABC", wasRunning: false });
+		for (const name of ["/lh-acct-ABC", "/lh-acct-ABC-old", "/lh-acct-ABC-old-paused", "/lh-acct-abc-old-running"]) assert.equal(oldTagOf(name), null, name);
+	});
+
+	test("the body: only tag, and start off only when literally false", () => {
+		assert.deepEqual(createRequest('{"tag":"ABC"}'), { tag: "ABC", start: true });
+		assert.deepEqual(createRequest('{"tag":"ABC","start":false}'), { tag: "ABC", start: false });
+		for (const start of ["true", "false", 0, null, "", [], {}]) {
+			assert.deepEqual(createRequest(JSON.stringify({ tag: "ABC", start })), { tag: "ABC", start: true }, JSON.stringify(start));
+		}
+	});
+
+	test("an image reference keeps its slashes in the path", () => {
+		assert.equal(imageRefPath("ghcr.io/owner/name:dev"), "ghcr.io/owner/name%3Adev");
+		assert.equal(imageRefPath("localhost:5000/a/b@sha256:" + "a".repeat(64)), "localhost%3A5000/a/b%40sha256%3A" + "a".repeat(64));
+		assert.equal(imageRefPath("sha256:" + "b".repeat(64)), "sha256%3A" + "b".repeat(64));
 	});
 
 	test("the template refuses a bad tag or secret", () => {
@@ -415,6 +466,7 @@ describe("POST /copies", () => {
 		assert.match(secret, /^[A-Za-z0-9_-]{43}$/);
 		assert.equal(Buffer.from(secret, "base64url").length, 32);
 		assert.deepEqual(docker.lines(), [
+			...settleLines("K7Q"),
 			"GET /images/lh-image:test/json",
 			"GET /networks/lh-acct-K7Q-net",
 			"POST /networks/create",
@@ -519,16 +571,19 @@ describe("POST /copies", () => {
 		assert.equal(second.status, 200);
 		assert.notEqual(second.body.gateSecret, first.body.gateSecret);
 		assert.deepEqual(docker.lines(), [
+			...settleLines("ABC"),
 			"GET /images/lh-image:test/json",
 			"GET /networks/lh-acct-ABC-net",
 			"GET /volumes/lh-acct-ABC-data",
 			"GET /containers/lh-acct-ABC/json",
+			`POST /containers/${firstId}/rename`,
 			`POST /containers/${firstId}/stop`,
-			`DELETE /containers/${firstId}`,
 			"POST /containers/create",
 			"GET /containers/caddy/json",
 			"POST /containers/lh-acct-ABC/start",
+			`DELETE /containers/${firstId}`,
 		]);
+		assert.deepEqual(docker.calls[6]!.query, { name: "lh-acct-ABC-old-running" });
 		assert.deepEqual(creates()[0]!.body, expectedBody("ABC", OLD_IMAGE, second.body.gateSecret as string));
 		assert.equal(docker.volumes.size, 1);
 	});
@@ -554,8 +609,9 @@ describe("POST /copies", () => {
 		assert.equal(a.status, 200);
 		assert.equal(b.status, 200);
 		const lines = docker.lines();
-		// The stop's own look-up comes only after the create has started its copy.
-		assert.equal(lines.lastIndexOf("GET /containers/lh-acct-ABC/json"), lines.indexOf("POST /containers/lh-acct-ABC/start") + 1, lines.join("\n"));
+		// The stop's first look-up comes only after the re-create's last step.
+		const firstDone = lines.findIndex((l) => l.startsWith("DELETE /containers/"));
+		assert.ok(firstDone > 0 && lines.lastIndexOf(settleLines("ABC")[0]!) === firstDone + 1, lines.join("\n"));
 		assert.equal(docker.findContainer("lh-acct-ABC")!.State.Running, false);
 	});
 
@@ -586,7 +642,7 @@ describe("POST /copies", () => {
 		await startMaker({ image: null });
 		const r = await call("POST", "/copies", { tag: "ABC" });
 		assert.equal(r.status, 200);
-		assert.equal(docker.lines()[0], "GET /containers/maker-self/json");
+		assert.equal(docker.lines()[2], "GET /containers/maker-self/json");
 		assert.equal((creates()[0]!.body as { Image: string }).Image, NEW_IMAGE);
 	});
 });
@@ -599,11 +655,12 @@ describe("stop, start, remove", () => {
 		const id = docker.findContainer("lh-acct-ABC")!.Id;
 		docker.calls = [];
 		assert.deepEqual((await call("POST", "/copies/ABC/stop")).body, { tag: "ABC", state: "stopped" });
-		assert.deepEqual(docker.lines(), ["GET /containers/lh-acct-ABC/json", `POST /containers/${id}/stop`]);
-		assert.equal(docker.calls[1]!.query.t, "10");
+		assert.deepEqual(docker.lines(), [...settleLines("ABC"), "GET /containers/lh-acct-ABC/json", `POST /containers/${id}/stop`]);
+		assert.equal(docker.calls[3]!.query.t, "10");
 		docker.calls = [];
 		assert.deepEqual((await call("POST", "/copies/ABC/start")).body, { tag: "ABC", state: "running" });
 		assert.deepEqual(docker.lines(), [
+			...settleLines("ABC"),
 			"GET /containers/lh-acct-ABC/json",
 			"GET /networks/lh-acct-ABC-net",
 			"GET /containers/caddy/json",
@@ -616,7 +673,8 @@ describe("stop, start, remove", () => {
 		assert.deepEqual((await call("POST", "/copies/XYZ/start")).body, { code: "no_copy" });
 		assert.equal((await call("POST", "/copies/XYZ/start")).status, 404);
 		assert.equal((await call("POST", "/copies/XYZ/stop")).status, 404);
-		assert.deepEqual(docker.lines(), ["GET /containers/lh-acct-XYZ/json", "GET /containers/lh-acct-XYZ/json", "GET /containers/lh-acct-XYZ/json"]);
+		const one = [...settleLines("XYZ"), "GET /containers/lh-acct-XYZ/json"];
+		assert.deepEqual(docker.lines(), [...one, ...one, ...one]);
 	});
 
 	test("removing a copy keeps its volume, and is idempotent", async () => {
@@ -625,19 +683,21 @@ describe("stop, start, remove", () => {
 		docker.calls = [];
 		assert.equal((await call("DELETE", "/copies/ABC")).status, 200);
 		assert.deepEqual(docker.lines(), [
+			...settleLines("ABC"),
 			"GET /containers/lh-acct-ABC/json",
 			`POST /containers/${id}/stop`,
 			`DELETE /containers/${id}`,
 			"GET /networks/lh-acct-ABC-net",
+			"GET /containers/caddy/json",
 			"POST /networks/lh-acct-ABC-net/disconnect",
 			"DELETE /networks/lh-acct-ABC-net",
 		]);
-		assert.deepEqual(docker.calls[4]!.body, { Container: "caddy", Force: true });
+		assert.deepEqual(docker.calls[7]!.body, { Container: "caddy", Force: true });
 		assert.ok(docker.volumes.has("lh-acct-ABC-data"));
 		assert.equal(docker.networks.size, 0);
 		docker.calls = [];
 		assert.equal((await call("DELETE", "/copies/ABC")).status, 200);
-		assert.deepEqual(docker.lines(), ["GET /containers/lh-acct-ABC/json", "GET /networks/lh-acct-ABC-net"]);
+		assert.deepEqual(docker.lines(), [...settleLines("ABC"), "GET /containers/lh-acct-ABC/json", "GET /networks/lh-acct-ABC-net"]);
 	});
 
 	test("the volume goes only once no container uses it", async () => {
@@ -695,7 +755,7 @@ describe("GET /copies and reconcile", () => {
 		docker.delayMs = (c) => (c.path === "/containers/create" ? 15 : 0);
 		const r = await call("POST", "/reconcile");
 		assert.equal(r.status, 200);
-		assert.deepEqual(r.body, { updated: ["AAA", "BBB", "DDD"], failed: ["CCC"], unchanged: 0 });
+		assert.deepEqual(r.body, { recovered: [], updated: ["AAA", "BBB", "DDD"], failed: ["CCC"], unchanged: 0 });
 		for (const tag of ["AAA", "BBB", "DDD"]) {
 			const c = docker.findContainer(`lh-acct-${tag}`)!;
 			assert.equal(c.Image, NEW_IMAGE, tag);
@@ -713,10 +773,17 @@ describe("GET /copies and reconcile", () => {
 		const order = sequence.filter((t, i) => t !== sequence[i - 1]);
 		assert.deepEqual(order, ["AAA", "BBB", "CCC", "DDD"], sequence.join(","));
 		assert.ok(logs.some((l) => /update CCC: failed \(docker_error 500/.test(l)));
-		// A second pass updates nothing.
+		// The failed one was put back as it was: its container, its image, its secret, running.
+		const ccc = docker.findContainer("lh-acct-CCC")!;
+		assert.equal(ccc.Image, OLD_IMAGE);
+		assert.equal(ccc.State.Running, true);
+		assert.equal(secretOf("lh-acct-CCC"), secrets.CCC);
+		assert.ok(![...docker.containers.values()].some((c) => c.Name.includes("-old")));
+		// The next pass brings it over.
 		docker.failWith = null;
 		const again = await call("POST", "/reconcile");
-		assert.deepEqual(again.body, { updated: [], failed: [], unchanged: 3 });
+		assert.deepEqual(again.body, { recovered: [], updated: ["CCC"], failed: [], unchanged: 3 });
+		assert.equal(secretOf("lh-acct-CCC"), secrets.CCC);
 	});
 
 	test("a copy without a valid secret is left alone and logged", async () => {
@@ -725,7 +792,7 @@ describe("GET /copies and reconcile", () => {
 		});
 		docker.images.set("lh-image:test", NEW_IMAGE);
 		const r = await call("POST", "/reconcile");
-		assert.deepEqual(r.body, { updated: [], failed: ["ABC"], unchanged: 0 });
+		assert.deepEqual(r.body, { recovered: [], updated: [], failed: ["ABC"], unchanged: 0 });
 		assert.equal(docker.findContainer("lh-acct-ABC")!.Image, OLD_IMAGE);
 		assert.ok(logs.some((l) => l.includes("update ABC: failed (no_secret)")));
 	});
@@ -736,7 +803,7 @@ describe("GET /copies and reconcile", () => {
 		docker.findContainer("caddy")!.networks.clear();
 		docker.calls = [];
 		const r = await call("POST", "/reconcile");
-		assert.deepEqual(r.body, { updated: [], failed: [], unchanged: 2 });
+		assert.deepEqual(r.body, { recovered: [], updated: [], failed: [], unchanged: 2 });
 		assert.deepEqual(
 			docker.lines().filter((l) => l.endsWith("/connect")),
 			["POST /networks/lh-acct-AAA-net/connect", "POST /networks/lh-acct-BBB-net/connect"],
@@ -780,5 +847,259 @@ describe("GET /copies and reconcile", () => {
 		const all = logs.join("\n");
 		assert.ok(!all.includes(secret) && !all.includes(TOKEN), all);
 		assert.match(all, /\[redacted\]/);
+	});
+});
+
+// ─── Review fixes: the recoverable swap, shutdown, partial states ─────────────
+
+function copiesOf(tag: string) {
+	return [...docker.containers.values()].filter((c) => c.Name === `/lh-acct-${tag}` || c.Name.startsWith(`/lh-acct-${tag}-old`));
+}
+
+/** A fresh maker on the same Docker, as after the process was killed and started again. */
+function freshMaker() {
+	return new Maker(config, DockerClient.overSocket(docker.socket), (line) => logs.push(line));
+}
+
+describe("a swap killed at any instant", () => {
+	for (const wasRunning of [true, false]) {
+		test(`an update, the copy ${wasRunning ? "running" : "stopped"}: finished at the next start`, async () => {
+			// rename, stop, create, start (when running), remove: at most 5 changing calls; 7 covers "after the end".
+			const cutOff: string[] = [];
+			for (let k = 0; k <= 7; k += 1) {
+				docker.containers.clear();
+				docker.networks.clear();
+				docker.volumes.clear();
+				docker.addContainer("caddy", "sha256:" + "d".repeat(64));
+				docker.images.set("lh-image:test", OLD_IMAGE);
+				docker.mutations = 0;
+				docker.deadAfter = null;
+				const secret = (await call("POST", "/copies", { tag: "ABC", start: wasRunning })).body.gateSecret as string;
+				docker.images.set("lh-image:test", NEW_IMAGE);
+				docker.mutations = 0;
+				docker.deadAfter = k;
+				await freshMaker()
+					.reconcile()
+					.catch(() => undefined);
+				assert.ok(copiesOf("ABC").length >= 1, `k=${k}: never without a container`);
+				cutOff.push(copiesOf("ABC").map((c) => `${c.Name}:${c.State.Running ? "up" : "down"}`).join("+"));
+				docker.deadAfter = null;
+				const result = await freshMaker().reconcile();
+				const left = copiesOf("ABC");
+				assert.equal(left.length, 1, `k=${k}: ${left.map((c) => c.Name).join(",")}`);
+				assert.equal(left[0]!.Name, "/lh-acct-ABC", `k=${k}`);
+				assert.equal(left[0]!.Image, NEW_IMAGE, `k=${k}`);
+				assert.equal(left[0]!.State.Running, wasRunning, `k=${k}: running iff it was`);
+				assert.equal(secretOf("lh-acct-ABC"), secret, `k=${k}: same secret`);
+				assert.deepEqual(left[0]!.body, expectedBody("ABC", NEW_IMAGE, secret), `k=${k}`);
+				assert.ok(docker.findContainer("caddy")!.networks.has("lh-acct-ABC-net"), `k=${k}`);
+				assert.deepEqual(result.failed, [], `k=${k}`);
+			}
+			// The kills landed in every phase: before, renamed and still up, stopped, both there, done.
+			const up = wasRunning ? "up" : "down";
+			assert.deepEqual(cutOff.slice(0, 5), [
+				`/lh-acct-ABC:${up}`,
+				`/lh-acct-ABC-old-${wasRunning ? "running" : "stopped"}:${up}`,
+				`/lh-acct-ABC-old-${wasRunning ? "running" : "stopped"}:down`,
+				`/lh-acct-ABC-old-${wasRunning ? "running" : "stopped"}:down+/lh-acct-ABC:down`,
+				wasRunning ? "/lh-acct-ABC-old-running:down+/lh-acct-ABC:up" : "/lh-acct-ABC:down",
+			]);
+		});
+	}
+
+	test("a re-create (POST /copies) killed at any instant still leaves one container, running", async () => {
+		for (let k = 0; k <= 7; k += 1) {
+			docker.containers.clear();
+			docker.networks.clear();
+			docker.volumes.clear();
+			docker.addContainer("caddy", "sha256:" + "d".repeat(64));
+			docker.mutations = 0;
+			docker.deadAfter = null;
+			await call("POST", "/copies", { tag: "ABC" });
+			docker.mutations = 0;
+			docker.deadAfter = k;
+			await freshMaker()
+				.createCopy("ABC")
+				.catch(() => undefined);
+			docker.deadAfter = null;
+			await freshMaker().reconcile();
+			const left = copiesOf("ABC");
+			assert.equal(left.length, 1, `k=${k}`);
+			assert.equal(left[0]!.Name, "/lh-acct-ABC");
+			assert.equal(left[0]!.State.Running, true, `k=${k}`);
+			assert.match(secretOf("lh-acct-ABC"), /^[A-Za-z0-9_-]{43}$/);
+		}
+	});
+
+	test("a leftover is finished by the next call for its tag too", async () => {
+		const secret = (await call("POST", "/copies", { tag: "ABC" })).body.gateSecret as string;
+		docker.findContainer("lh-acct-ABC")!.Name = "/lh-acct-ABC-old-running";
+		assert.deepEqual(await call("GET", "/copies").then((r) => r.body), [], "a leftover is not listed as a copy");
+		assert.equal((await call("POST", "/copies/ABC/start")).status, 200);
+		assert.equal(copiesOf("ABC").length, 1);
+		assert.equal(secretOf("lh-acct-ABC"), secret);
+		assert.equal(docker.findContainer("lh-acct-ABC")!.State.Running, true);
+	});
+
+	test("Docker's own failure part-way is rolled back to the old container", async () => {
+		const secret = (await call("POST", "/copies", { tag: "ABC" })).body.gateSecret as string;
+		const id = docker.findContainer("lh-acct-ABC")!.Id;
+		docker.findContainer("caddy")!.networks.clear();
+		docker.failWith = (c) => (c.path.endsWith("/connect") ? 500 : null);
+		const r = await call("POST", "/copies", { tag: "ABC" });
+		assert.deepEqual([r.status, r.body], [502, { code: "docker_error" }]);
+		const left = copiesOf("ABC");
+		assert.equal(left.length, 1);
+		assert.equal(left[0]!.Id, id, "the old container, back under its name");
+		assert.equal(left[0]!.Name, "/lh-acct-ABC");
+		assert.equal(left[0]!.State.Running, true);
+		assert.equal(secretOf("lh-acct-ABC"), secret);
+		// Caddy was never attached: removing it later doesn't try to disconnect.
+		docker.failWith = null;
+		docker.calls = [];
+		assert.equal((await call("DELETE", "/copies/ABC")).status, 200);
+		assert.ok(!docker.lines().some((l) => l.endsWith("/disconnect")));
+		assert.equal(docker.networks.size, 0);
+	});
+});
+
+describe("shutdown", () => {
+	test("a signal during a pass waits for the swap under way and starts no other", async () => {
+		for (const tag of ["AAA", "BBB"]) await call("POST", "/copies", { tag });
+		docker.images.set("lh-image:test", NEW_IMAGE);
+		docker.delayMs = (c) => (c.path === "/containers/create" ? 150 : 0);
+		docker.calls = [];
+		const pass = maker.reconcile().catch((e: unknown) => e);
+		while (!docker.calls.some((c) => c.path === "/containers/create")) await new Promise((r) => setTimeout(r, 2));
+		let done = false;
+		const stopping = shutdownMaker(server, maker, 10_000).then((v) => {
+			done = true;
+			return v;
+		});
+		await new Promise((r) => setTimeout(r, 50));
+		assert.equal(done, false, "still waiting while the swap runs");
+		assert.equal(await stopping, true);
+		await pass;
+		const aaa = docker.findContainer("lh-acct-AAA")!;
+		assert.equal(aaa.Image, NEW_IMAGE);
+		assert.equal(aaa.State.Running, true);
+		assert.equal(docker.findContainer("lh-acct-BBB")!.Image, OLD_IMAGE, "no new swap after the signal");
+		assert.ok(!docker.calls.some((c) => c.query.name?.startsWith("lh-acct-BBB")));
+		assert.equal(copiesOf("AAA").length + copiesOf("BBB").length, 2);
+		await assert.rejects(maker.createCopy("CCC"), /shutting_down/);
+		await assert.rejects(maker.reconcile(), /shutting_down/);
+	});
+
+	test("SIGTERM to the program (maker-main.ts) waits, then exits 0", async () => {
+		for (const tag of ["AAA", "BBB"]) await call("POST", "/copies", { tag });
+		docker.images.set("lh-image:test", NEW_IMAGE);
+		docker.delayMs = (c) => (c.path === "/containers/create" ? 400 : 0);
+		docker.calls = [];
+		const child = spawn(process.execPath, ["--import", "tsx", path.join(import.meta.dirname, "..", "gateway", "maker-main.ts")], {
+			env: { ...process.env, LH_MAKER_TOKEN: TOKEN, LH_IMAGE: "lh-image:test", LH_CADDY_CONTAINER: "caddy", PORT: "0", DOCKER_SOCKET: docker.socket },
+			stdio: ["ignore", "pipe", "pipe"],
+		});
+		let output = "";
+		child.stdout.on("data", (d: Buffer) => (output += d.toString()));
+		child.stderr.on("data", (d: Buffer) => (output += d.toString()));
+		const exited = new Promise<number | null>((resolve) => child.on("exit", (c) => resolve(c)));
+		const deadline = Date.now() + 60_000;
+		while (!docker.calls.some((c) => c.path === "/containers/create")) {
+			assert.ok(Date.now() < deadline, output);
+			await new Promise((r) => setTimeout(r, 5));
+		}
+		child.kill("SIGTERM");
+		assert.equal(await exited, 0, output);
+		assert.match(output, /stopping: no new calls/);
+		assert.match(output, /maker: stopped\./);
+		const first = docker.calls.find((c) => c.path === "/containers/create")!.query.name!;
+		const other = first === "lh-acct-AAA" ? "lh-acct-BBB" : "lh-acct-AAA";
+		assert.equal(docker.findContainer(first)!.Image, NEW_IMAGE);
+		assert.equal(docker.findContainer(first)!.State.Running, true);
+		assert.equal(docker.findContainer(other)!.Image, OLD_IMAGE);
+		assert.equal(docker.findContainer(other)!.State.Running, true);
+		assert.ok(![...docker.containers.values()].some((c) => c.Name.includes("-old")));
+		assert.ok(!output.includes(TOKEN));
+	});
+});
+
+describe("partial states and the new body field", () => {
+	test("{tag, start: false} makes everything but leaves the copy stopped", async () => {
+		const r = await call("POST", "/copies", { tag: "ABC", start: false, image: "evil" });
+		assert.equal(r.status, 200);
+		assert.ok(!docker.lines().some((l) => l.endsWith("/start")));
+		assert.equal(docker.findContainer("lh-acct-ABC")!.State.Running, false);
+		assert.deepEqual(creates()[0]!.body, expectedBody("ABC", OLD_IMAGE, r.body.gateSecret as string));
+		assert.ok(docker.findContainer("caddy")!.networks.has("lh-acct-ABC-net"));
+		await call("POST", "/copies", { tag: "ABD", start: "false" });
+		assert.equal(docker.findContainer("lh-acct-ABD")!.State.Running, true, "only a literal false");
+	});
+
+	test("a copy whose container is missing is absent from GET /copies; start says 404", async () => {
+		await call("POST", "/copies", { tag: "ABC" });
+		await call("POST", "/copies", { tag: "ABD" });
+		docker.containers.delete(docker.findContainer("lh-acct-ABC")!.Id);
+		const list = (await call("GET", "/copies")).body as Array<{ tag: string }>;
+		assert.deepEqual(
+			list.map((c) => c.tag),
+			["ABD"],
+		);
+		assert.equal((await call("POST", "/copies/ABC/start")).status, 404);
+	});
+
+	test("DELETE /copies from any partial state, and again", async () => {
+		const states: Array<[string, () => void]> = [
+			["Caddy re-created (not attached)", () => docker.findContainer("caddy")!.networks.clear()],
+			["container gone", () => docker.containers.delete(docker.findContainer("lh-acct-ABC")!.Id)],
+			["network gone", () => {
+				docker.networks.clear();
+				docker.findContainer("caddy")!.networks.clear();
+			}],
+			["Caddy container missing", () => docker.containers.delete(docker.findContainer("caddy")!.Id)],
+			["a swap's leftover", () => {
+				docker.findContainer("lh-acct-ABC")!.Name = "/lh-acct-ABC-old-stopped";
+			}],
+		];
+		for (const [label, breakIt] of states) {
+			docker.containers.clear();
+			docker.networks.clear();
+			docker.addContainer("caddy", "sha256:" + "d".repeat(64));
+			await call("POST", "/copies", { tag: "ABC" });
+			breakIt();
+			const first = await call("DELETE", "/copies/ABC");
+			assert.equal(first.status, 200, `${label}: ${logs.join("\n")}`);
+			assert.equal(copiesOf("ABC").length, 0, label);
+			assert.equal(docker.networks.size, 0, label);
+			assert.equal((await call("DELETE", "/copies/ABC")).status, 200, `${label}, again`);
+			assert.ok(docker.volumes.has("lh-acct-ABC-data"), label);
+		}
+	});
+
+	test("a retry after a removal that failed part-way", async () => {
+		await call("POST", "/copies", { tag: "ABC" });
+		let once = true;
+		docker.failWith = (c) => {
+			if (c.method === "DELETE" && c.path.startsWith("/networks/") && once) {
+				once = false;
+				return 500;
+			}
+			return null;
+		};
+		assert.equal((await call("DELETE", "/copies/ABC")).status, 502);
+		assert.equal(docker.findContainer("caddy")!.networks.has("lh-acct-ABC-net"), false, "Caddy already detached");
+		docker.calls = [];
+		assert.equal((await call("DELETE", "/copies/ABC")).status, 200);
+		assert.ok(!docker.lines().some((l) => l.endsWith("/disconnect")), "no disconnect of what isn't connected");
+		assert.equal(docker.networks.size, 0);
+	});
+
+	test("an LH_IMAGE with a registry, slashes and a tag", async () => {
+		docker.images.set("ghcr.io/owner/name:dev", NEW_IMAGE);
+		await startMaker({ image: "ghcr.io/owner/name:dev" });
+		const r = await call("POST", "/copies", { tag: "ABC" });
+		assert.equal(r.status, 200);
+		const inspect = docker.calls.find((c) => c.path.startsWith("/images/"))!;
+		assert.equal(inspect.raw, "/images/ghcr.io/owner/name%3Adev/json");
+		assert.equal((creates()[0]!.body as { Image: string }).Image, NEW_IMAGE);
 	});
 });
