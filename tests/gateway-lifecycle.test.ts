@@ -13,6 +13,7 @@
 
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import http from "node:http";
 import * as os from "node:os";
 import * as path from "node:path";
 import { after, beforeEach, describe, it } from "node:test";
@@ -293,5 +294,76 @@ describe("secrets", () => {
 		for (const line of h.logs) for (const value of secrets) assert.ok(!line.includes(value), line);
 		assert.ok(h.logs.length > 0, "something was logged");
 		assert.equal(fs.statSync(h.deps.store.file).mode & 0o777, 0o600);
+	});
+});
+
+describe("findings from the real stack", () => {
+	it("1: the owner's claim gives four recovery codes, and one of them resets the owner's password", async () => {
+		const fresh = harness(TMP);
+		const lines: string[] = [];
+		(await import("../gateway/main.ts")).announceSetupCode(fresh.deps.store, (l) => lines.push(l));
+		const claim = await fresh.call(fresh.post("/api/server-auth/setup", { code: lines[1]!.split(": ")[1]!, name: "Boss", password: PASSWORD }));
+		const { codes } = await claim.json() as { codes: string[] };
+		assert.equal(codes.length, 4);
+		const r = await fresh.call(fresh.post("/api/server-auth/reset", { name: "boss", code: codes[3], password: "the owner's new one" }));
+		assert.equal(r.status, 200);
+	});
+
+	it("2: several Cookie lines are joined with '; '; two Authorization lines are refused (400)", async () => {
+		const { toHeaders, startGateway } = await import("../gateway/main.ts");
+		assert.equal(toHeaders(["Cookie", "a=1", "Host", "x", "cookie", "__Host-lh_session=t"]).get("cookie"), "a=1; __Host-lh_session=t");
+		assert.throws(() => toHeaders(["Authorization", "Bearer a", "authorization", "Bearer b"]));
+		const owner = await h.signIn("Boss", PASSWORD);
+		const gateway = await startGateway(h.deps.config, { relay: h.deps.relay, log: () => {}, loop: false, listen: false });
+		await new Promise<void>((resolve) => gateway.server.listen(0, "127.0.0.1", resolve));
+		try {
+			const port = (gateway.server.address() as import("node:net").AddressInfo).port;
+			const raw = (headers: Array<[string, string]>) => new Promise<number>((resolve, reject) => {
+				const req = http.request({ host: "127.0.0.1", port, path: "/gate", method: "GET", headers: headers.flat() as unknown as http.OutgoingHttpHeaders }, (res) => { res.resume(); resolve(res.statusCode!); });
+				req.on("error", reject);
+				req.end();
+			});
+			const base: Array<[string, string]> = [["x-forwarded-method", "GET"], ["x-forwarded-uri", "/chat/1"], ["host", "learn.example.com"]];
+			assert.equal(await raw([...base, ["cookie", "lh_server=1"], ["cookie", owner]]), 200, "the session in the second Cookie line");
+			assert.equal(await raw([...base, ["cookie", owner], ["cookie", owner]]), 303, "named twice: none");
+			const sync: Array<[string, string]> = [["x-forwarded-method", "POST"], ["x-forwarded-uri", "/api/sync/hello"], ["host", "learn.example.com"]];
+			assert.equal(await raw([...sync, ["authorization", `Bearer ${"A".repeat(43)}`]]), 200);
+			assert.equal(await raw([...sync, ["authorization", `Bearer ${"A".repeat(43)}`], ["authorization", `Bearer ABC${"k".repeat(43)}`]]), 400);
+		} finally {
+			await gateway.stop();
+		}
+	});
+
+	it("3: /gate is matched on its path; its own query (Caddy appends the request's) is never read", async () => {
+		const owner = await h.signIn("Boss", PASSWORD);
+		const ask = (gatePath: string, uri: string) => handleRequest(h.get(gatePath, { "x-forwarded-method": "GET", "x-forwarded-uri": uri, cookie: owner }), h.deps, ALL_ROUTES);
+		for (const gatePath of ["/gate?z=2", "/gate?anything", "/gate?x=/../..", "/gate?x=%2e%2e%2fapi%2finternal"]) {
+			const a = await ask(gatePath, "/chat/1");
+			assert.equal(a.status, 200, gatePath);
+			assert.equal(a.headers.get("x-lh-scope"), "session");
+			assert.equal((await ask(gatePath, "/api/internal/unpair-all")).status, 404, gatePath);
+			assert.equal((await ask(gatePath, "/_next/a%23/../../api/chats")).status, 400, gatePath);
+		}
+	});
+
+	it("4: the lockout's address comes from X-Forwarded-For only, never X-Real-IP or Forwarded", async () => {
+		for (let i = 0; i < 5; i += 1) {
+			await h.call(h.post("/api/server-auth/login", { name: "Boss", password: "wrong wrong wrong" }, { "x-real-ip": `198.51.100.${i}`, forwarded: `for=198.51.100.${i}` }));
+		}
+		assert.deepEqual(Object.keys(h.state().lockouts), ["203.0.113.7"]);
+		const blocked = await h.call(h.post("/api/server-auth/login", { name: "Boss", password: PASSWORD }, { "x-real-ip": "192.0.2.1", forwarded: "for=192.0.2.1" }));
+		assert.equal(blocked.status, 429);
+	});
+
+	it("5: the relay always names a client for the copy: the real one on a pairing, 'gateway' on unpair-all", async () => {
+		const { createRelay } = await import("../gateway/copies.ts");
+		const seen: Headers[] = [];
+		const relay = createRelay({ relayUrl: "http://caddy:9200", relayToken: RELAY_TOKEN }, async (_input, init) => { seen.push(new Headers(init?.headers)); return Response.json({ ok: true }); });
+		await relay.send({ upstream: "lh-acct-ABC:3000", gateSecret: "s".repeat(43), scope: "internal", method: "POST", path: "/api/internal/unpair-all", body: "{}" });
+		await relay.send({ upstream: "lh-acct-ABC:3000", gateSecret: "s".repeat(43), scope: "sync", clientAddress: "203.0.113.7", method: "POST", path: "/api/sync/pair", headers: { "x-lh-scope": "session", "x-lh-client-addr": "1.1.1.1" }, body: "{}" });
+		assert.equal(seen[0]!.get("x-lh-client-addr"), "gateway");
+		assert.equal(seen[0]!.get("x-lh-scope"), "internal");
+		assert.equal(seen[1]!.get("x-lh-client-addr"), "203.0.113.7", "a header passed in can't override it");
+		assert.equal(seen[1]!.get("x-lh-scope"), "sync");
 	});
 });

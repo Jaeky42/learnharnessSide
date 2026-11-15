@@ -20,7 +20,7 @@ export interface GatewayConfig {
 	/** Caddy's internal relay to a copy, and its token. */
 	relayUrl: string;
 	relayToken: string;
-	/** The maker (unused in slices 1 and 2). */
+	/** The maker (LH_MAKER_URL, LH_MAKER_TOKEN); without them no copy can be made (invites answer 503). */
 	makerUrl: string | null;
 	makerToken: string | null;
 	/** LH_TRUST_PROXY=1: the client's address is the last X-Forwarded-For entry. */

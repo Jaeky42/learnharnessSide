@@ -212,7 +212,8 @@ export const setupRoute: Handler = (request, deps) => guarded(async () => {
 		const claimed = claimOwner(state, { code: body.code, name: body.name, password: body.password, upstream: deps.config.ownerUpstream, gateSecret: deps.config.ownerGateSecret }, address, now);
 		if (claimed.ok) {
 			const created = createAccountSession(claimed.state, claimed.account.id, label, now);
-			return { state: created.state, result: { status: 200, cookies: signedInCookies(created.token, claimed.account), clearSite: true } };
+			// The recovery codes, once: the setup page shows them (as the invite page does).
+			return { state: created.state, result: { status: 200, cookies: signedInCookies(created.token, claimed.account), body: { codes: claimed.codes }, clearSite: true } };
 		}
 		const keep = claimed.state === state ? null : claimed.state;
 		switch (claimed.code) {

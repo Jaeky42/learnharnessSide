@@ -213,6 +213,10 @@ describe("first start", () => {
 		assert.ok(verifyPassword(PASSWORD, claimed.account.password));
 		assert.equal(claimed.state.setupCodeHash, null);
 		assert.ok(acc.hasOwner(claimed.state));
+		// The owner gets four recovery codes too (found on the real stack): hashes stored, the codes once.
+		assert.equal(claimed.codes.length, acc.RECOVERY_CODE_COUNT);
+		assert.deepEqual(claimed.account.recoveryCodes, claimed.codes.map((c) => setupCodeHash(c)));
+		for (const c of claimed.codes) assert.ok(!JSON.stringify(claimed.state).includes(c));
 		refused(acc.claimOwner(deepFreeze(claimed.state), input, ADDR, NOW), "already-set-up");
 		refused(acc.issueSetupCode(claimed.state), "owner-exists");
 	});

@@ -32,6 +32,8 @@ import { copyOf, type RelayScope } from "./gate.ts";
 import type { GatewayStore } from "./state.ts";
 
 export const RELAY_TIMEOUT_MS = 15_000;
+/** The client address the copy sees for the gateway's own calls (unpair-all): never empty. */
+export const GATEWAY_CLIENT_ADDR = "gateway";
 /** The most of a copy's or the maker's answer the gateway reads. */
 export const ANSWER_LIMIT_BYTES = 64 * 1024;
 
@@ -71,7 +73,7 @@ const UPSTREAM = /^[A-Za-z0-9.-]+:\d{1,5}$/;
 export interface RelayRequest {
 	upstream: string;
 	gateSecret: string;
-	/** The real client's address; omitted for the gateway's own calls. */
+	/** The real client's address; omitted for the gateway's own calls (GATEWAY_CLIENT_ADDR is sent). */
 	clientAddress?: string;
 	method: "GET" | "POST";
 	/** Why this call may reach the copy (X-LH-Scope). */
@@ -97,7 +99,8 @@ export function createRelay(config: Pick<GatewayConfig, "relayUrl" | "relayToken
 			headers.set("x-lh-upstream", request.upstream);
 			headers.set("x-lh-gate", request.gateSecret);
 			headers.set("x-lh-scope", request.scope);
-			if (request.clientAddress) headers.set("x-lh-client-addr", request.clientAddress);
+			// Caddy's relay turns this into the copy's X-Forwarded-For; the gateway's own calls name themselves.
+			headers.set("x-lh-client-addr", request.clientAddress || GATEWAY_CLIENT_ADDR);
 			return fetchImpl(`${config.relayUrl}${request.path}`, {
 				method: request.method,
 				headers,

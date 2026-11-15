@@ -158,6 +158,10 @@ describe("the first start", () => {
 		}
 		assert.ok(html.includes(JSON.stringify(words.PASSWORDS_DONT_MATCH)));
 		assert.ok(html.includes(JSON.stringify(words.USE_AT_LEAST)));
+		// After the claim: the same recovery-codes page as after an invite.
+		assert.ok(html.includes(pages.recoveryCodesView()));
+		for (const text of [words.RECOVERY_PAGE_TEXT.title, words.RECOVERY_PAGE_TEXT.body, words.RECOVERY_PAGE_TEXT.copy, words.RECOVERY_PAGE_TEXT.continue]) assert.ok(html.includes(pages.jsString(text)), text);
+		for (const forbidden of ["localStorage", "sessionStorage", "document.cookie", "history.pushState"]) assert.ok(!html.includes(forbidden), forbidden);
 	});
 
 	it("the claim works once, with the right code; a wrong code and a bad name are refused in the approved words", async () => {
@@ -174,7 +178,12 @@ describe("the first start", () => {
 		assert.deepEqual(await short.json(), { error: words.USE_AT_LEAST });
 		const ok = await call(post("/api/server-auth/setup", { code, name: "Boss", password: PASSWORD }));
 		assert.equal(ok.status, 200);
-		assert.deepEqual(await ok.json(), { ok: true });
+		// Changed with the real stack's finding: the owner gets four recovery codes at the claim, once.
+		const claimBody = await ok.json() as { codes: string[] };
+		assert.deepEqual(Object.keys(claimBody), ["codes"]);
+		assert.equal(claimBody.codes.length, 4);
+		assert.deepEqual(acc.ownerAccount(state())!.recoveryCodes, claimBody.codes.map((c) => core.setupCodeHash(c)));
+		for (const c of claimBody.codes) assert.ok(!fs.readFileSync(deps.store.file, "utf-8").includes(c));
 		const cookies = cookiesOf(ok);
 		assert.match(cookies[0]!, new RegExp(`^${core.SESSION_COOKIE}=[A-Za-z0-9_-]{43}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=15552000$`));
 		assert.equal(cookies[1], "lh_owner=1; Path=/; Secure; SameSite=Lax; Max-Age=15552000");
@@ -367,7 +376,7 @@ describe("Settings → Account", () => {
 		assert.deepEqual(Object.keys(body).sort(), ["devices", "name", "owner", "recoveryCodesLeft"]);
 		assert.equal(body.name, "Boss");
 		assert.equal(body.owner, true);
-		assert.equal(body.recoveryCodesLeft, 0);
+		assert.equal(body.recoveryCodesLeft, 4, "the owner's codes from the claim");
 		const devices = body.devices as Array<Record<string, unknown>>;
 		assert.equal(devices.length, 1);
 		assert.deepEqual(Object.keys(devices[0]!).sort(), ["createdAt", "current", "expiresAt", "id", "label", "lastSeenAt"]);

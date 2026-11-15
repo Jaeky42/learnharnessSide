@@ -557,8 +557,11 @@ export interface ClaimInput {
 
 export type ClaimFailure = "already-set-up" | "setup-code-invalid" | NameProblem | "password-problem" | "locked";
 
-/** The setup code, a name and a password create the owner's account, once. */
-export function claimOwner(state: GatewayState, input: ClaimInput, address: string, now: number): { ok: true; state: GatewayState; account: AccountRecord } | Fail<ClaimFailure> {
+/**
+ * The setup code, a name and a password create the owner's account, once,
+ * with its four recovery codes (in clear in the result, shown once).
+ */
+export function claimOwner(state: GatewayState, input: ClaimInput, address: string, now: number): { ok: true; state: GatewayState; account: AccountRecord; codes: string[] } | Fail<ClaimFailure> {
 	if (hasOwner(state)) return { ok: false, code: "already-set-up", state };
 	const wait = lockWait(state, address, now);
 	if (wait) return locked(state, wait);
@@ -571,12 +574,13 @@ export function claimOwner(state: GatewayState, input: ClaimInput, address: stri
 	const passwordIssue = passwordProblem(input.password);
 	if (passwordIssue) return { ok: false, code: "password-problem", state, message: passwordIssue };
 	const name = input.name as string;
+	const recovery = newRecoveryCodes();
 	const account: AccountRecord = {
 		id: newId("acct"), tag: null, name, nameKey: nameKeyOf(name), password: hashPassword(input.password as string),
-		recoveryCodes: [], role: "owner", state: "active", createdAt: now, lastSeenAt: null, removedAt: null,
+		recoveryCodes: recovery.hashes, role: "owner", state: "active", createdAt: now, lastSeenAt: null, removedAt: null,
 		upstream: input.upstream, gateSecret: input.gateSecret,
 	};
-	return { ok: true, state: { ...state, accounts: [...state.accounts, account], setupCodeHash: null }, account };
+	return { ok: true, state: { ...state, accounts: [...state.accounts, account], setupCodeHash: null }, account, codes: recovery.codes };
 }
 
 // ─── Redeeming an invite (reserve, call the maker, then finish or roll back) ─

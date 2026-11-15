@@ -243,32 +243,21 @@ ${form("/api/server-auth/setup", [
     ${newPasswordCheck("password", "confirm")}
     return { code: value("code"), name: value("name"), password: value("password") };
   }`,
+		onSuccess: recoveryCodesView(),
 	});
 }
 
 /**
- * The invite page. On success its own script replaces the form with "Your
- * recovery codes": the codes exist only in the POST's answer and in this
- * page's memory, never in a URL, a cookie or storage, and a reload can't
- * bring them back (Continue goes to "/" with `location.replace`).
+ * "Your recovery codes", once, after an account is made (the first-start
+ * claim and an invite): the page's own script replaces the form with the
+ * four codes from the POST's answer, Copy and Continue. The codes exist only
+ * in that answer and in the page's memory, never in a URL, a cookie or
+ * storage, and a reload can't bring them back (Continue goes to "/" with
+ * `location.replace`).
  */
-export function invitePageHtml(): string {
+export function recoveryCodesView(): string {
 	const r = RECOVERY_PAGE_TEXT;
-	return pageShell({
-		title: INVITE_TEXT.title,
-		body: `
-<h1>${escapeHtml(INVITE_TEXT.title)}</h1>
-${form("/api/server-auth/invite", [
-		field({ id: "code", label: INVITE_TEXT.codeLabel, autocomplete: "one-time-code", code: true, placeholder: "XXXX-XXXX", autofocus: true }),
-		field({ id: "name", label: INVITE_TEXT.nameLabel, autocomplete: "username", plain: true, help: [INVITE_TEXT.nameHelp, INVITE_TEXT.nameHelpSignIn] }),
-		field({ id: "password", label: INVITE_TEXT.passwordLabel, type: "password", autocomplete: "new-password", minlength: PASSWORD_MIN_LENGTH, help: [INVITE_TEXT.passwordHelp] }),
-		field({ id: "confirm", label: INVITE_TEXT.confirmLabel, type: "password", autocomplete: "new-password" }),
-	], INVITE_TEXT.submit)}`,
-		payload: `function (form) {
-    ${newPasswordCheck("password", "confirm")}
-    return { code: value("code"), name: value("name"), password: value("password") };
-  }`,
-		onSuccess: `function (body) {
+	return `function (body) {
     var codes = body && Array.isArray(body.codes) ? body.codes : [];
     var main = document.querySelector("main");
     while (main.firstChild) main.removeChild(main.firstChild);
@@ -286,7 +275,28 @@ ${form("/api/server-auth/invite", [
     row.appendChild(copy); row.appendChild(go);
     document.title = ${jsString(`${r.title} · LearnHarness`)};
     go.focus();
+  }`;
+}
+
+/**
+ * The invite page; on success, the recovery codes (`recoveryCodesView`).
+ */
+export function invitePageHtml(): string {
+	return pageShell({
+		title: INVITE_TEXT.title,
+		body: `
+<h1>${escapeHtml(INVITE_TEXT.title)}</h1>
+${form("/api/server-auth/invite", [
+		field({ id: "code", label: INVITE_TEXT.codeLabel, autocomplete: "one-time-code", code: true, placeholder: "XXXX-XXXX", autofocus: true }),
+		field({ id: "name", label: INVITE_TEXT.nameLabel, autocomplete: "username", plain: true, help: [INVITE_TEXT.nameHelp, INVITE_TEXT.nameHelpSignIn] }),
+		field({ id: "password", label: INVITE_TEXT.passwordLabel, type: "password", autocomplete: "new-password", minlength: PASSWORD_MIN_LENGTH, help: [INVITE_TEXT.passwordHelp] }),
+		field({ id: "confirm", label: INVITE_TEXT.confirmLabel, type: "password", autocomplete: "new-password" }),
+	], INVITE_TEXT.submit)}`,
+		payload: `function (form) {
+    ${newPasswordCheck("password", "confirm")}
+    return { code: value("code"), name: value("name"), password: value("password") };
   }`,
+		onSuccess: recoveryCodesView(),
 	});
 }
 

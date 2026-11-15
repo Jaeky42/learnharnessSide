@@ -69,10 +69,28 @@ async function readLimited(req: http.IncomingMessage, limit: number): Promise<Bu
 	return Buffer.concat(chunks);
 }
 
-function toHeaders(req: http.IncomingMessage): Headers {
+/** Two Authorization lines: whose key would count is ambiguous, so the request is refused (400). */
+class DuplicateHeader extends Error {}
+
+/**
+ * The request's headers. Several Cookie lines (HTTP/1.1 allows them; HTTP/2
+ * crumbs reach us joined) are joined with "; ", as one Cookie header reads;
+ * a session cookie named twice still reads as none (gate.ts `readCookie`).
+ */
+export function toHeaders(rawHeaders: string[]): Headers {
 	const headers = new Headers();
-	for (let i = 0; i < req.rawHeaders.length; i += 2) {
-		try { headers.append(req.rawHeaders[i]!, req.rawHeaders[i + 1]!); } catch { /* a header fetch can't carry */ }
+	const cookies: string[] = [];
+	let authorizations = 0;
+	for (let i = 0; i < rawHeaders.length; i += 2) {
+		const name = rawHeaders[i]!;
+		const value = rawHeaders[i + 1]!;
+		const lower = name.toLowerCase();
+		if (lower === "cookie") { cookies.push(value); continue; }
+		if (lower === "authorization" && ++authorizations > 1) throw new DuplicateHeader();
+		try { headers.append(name, value); } catch { /* a header fetch can't carry */ }
+	}
+	if (cookies.length) {
+		try { headers.set("cookie", cookies.join("; ")); } catch { /* as above */ }
 	}
 	return headers;
 }
@@ -98,7 +116,7 @@ export function createServer(handle: (request: Request, info: { remoteAddress: s
 				const body = method === "GET" || method === "HEAD" ? undefined : await readLimited(req, BODY_LIMIT_BYTES);
 				// The path is the gateway's own: the request's Host never decides where it is routed.
 				const url = new URL(req.url ?? "/", "http://gateway.invalid");
-				const request = new Request(url, { method, headers: toHeaders(req), body: body && body.length ? new Uint8Array(body) : undefined });
+				const request = new Request(url, { method, headers: toHeaders(req.rawHeaders), body: body && body.length ? new Uint8Array(body) : undefined });
 				await send(res, await handle(request, { remoteAddress: req.socket.remoteAddress }), head);
 			} catch (error) {
 				const status = error instanceof TooLarge ? 413 : 400;

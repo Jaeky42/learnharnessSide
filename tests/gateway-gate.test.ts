@@ -297,6 +297,8 @@ describe("what a client can't do", () => {
 			"/api/chats%23x", "/_next/static/a%23/x", "/icons/%2e%2e/api", "/_next/static/%2E%2e/x",
 			"/a/../b?x", "/a/./b?x=1", "/_next/static/a;/../../api/chats", "/api/sync/;/../chats",
 			"/" + "a".repeat(9000), "/a?" + "b".repeat(9000), "/é", "/a?x=é", "/a?x=<b>", "/a?x=\"y\"", "/a\tb", "/a\u007f",
+			// Measured on the real Caddy: request targets reach /gate raw, `#` already encoded.
+			"/_next/a%23/../../api/chats", "/_next/static/a%23/../../api/chats", "/icons/x%23/../../api/sync/hello", "/api/sync/x%23/../../chats",
 		]) {
 			refused(decide({ uri, authorization: `Bearer ${OWNER_KEY}` }), 400);
 		}
@@ -380,7 +382,8 @@ describe("the rules repeated from the copy agree with the copy's own", () => {
 	});
 
 	it("the client's address", () => {
-		for (const forwarded of [null, "", "203.0.113.7", "1.1.1.1, 203.0.113.7", "1.1.1.1,203.0.113.7 , ", " , ", "x".repeat(65), "2001:db8::1"]) {
+		// "gateway": what the relay sends as the client for the gateway's own calls (copies.ts GATEWAY_CLIENT_ADDR).
+		for (const forwarded of [null, "", "203.0.113.7", "1.1.1.1, 203.0.113.7", "1.1.1.1,203.0.113.7 , ", " , ", "x".repeat(65), "2001:db8::1", "gateway"]) {
 			for (const trust of [true, false]) {
 				const headers = new Headers(forwarded === null ? {} : { "x-forwarded-for": forwarded });
 				assert.equal(gate.clientAddress(forwarded, trust), copyAuth.clientAddress(headers, trust ? { LH_TRUST_PROXY: "1" } : {}), `${forwarded} ${trust}`);
