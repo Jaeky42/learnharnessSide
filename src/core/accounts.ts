@@ -19,6 +19,7 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import {
 	LAST_SEEN_RESOLUTION_MS,
+	LOCKOUT_FORGET_MS,
 	clearFailures,
 	emptyServerAuthState,
 	hashPassword,
@@ -105,8 +106,8 @@ export interface AccountRecord {
 	gateSecret: string | null;
 	/**
 	 * Present (true) only while the copy still has to be told to unpair its
-	 * desktop apps (after a password change, a reset, Sign out everywhere,
-	 * Pause, Remove). Its sync requests get 503 until it is cleared.
+	 * desktop apps (after a password change, either reset, Sign out
+	 * everywhere; never Pause or Remove). Its sync requests get 503 until it is cleared.
 	 */
 	unpairPending?: true;
 	/**
@@ -116,6 +117,18 @@ export interface AccountRecord {
 	 * the lifecycle loop creates it again (a fresh secret) before trusting it.
 	 */
 	copyPending?: true;
+	/**
+	 * Present (true) on an abandoned reservation: its deletion removes the
+	 * container but never the volume, because a volume under this tag may
+	 * not be this attempt's own (it could predate a lost state file).
+	 */
+	keepVolume?: true;
+}
+
+/** One address's lockout, and whose password every counted failure was against. */
+export interface GatewayLockout extends LockoutRecord {
+	/** An account id when every counted failure was a password try against it; "*" otherwise (another name, mixed, any code). */
+	against: string;
 }
 
 export interface GatewaySession extends SessionRecord {
@@ -143,8 +156,8 @@ export interface GatewayState {
 	sessions: GatewaySession[];
 	invites: InviteRecord[];
 	resets: ResetRecord[];
-	/** One lockout per client address: passwords and every kind of code. */
-	lockouts: Record<string, LockoutRecord>;
+	/** One lockout per client address (IPv6 by /64): passwords and every kind of code. */
+	lockouts: Record<string, GatewayLockout>;
 	/** SHA-256 (hex) of the first-start setup code while no owner exists. */
 	setupCodeHash: string | null;
 }
@@ -194,6 +207,8 @@ function parseAccount(raw: unknown): AccountRecord {
 	if (raw.gateSecret !== null && !isStr(raw.gateSecret)) return bad("account");
 	if (raw.unpairPending !== undefined && raw.unpairPending !== true) return bad("account");
 	if (raw.copyPending !== undefined && raw.copyPending !== true) return bad("account");
+	if (raw.keepVolume !== undefined && raw.keepVolume !== true) return bad("account");
+	if (!upstreamAllowed(role, raw.tag as string | null, raw.upstream as string | null)) return bad("account upstream");
 	return {
 		id: raw.id, tag: raw.tag as string | null, name: raw.name, nameKey: raw.nameKey, password: parsePassword(raw.password),
 		recoveryCodes: [...(raw.recoveryCodes as string[])], role, state, createdAt: raw.createdAt,
@@ -201,6 +216,7 @@ function parseAccount(raw: unknown): AccountRecord {
 		upstream: raw.upstream as string | null, gateSecret: raw.gateSecret as string | null,
 		...(raw.unpairPending === true ? { unpairPending: true as const } : {}),
 		...(raw.copyPending === true ? { copyPending: true as const } : {}),
+		...(raw.keepVolume === true ? { keepVolume: true as const } : {}),
 	};
 }
 
@@ -222,10 +238,12 @@ export function parseGatewayState(raw: unknown): GatewayState {
 		return { accountId: r.accountId, codeHash: r.codeHash, createdAt: r.createdAt, expiresAt: r.expiresAt };
 	});
 	if (!isObject(raw.lockouts)) return bad("lockouts");
-	const lockouts: Record<string, LockoutRecord> = {};
+	const lockouts: Record<string, GatewayLockout> = {};
 	for (const [address, l] of Object.entries(raw.lockouts)) {
 		if (!isObject(l) || !isNum(l.failures) || !isNum(l.level) || !isNum(l.lockedUntil) || !isNum(l.lastFailureAt)) return bad("lockout");
-		lockouts[address] = { failures: l.failures, level: l.level, lockedUntil: l.lockedUntil, lastFailureAt: l.lastFailureAt };
+		if (l.against !== undefined && !isStr(l.against)) return bad("lockout");
+		// An older record says nothing about whose: no success clears it.
+		lockouts[address] = { failures: l.failures, level: l.level, lockedUntil: l.lockedUntil, lastFailureAt: l.lastFailureAt, against: (l.against as string | undefined) ?? ANY };
 	}
 	if (raw.setupCodeHash !== null && !isHash(raw.setupCodeHash)) return bad("setup code record");
 	return { version: GATEWAY_STATE_VERSION, accounts, sessions, invites, resets, lockouts, setupCodeHash: raw.setupCodeHash as string | null };
@@ -290,6 +308,22 @@ const TAG_PATTERN = /^[0-9A-HJKMNP-TV-Z]{3}$/;
 
 export function isTag(value: unknown): value is string {
 	return typeof value === "string" && TAG_PATTERN.test(value);
+}
+
+/** The one upstream a member's copy can have (the maker names every copy so). */
+export const memberUpstream = (tag: string): string => `lh-acct-${tag}:3000`;
+const OWNER_UPSTREAM_SHAPE = /^[A-Za-z0-9.-]{1,253}:\d{1,5}$/;
+
+/**
+ * A member's upstream is exactly its own `lh-acct-<tag>:3000` (or none yet);
+ * the owner's is a host:port (the gateway uses the configured one anyway).
+ * Any other value makes the file damaged: the gate must never send a member
+ * to another copy.
+ */
+export function upstreamAllowed(role: AccountRole, tag: string | null, upstream: string | null): boolean {
+	if (upstream === null) return true;
+	if (role === "owner") return tag === null && OWNER_UPSTREAM_SHAPE.test(upstream);
+	return tag !== null && upstream === memberUpstream(tag);
 }
 
 /** Three characters of the setup-code alphabet. */
@@ -363,22 +397,77 @@ function codeHashOf(code: unknown): string | null {
 
 // ─── The lockout (one per address, every kind of attempt) ────────────────────
 
+/** `against` for a failure that is not a password try against one existing account. */
+const ANY = "*";
+/** At most this many addresses are remembered; the oldest failures go first (bounds the file too). */
+export const MAX_LOCKOUT_ENTRIES = 2000;
+
+/**
+ * The lockout's key for a client address: an IPv6 address by its /64 (one
+ * home or one server usually holds a whole /64), an IPv4-mapped IPv6
+ * address as the IPv4 address, anything else as it is.
+ */
+export function lockoutKey(address: string): string {
+	const plain = address.trim().toLowerCase();
+	const mapped = /^(?:0{0,4}:){0,5}(?:0{0,4}::?)?ffff:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(plain) ?? /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(plain);
+	if (mapped) return mapped[1]!;
+	if (!plain.includes(":") || !/^[0-9a-f:.%a-z]+$/.test(plain)) return address;
+	const bare = plain.split("%")[0]!;
+	const halves = bare.split("::");
+	if (halves.length > 2) return address;
+	const head = halves[0] ? halves[0].split(":") : [];
+	const tail = halves.length === 2 && halves[1] ? halves[1].split(":") : [];
+	const missing = 8 - head.length - tail.length;
+	if (halves.length === 1 ? head.length !== 8 : missing < 1) return address;
+	const groups = [...head, ...Array<string>(halves.length === 2 ? missing : 0).fill("0"), ...tail];
+	if (!groups.slice(0, 4).every((g) => /^[0-9a-f]{1,4}$/.test(g))) return address;
+	return `${groups.slice(0, 4).map((g) => g.replace(/^0+(?=.)/, "")).join(":")}::/64`;
+}
+
 // ./server-auth's helpers are typed against its own state; they only touch `lockouts`.
 function shim(state: GatewayState) {
-	return { ...emptyServerAuthState(), lockouts: state.lockouts };
+	return { ...emptyServerAuthState(), lockouts: state.lockouts as Record<string, LockoutRecord> };
 }
 
 /** Milliseconds until this address may try again, or 0. */
 export function lockWait(state: GatewayState, address: string, now: number): number {
-	return lockedFor(shim(state), address, now);
+	return lockedFor(shim(state), lockoutKey(address), now);
 }
 
-function withFailure(state: GatewayState, address: string, now: number): GatewayState {
-	return { ...state, lockouts: recordFailure(shim(state), address, now).lockouts };
+/**
+ * One failure for the address. `against`: the account whose password was
+ * tried, or "*" (a name with no account, or any code). A record already
+ * against another account, or "*", stays "*" until it ages out.
+ */
+function withFailure(state: GatewayState, address: string, now: number, against: string): GatewayState {
+	const key = lockoutKey(address);
+	const previous = state.lockouts[key];
+	const fresh = !previous || now - previous.lastFailureAt >= LOCKOUT_FORGET_MS;
+	const target = fresh ? against : previous.against === against ? against : ANY;
+	const recorded = recordFailure(shim(state), key, now).lockouts;
+	const lockouts: Record<string, GatewayLockout> = {};
+	for (const [k, record] of Object.entries(recorded)) {
+		lockouts[k] = { failures: record.failures, level: record.level, lockedUntil: record.lockedUntil, lastFailureAt: record.lastFailureAt, against: k === key ? target : state.lockouts[k]?.against ?? ANY };
+	}
+	const keys = Object.keys(lockouts);
+	if (keys.length > MAX_LOCKOUT_ENTRIES) {
+		const oldest = keys.filter((k) => k !== key).sort((a, b) => lockouts[a]!.lastFailureAt - lockouts[b]!.lastFailureAt);
+		for (const k of oldest.slice(0, keys.length - MAX_LOCKOUT_ENTRIES)) delete lockouts[k];
+	}
+	return { ...state, lockouts };
 }
 
-function withoutFailures(state: GatewayState, address: string): GatewayState {
-	return state.lockouts[address] ? { ...state, lockouts: clearFailures(shim(state), address).lockouts } : state;
+/**
+ * A success clears the address's failures only when every one of them was a
+ * password try against this same account (someone mistyping their own
+ * password). Failures against another name, or any code failure, are never
+ * cleared by a success; they age out (LOCKOUT_FORGET_MS).
+ */
+function withoutFailures(state: GatewayState, address: string, accountId: string | null): GatewayState {
+	const key = lockoutKey(address);
+	const record = state.lockouts[key];
+	if (!record || accountId === null || record.against !== accountId) return state;
+	return { ...state, lockouts: clearFailures(shim(state), key).lockouts as Record<string, GatewayLockout> };
 }
 
 /**
@@ -386,7 +475,7 @@ function withoutFailures(state: GatewayState, address: string): GatewayState {
  * no copy's shape): recorded in the one lockout. `waitMs` > 0 when it tripped the pause.
  */
 export function recordWrongAttempt(state: GatewayState, address: string, now: number): { state: GatewayState; waitMs: number } {
-	const next = withFailure(state, address, now);
+	const next = withFailure(state, address, now, ANY);
 	return { state: next, waitMs: lockWait(next, address, now) };
 }
 
@@ -395,8 +484,8 @@ function locked(state: GatewayState, wait: number): Fail<"locked"> {
 }
 
 /** A wrong attempt: recorded, and "locked" when it was the one that tripped the pause. */
-function wrongAttempt<C extends string>(state: GatewayState, address: string, now: number, code: C): Fail<C | "locked"> {
-	const next = withFailure(state, address, now);
+function wrongAttempt<C extends string>(state: GatewayState, address: string, now: number, code: C, against: string = ANY): Fail<C | "locked"> {
+	const next = withFailure(state, address, now, against);
 	const wait = lockWait(next, address, now);
 	return wait ? locked(next, wait) : { ok: false, code, state: next };
 }
@@ -478,7 +567,7 @@ export function claimOwner(state: GatewayState, input: ClaimInput, address: stri
 		recoveryCodes: [], role: "owner", state: "active", createdAt: now, lastSeenAt: null, removedAt: null,
 		upstream: input.upstream, gateSecret: input.gateSecret,
 	};
-	return { ok: true, state: { ...withoutFailures(state, address), accounts: [...state.accounts, account], setupCodeHash: null }, account };
+	return { ok: true, state: { ...state, accounts: [...state.accounts, account], setupCodeHash: null }, account };
 }
 
 // ─── Redeeming an invite (reserve, call the maker, then finish or roll back) ─
@@ -518,7 +607,7 @@ export function reserveMember(state: GatewayState, input: RedeemInput, cap: numb
 		recoveryCodes: recovery.hashes, role: "member", state: "active", createdAt: now, lastSeenAt: null, removedAt: null,
 		upstream: null, gateSecret: null,
 	};
-	const next: GatewayState = { ...withoutFailures(state, address), invites: state.invites.filter((i) => i.id !== invite.id), accounts: [...state.accounts, account] };
+	const next: GatewayState = { ...state, invites: state.invites.filter((i) => i.id !== invite.id), accounts: [...state.accounts, account] };
 	return { ok: true, state: next, account, codes: recovery.codes, invite };
 }
 
@@ -546,7 +635,9 @@ export function abandonReservation(state: GatewayState, accountId: string): { ok
 	const account = findAccount(state, accountId);
 	if (!account) return { ok: false, code: "not-found", state };
 	if (account.role !== "member" || (account.state !== "deleting" && isReady(account))) return { ok: false, code: "bad-state", state };
-	return { ok: true, ...markDeleting(state, account) };
+	const marked = markDeleting(state, account);
+	const kept: AccountRecord = { ...marked.account, keepVolume: true };
+	return { ok: true, state: withAccount(marked.state, kept), account: kept };
 }
 
 /** Member accounts that were reserved but never got a copy (a crash between steps 1 and 3). */
@@ -660,10 +751,10 @@ export function signIn(state: GatewayState, input: { name: unknown; password: un
 	const account = found && found.state !== "deleting" ? found : null;
 	const password = typeof input.password === "string" ? input.password : "";
 	const right = verifyPassword(password, account ? account.password : DUMMY_PASSWORD);
-	if (!account || !right) return wrongAttempt(state, address, now, "wrong");
+	if (!account || !right) return wrongAttempt(state, address, now, "wrong", account ? account.id : ANY);
 	if (account.state === "paused") return { ok: false, code: "paused", state };
 	if (account.state === "removed") return { ok: false, code: "removed", state };
-	const created = createAccountSession(withoutFailures(state, address), account.id, label, now);
+	const created = createAccountSession(withoutFailures(state, address, account.id), account.id, label, now);
 	const seen: AccountRecord = { ...account, lastSeenAt: now };
 	return { ok: true, state: { ...created.state, accounts: created.state.accounts.map((a) => a.id === account.id ? seen : a) }, token: created.token, session: created.session, account: seen };
 }
@@ -673,7 +764,7 @@ export function signIn(state: GatewayState, input: { name: unknown; password: un
 function checkPassword(state: GatewayState, account: AccountRecord, password: unknown, address: string, now: number): { ok: true } | Fail<"wrong-password" | "locked"> {
 	const wait = lockWait(state, address, now);
 	if (wait) return locked(state, wait);
-	if (typeof password !== "string" || !verifyPassword(password, account.password)) return wrongAttempt(state, address, now, "wrong-password");
+	if (typeof password !== "string" || !verifyPassword(password, account.password)) return wrongAttempt(state, address, now, "wrong-password", account.id);
 	return { ok: true };
 }
 
@@ -689,7 +780,7 @@ export function changePassword(state: GatewayState, accountId: string, keepSessi
 	if (!checked.ok) return checked;
 	const issue = passwordProblem(input.next);
 	if (issue) return { ok: false, code: "password-problem", state, message: issue };
-	const updated = withAccount(withoutFailures(state, address), { ...account, password: hashPassword(input.next as string) });
+	const updated = withAccount(withoutFailures(state, address, accountId), { ...account, password: hashPassword(input.next as string) });
 	return { ok: true, state: removeOtherAccountSessions(updated, accountId, keepSessionId) };
 }
 
@@ -709,7 +800,7 @@ export function replaceRecoveryCodes(state: GatewayState, accountId: string, pas
 	const checked = checkPassword(state, account, password, address, now);
 	if (!checked.ok) return checked;
 	const fresh = newRecoveryCodes();
-	return { ok: true, state: withAccount(withoutFailures(state, address), { ...account, recoveryCodes: fresh.hashes }), codes: fresh.codes };
+	return { ok: true, state: withAccount(withoutFailures(state, address, accountId), { ...account, recoveryCodes: fresh.hashes }), codes: fresh.codes };
 }
 
 // ─── Reset ───────────────────────────────────────────────────────────────────
@@ -755,7 +846,7 @@ export function resetPassword(state: GatewayState, input: { name: unknown; code:
 		password: hashPassword(input.password as string),
 		recoveryCodes: recovery ? account.recoveryCodes.filter((c) => c !== recovery) : account.recoveryCodes,
 	};
-	const next: GatewayState = { ...withAccount(withoutFailures(state, address), updated), resets: state.resets.filter((r) => r.accountId !== account.id) };
+	const next: GatewayState = { ...withAccount(state, updated), resets: state.resets.filter((r) => r.accountId !== account.id) };
 	return { ok: true, state: removeAccountSessions(next, account.id), account: updated };
 }
 
@@ -846,7 +937,7 @@ export function selfDelete(state: GatewayState, accountId: string, password: unk
 	if (!target.ok) return target;
 	const checked = checkPassword(state, target.account, password, address, now);
 	if (!checked.ok) return checked;
-	return { ok: true, ...markDeleting(withoutFailures(state, address), target.account) };
+	return { ok: true, ...markDeleting(withoutFailures(state, address, target.account.id), target.account) };
 }
 
 /** Removes the record, its sessions and its reset codes for good; the name and tag are free again. */

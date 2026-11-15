@@ -100,6 +100,8 @@ export const inviteRoute: Handler<AccountDeps> = (request, deps) => guarded(asyn
 	if (refused) return refused;
 	const body = await readBody(request);
 	if (!body) return json({ error: "Expected JSON." }, 400);
+	// No maker: a copy can be neither made nor cleaned up; nothing is reserved.
+	if (!deps.config.makerUrl || !deps.config.makerToken) return json({ code: "unavailable" }, 503);
 	const now = deps.now();
 	const address = addressOf(request, deps.config);
 	const label = deviceLabel(request.headers.get("user-agent"));

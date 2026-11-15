@@ -299,7 +299,9 @@ describe("an invalid LH_ACCOUNT_TAG fails closed", () => {
 });
 
 describe("behind the gateway", () => {
-	const gateHeader = { [server.GATE_HEADER]: SECRET };
+	// What the gateway hop adds: the secret and the request's scope.
+	const gateHeader = { [server.GATE_HEADER]: SECRET, [server.SCOPE_HEADER]: "session" };
+	const syncHeader = { [server.GATE_HEADER]: SECRET, [server.SCOPE_HEADER]: "sync" };
 
 	it("a tagged copy with no password makes a code with the secret and no cookie, pairs the real client, and removes the PC", async () => {
 		assert.equal(fs.existsSync(store.serverLoginFile()), false, "no login file, no password");
@@ -308,7 +310,7 @@ describe("behind the gateway", () => {
 		const noSecret = await withEnv(GATEWAY, () => syncHttp.desktopsResponse(browserPost("/api/server-auth/desktops", { op: "code" })));
 		assert.equal(noSecret.status, 401);
 
-		const fetchIt = serverFetch(GATEWAY, gateHeader);
+		const fetchIt = serverFetch(GATEWAY, syncHeader);
 		const paired = await client.pairWithServer({ server: SERVER, code, name: "Desktop" }, { fetch: fetchIt });
 		assert.equal(paired.ok, true, JSON.stringify(paired));
 		const key = pairingStore.readCloudPairing()!.key!;
@@ -320,7 +322,7 @@ describe("behind the gateway", () => {
 		const removed = await withEnv(GATEWAY, () => syncHttp.desktopsResponse(browserPost("/api/server-auth/desktops", { op: "remove", id }, gateHeader)));
 		assert.equal(removed.status, 200);
 		assert.equal(store.readServerAuthState().devices.length, 0);
-		assert.equal(helloStatus(GATEWAY, key, gateHeader), 401, "the removed PC's key no longer opens sync");
+		assert.equal(helloStatus(GATEWAY, key, syncHeader), 401, "the removed PC's key no longer opens sync");
 	});
 
 	it("without the secret the pairing request never reaches the route (503, the desktop's 'offline')", async () => {
@@ -333,7 +335,7 @@ describe("behind the gateway", () => {
 
 	it("an Origin naming another site is refused at the sync gate", async () => {
 		const code = await codeFrom(GATEWAY, { ...gateHeader });
-		const paired = await client.pairWithServer({ server: SERVER, code, name: "Desktop" }, { fetch: serverFetch(GATEWAY, { ...gateHeader, origin: "https://elsewhere.example" }) });
+		const paired = await client.pairWithServer({ server: SERVER, code, name: "Desktop" }, { fetch: serverFetch(GATEWAY, { ...syncHeader, origin: "https://elsewhere.example" }) });
 		assert.equal(paired.ok === false && paired.status, 403);
 	});
 
@@ -355,8 +357,8 @@ describe("behind the gateway", () => {
 		const key = pairingStore.readCloudPairing()!.key!;
 		assert.equal(key.length, 43);
 		const owner: Vars = { LH_GATE_SECRET: SECRET };
-		assert.equal(helloStatus(owner, key, gateHeader), 200);
-		const fetchIt = serverFetch(owner, gateHeader);
+		assert.equal(helloStatus(owner, key, syncHeader), 200);
+		const fetchIt = serverFetch(owner, syncHeader);
 		assert.equal((await withEnv(owner, () => client.contactServer({ fetch: fetchIt }))).sync.state, "ok");
 		const round = await withEnv(owner, () => client.syncRequest("/api/sync/sessions", { method: "POST", body: { cursor: 0 } }, { fetch: fetchIt }));
 		assert.equal(round.ok, true, JSON.stringify(round));

@@ -37,7 +37,7 @@ import { INVITE_TEXT, SETUP_TEXT, SIGN_IN_TEXT, tooManyAttempts } from "../src/c
 import { deviceLabel, SESSION_COOKIE } from "../src/core/server-auth.ts";
 import { SYNC_PROTOCOL_HEADER } from "../src/core/sync/protocol.ts";
 import type { GatewayConfig } from "./config.ts";
-import type { Relay, Unpairer } from "./copies.ts";
+import { AnswerTooLarge, readCapped, type Relay, type Unpairer } from "./copies.ts";
 import {
 	clientAddress,
 	copyOf,
@@ -170,7 +170,7 @@ export const gateRoute: Handler = async (request, deps) => {
 		// The answer stands on the state already validated; a failed write changes nothing about it.
 		try { deps.store.update((state) => ({ state: touchSession(state, sessionId, now), result: undefined })); } catch { /* cosmetic */ }
 	}
-	return new Response(null, { status: 200, headers: { ...NO_STORE, "X-LH-Upstream": decision.upstream, "X-LH-Gate": decision.gateSecret } });
+	return new Response(null, { status: 200, headers: { ...NO_STORE, "X-LH-Upstream": decision.upstream, "X-LH-Gate": decision.gateSecret, "X-LH-Scope": decision.scope } });
 };
 
 // ─── Pages ───────────────────────────────────────────────────────────────────
@@ -364,6 +364,9 @@ export const pairRoute: Handler = (request, deps) => guarded(async () => {
 	if (wait) return json({ error: tooManyAttempts(wait) }, 429);
 
 	const tag = tagFromPairingCode(code);
+	// No owner: the file is new or was lost. A tagged code may be an account
+	// this file has forgotten; 503 (not counted) rather than "wrong code".
+	if (tag.ok && tag.tag !== null && !hasOwner(read.state)) return new Response(null, { status: 503, headers: NO_STORE });
 	const account = tag.ok ? findAccountByTag(read.state, tag.tag) : null;
 	const known = tag.ok && (tag.tag === null || (!!account && account.role !== "owner" && account.state !== "deleting"));
 	if (!known) {
@@ -387,16 +390,30 @@ export const pairRoute: Handler = (request, deps) => guarded(async () => {
 		const value = request.headers.get(name);
 		if (value !== null) headers[name] = value;
 	}
-	let answer: Response;
+	// Counted from the state read above with no await in between, so an
+	// unpair-all asked for after that read waits for this forward to end.
+	const endPairing = deps.unpairer.beginPairing(account?.id ?? "owner");
 	try {
-		answer = await deps.relay.send({ ...copy, clientAddress: address, method: "POST", path: "/api/sync/pair", headers, body: bytes });
-	} catch {
-		return new Response(null, { status: 503, headers: NO_STORE });
+		let answer: Response;
+		try {
+			answer = await deps.relay.send({ ...copy, scope: "sync", clientAddress: address, method: "POST", path: "/api/sync/pair", headers, body: bytes });
+		} catch {
+			return new Response(null, { status: 503, headers: NO_STORE });
+		}
+		let data: Uint8Array;
+		try {
+			data = await readCapped(answer);
+		} catch (error) {
+			if (error instanceof AnswerTooLarge) return new Response(null, { status: 502, headers: NO_STORE });
+			return new Response(null, { status: 503, headers: NO_STORE });
+		}
+		const out = new Headers(NO_STORE);
+		const type = answer.headers.get("content-type");
+		if (type) out.set("Content-Type", type);
+		return new Response(data, { status: answer.status, headers: out });
+	} finally {
+		endPairing();
 	}
-	const out = new Headers(NO_STORE);
-	const type = answer.headers.get("content-type");
-	if (type) out.set("Content-Type", type);
-	return new Response(await answer.arrayBuffer(), { status: answer.status, headers: out });
 });
 
 // ─── The table ───────────────────────────────────────────────────────────────

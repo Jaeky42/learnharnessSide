@@ -22,7 +22,8 @@
  * Behind a gateway (multi-account, docs/multi-account-plan.md "A copy behind
  * the gateway"): server mode plus a non-empty LH_GATE_SECRET. The gateway
  * owns the login; this copy only checks that every request carries its
- * secret in X-LH-Gate (constant time), then runs the sync device-key gate as
+ * secret in X-LH-Gate (constant time) and that the path fits the scope the
+ * gateway gave it in X-LH-Scope, then runs the sync device-key gate as
  * before. Its own account routes and pages answer 404, no setup code is
  * printed, and server-login.json is left as it is, so taking the gateway
  * away gives the old login back. A secret under 32 characters refuses every
@@ -93,6 +94,29 @@ export function gatePasses(headers: Headers, env: Env = process.env): boolean {
 	if (given === null) return false;
 	const digest = (value: string) => createHash("sha256").update(value, "utf8").digest();
 	return timingSafeEqual(digest(given), digest(env.LH_GATE_SECRET!));
+}
+
+/** The request header Caddy fills with the gateway's scope for the request
+ *  (and strips from clients). */
+export const SCOPE_HEADER = "x-lh-scope";
+export const GATE_SCOPES = ["public", "sync", "internal", "session"] as const;
+export type GateScope = (typeof GATE_SCOPES)[number];
+
+/** The scope the gateway gave the request, or null for none or an unknown one. */
+export function gateScopeOf(headers: Headers): GateScope | null {
+	const value = headers.get(SCOPE_HEADER);
+	return (GATE_SCOPES as readonly string[]).includes(value ?? "") ? value as GateScope : null;
+}
+
+/** The gateway's public list (gateway/gate.ts isPublicFile), kept equal by a
+ *  test: tighter than isPublic (no pages, APIs, manifest or other /_next/). */
+export const GATEWAY_PUBLIC_FILES: readonly string[] = ["/favicon.ico", "/robots.txt"];
+export const GATEWAY_PUBLIC_PREFIXES: readonly string[] = ["/_next/static/", "/fonts/", "/icons/"];
+
+/** What scope "public" may reach: the gateway's list, and only within this copy's own isPublic. */
+export function isGatewayPublic(pathname: string): boolean {
+	return isPublic(pathname) &&
+		(GATEWAY_PUBLIC_FILES.includes(pathname) || GATEWAY_PUBLIC_PREFIXES.some((prefix) => pathname.startsWith(prefix)));
 }
 
 /** The copy's internal routes, for the gateway only (docs/multi-account-build.md). */
@@ -239,27 +263,43 @@ export function serverGate(input: GateInput): Response | null {
 
 /**
  * Multi-account: the gate of a copy behind the gateway. The secret decides,
- * for pages, APIs and public files alike; no cookie, password or setup page
- * here. Refusals: 503 for a too-short secret (misconfigured, fail closed) and
- * on sync paths (a desktop app reads 5xx as "offline" and keeps its key);
- * 401 for any other API; 403 for a page or file. Then the sync paths run the
- * device-key gate as before, and the same-site write rule stays as a second
- * lock (the gateway applies it first; /api/internal/* is called by the
- * gateway itself, with no Origin).
+ * then the scope the gateway gave the request (X-LH-Scope), re-checked here
+ * against the path as this copy parsed it, so a path the gateway classified
+ * differently (dot segments, encodings) can't widen what passes:
+ *   public    GET/HEAD of the gateway's public files only (a subset of isPublic)
+ *   sync      sync paths only, then the device-key gate as before
+ *   internal  /api/internal/* only (reachable with no other scope)
+ *   session   everything but /api/internal/*; sync paths still need a device
+ *             key, and the same-site write rule stays as a second lock
+ * Refusals: 503 for a too-short secret (misconfigured, fail closed); for a
+ * wrong secret, a missing or unknown scope, or a path outside its scope, the
+ * same answer: 503 on sync paths (a desktop app reads 5xx as "offline" and
+ * keeps its key), 401 for any other API, 403 for a page or file.
  */
 function gatewayGate(input: GateInput, env: Env, now: number): Response | null {
 	if (gateSecretTooShort(env)) return new Response(null, { status: 503, headers: NO_STORE });
-	if (!gatePasses(input.headers, env)) {
-		if (isSyncPath(input.pathname)) return new Response(null, { status: 503, headers: NO_STORE });
-		if (input.pathname.startsWith("/api/")) return json({ error: "Sign in to LearnHarness first." }, 401);
-		return new Response(null, { status: 403, headers: NO_STORE });
+	const { pathname } = input;
+	const scope = gatePasses(input.headers, env) ? gateScopeOf(input.headers) : null;
+	if (!scope) return gateRefusal(pathname);
+	const internal = isInternalPath(pathname);
+	if (scope === "internal") return internal ? null : gateRefusal(pathname);
+	if (internal) return gateRefusal(pathname);
+	if (scope === "sync") return isSyncPath(pathname) ? syncGate(input, now) : gateRefusal(pathname);
+	if (scope === "public") {
+		const read = ["GET", "HEAD"].includes(input.method.toUpperCase());
+		return read && isGatewayPublic(pathname) ? null : gateRefusal(pathname);
 	}
-	if (isSyncPath(input.pathname)) return syncGate(input, now);
-	if (isInternalPath(input.pathname)) return null;
+	if (isSyncPath(pathname)) return syncGate(input, now);
 	if (!sameOrigin(input.method, input.headers)) {
 		return json({ error: "This request must come from the LearnHarness site itself." }, 403);
 	}
 	return null;
+}
+
+function gateRefusal(pathname: string): Response {
+	if (isSyncPath(pathname)) return new Response(null, { status: 503, headers: NO_STORE });
+	if (pathname.startsWith("/api/")) return json({ error: "Sign in to LearnHarness first." }, 401);
+	return new Response(null, { status: 403, headers: NO_STORE });
 }
 
 export function isSyncPath(pathname: string): boolean {
@@ -306,10 +346,11 @@ function touchStored(sessionId: string, now: number): void {
 
 // ─── Pages ───────────────────────────────────────────────────────────────────
 
-/** Is the request from a signed-in browser? Behind a gateway its secret is
- *  the proof (the gateway checked the login); otherwise this copy's cookie. */
+/** Is the request from a signed-in browser? Behind a gateway its secret with
+ *  scope "session" is the proof (the gateway checked the login); otherwise
+ *  this copy's cookie. */
 export function signedIn(request: Request, state: ServerAuthState, now: number): boolean {
-	if (behindGateway()) return gatePasses(request.headers);
+	if (behindGateway()) return gatePasses(request.headers) && gateScopeOf(request.headers) === "session";
 	return findSession(state, readSessionCookie(request.headers), now) !== null;
 }
 
@@ -476,9 +517,10 @@ export async function signOutEverywhereResponse(request: Request, now = Date.now
 
 /** POST /api/internal/unpair-all: the gateway unpairs every desktop app of
  *  this copy (after a password change, a reset, Sign out everywhere, Pause,
- *  Remove). The gate checked the secret already; it is checked again here. */
+ *  Remove). The gate checked the secret and the scope already; both are
+ *  checked again here. */
 export function unpairAllResponse(request: Request): Response {
-	if (!behindGateway() || !gatePasses(request.headers)) return notFound();
+	if (!behindGateway() || !gatePasses(request.headers) || gateScopeOf(request.headers) !== "internal") return notFound();
 	try {
 		updateServerAuthState((state) => ({
 			state: state.devices.length > 0 || state.pairing ? removeAllDevices(state) : null,
