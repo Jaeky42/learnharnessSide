@@ -15,6 +15,7 @@
  */
 
 import fs from "node:fs";
+import path from "node:path";
 import { pipeline, Transform } from "node:stream";
 import zlib from "node:zlib";
 
@@ -23,6 +24,30 @@ export interface ZipSource {
 	name: string;
 	/** The file on disk. */
 	path: string;
+}
+
+// ─── Entry names ─────────────────────────────────────────────────────────────
+
+// Control characters, backslash, colon and what Windows forbids in a file name.
+// eslint-disable-next-line no-control-regex
+const FORBIDDEN = /[\u0000-\u001f\u007f<>:"|?*\\]/;
+const RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
+
+/**
+ * Is this a name that is safe to unzip on any system? Forward slashes only; no
+ * empty, "." or ".." segment, no leading slash or drive letter; no control
+ * character, backslash, colon or any of < > " | ? *; no segment ending in a dot
+ * or a space, or named like a Windows device (CON, NUL, COM1 ... , with or
+ * without an extension). The one place names enter the archive checks this.
+ */
+export function isSafeEntryName(name: string): boolean {
+	if (name === "" || !name.isWellFormed() || Buffer.byteLength(name, "utf8") > 1024) return false;
+	for (const segment of name.split("/")) {
+		if (segment === "" || segment === "." || segment === ".." || segment.length > 255) return false;
+		if (FORBIDDEN.test(segment) || /[. ]$/.test(segment)) return false;
+		if (RESERVED.test(segment.split(".")[0]!)) return false;
+	}
+	return true;
 }
 
 /** What a plain (non-Zip64) archive can hold, with a margin for headers and growth. */
@@ -139,12 +164,17 @@ function endRecord(count: number, size: number, offset: number): Buffer {
 // ─── The stream ──────────────────────────────────────────────────────────────
 
 /** Open for reading without following a symlink at the last step; null when gone or not a regular file. */
-async function openRegular(file: string): Promise<{ handle: fs.promises.FileHandle; mtime: Date } | null> {
+async function openRegular(file: string, root: string | null): Promise<{ handle: fs.promises.FileHandle; mtime: Date } | null> {
 	let handle: fs.promises.FileHandle | undefined;
 	try {
 		handle = await fs.promises.open(/* turbopackIgnore: true */ file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
 		const info = await handle.stat();
 		if (!info.isFile()) { await handle.close(); return null; }
+		if (root !== null) {
+			// O_NOFOLLOW covers the last step only: a folder swapped for a link since the listing must not lead out.
+			const real = await fs.promises.realpath(/* turbopackIgnore: true */ file);
+			if (path.relative(root, real).startsWith("..") || path.isAbsolute(path.relative(root, real))) { await handle.close(); return null; }
+		}
 		return { handle, mtime: info.mtime };
 	} catch {
 		await handle?.close().catch(() => {});
@@ -152,12 +182,25 @@ async function openRegular(file: string): Promise<{ handle: fs.promises.FileHand
 	}
 }
 
+export interface ZipOptions {
+	/** Entries the caller already left out (unsafe names); counted in skipped-files.txt. */
+	skipped?: number;
+	/** The folder every file must stay inside; checked again right after each file is opened. */
+	root?: string;
+}
+
 /** The archive, piece by piece. Closing the generator early stops all reading. */
-export async function* zipChunks(sources: ZipSource[]): AsyncGenerator<Uint8Array> {
+export async function* zipChunks(sources: ZipSource[], options: ZipOptions = {}): AsyncGenerator<Uint8Array> {
 	const done: Finished[] = [];
 	let offset = 0;
+	let skipped = options.skipped ?? 0;
+	const root = options.root === undefined ? null : await fs.promises.realpath(/* turbopackIgnore: true */ options.root).catch(() => options.root!);
+	const note = skipped > 0 || sources.some((s) => !isSafeEntryName(s.name))
+		? null : undefined; // computed below; see `files`
+	void note;
 	for (const source of sources) {
-		const opened = await openRegular(source.path);
+		if (!isSafeEntryName(source.name)) { skipped += 1; continue; }
+		const opened = await openRegular(source.path, root);
 		if (!opened) continue; // vanished (or swapped for a link) since it was listed
 		if (done.length >= HARD_FILES) { await opened.handle.close().catch(() => {}); throw new ZipLimitError(); }
 		const name = Buffer.from(source.name, "utf8");

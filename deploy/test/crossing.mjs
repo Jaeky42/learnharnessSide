@@ -7,6 +7,8 @@
  * refused; the first one that isn't stops the run with a non-zero exit.
  *
  *   node deploy/test/crossing.mjs --base https://localhost --ca <caddy root.crt> [--compose-dir deploy]
+ *   node deploy/test/crossing.mjs --insecure ...   (no CA: TLS is not verified)
+ *   node deploy/test/crossing.mjs --list           (prints what it would try; touches nothing)
  *
  * The owner's account: LH_CROSSING_OWNER_NAME and LH_CROSSING_OWNER_PASSWORD
  * in the environment, or, on a stack nobody has claimed yet, the script claims
@@ -30,6 +32,8 @@ const { values: args } = parseArgs({
 		ca: { type: "string" },
 		"compose-dir": { type: "string", default: path.join(import.meta.dirname, "..") },
 		caddy: { type: "string", default: "lh-caddy" },
+		insecure: { type: "boolean", default: false },
+		list: { type: "boolean", default: false },
 	},
 });
 const BASE = new URL(args.base);
@@ -47,7 +51,7 @@ function request(method, target, { cookie, headers = {}, body } = {}) {
 		if (cookie) all.cookie = cookie;
 		if (data) { all["content-type"] ??= "application/json"; all["content-length"] = String(data.length); }
 		if (method !== "GET" && method !== "HEAD") all.origin ??= BASE.origin;
-		const req = https.request({ host: BASE.hostname, port: BASE.port || 443, method, path: target, headers: all, ca: CA, servername: BASE.hostname, agent: false, timeout: 30_000 }, (res) => {
+		const req = https.request({ host: BASE.hostname, port: BASE.port || 443, method, path: target, headers: all, ca: CA, rejectUnauthorized: !args.insecure, servername: BASE.hostname, agent: false, timeout: 30_000 }, (res) => {
 			const chunks = [];
 			res.on("data", (c) => chunks.push(c));
 			res.on("end", () => resolve({ status: res.statusCode, headers: res.headers, text: Buffer.concat(chunks).toString("utf8") }));
@@ -189,13 +193,15 @@ async function pairKey(cookie) {
 	const r = await request("POST", "/api/sync/pair", { body: { code, deviceId: `dev_${rand(8)}`, name: "Crossing test" } });
 	const key = jsonOf(r)?.key;
 	if (r.status !== 200 || typeof key !== "string") throw new Error(`pairing answered ${r.status}`);
-	return { code, key };
+	return { code, key, deviceId: jsonOf(r)?.device?.id };
 }
 const sync = (key, method, target, body) => request(method, target, { headers: { authorization: `Bearer ${key}`, "x-lh-sync-protocol": SYNC_PROTOCOL }, body });
 
 // ─── The run ─────────────────────────────────────────────────────────────────
 
 const refusedStatus = (s) => s === 400 || s === 401 || s === 403 || s === 404 || s === 502 || s === 503;
+/** Refused, or answered with nothing (Caddy's empty 200 for a host it doesn't serve). */
+const servedNothing = (r) => refusedStatus(r.status) || (r.status === 200 && r.text.trim() === "");
 const unreachable = (s) => s.startsWith("unreachable:");
 
 async function main() {
@@ -203,12 +209,14 @@ async function main() {
 	const tagOf = (container) => docker(["inspect", "-f", "{{range .Config.Env}}{{println .}}{{end}}", container]).match(/^LH_ACCOUNT_TAG=(\w{3})$/m)?.[1];
 	const suffix = rand(3);
 	const made = [];
+	let ownerDevice = null;
 	try {
 		const a = await makeMember(owner, `xa-${suffix}`); made.push(a);
 		const b = await makeMember(owner, `xb-${suffix}`); made.push(b);
 		await waitForCopy(a.cookie); await waitForCopy(b.cookie);
 		const markers = { owner: await marker(owner, `marker-owner-${suffix}`), a: await marker(a.cookie, `marker-a-${suffix}`), b: await marker(b.cookie, `marker-b-${suffix}`) };
 		const keys = { owner: await pairKey(owner), a: await pairKey(a.cookie), b: await pairKey(b.cookie) };
+		ownerDevice = keys.owner.deviceId;
 		// A member's tag is the first 3 characters of its device key; its container is named after it.
 		a.tag = keys.a.key.slice(0, 3); b.tag = keys.b.key.slice(0, 3);
 		a.container = `lh-acct-${a.tag}`; b.container = `lh-acct-${b.tag}`;
@@ -259,18 +267,17 @@ async function main() {
 		expect("from the gateway: a copy directly (it goes through the relay only)", fromInside(gateway, `http://${a.container}:3000/api/chats`), unreachable);
 
 		// 4. /api/internal/* and path tricks, from outside.
-		const internal = ["/api/internal/unpair-all", "/api/Internal/unpair-all", "/API/internal/unpair-all", "/api//internal/unpair-all", "//api/internal/unpair-all", "/api/./internal/unpair-all", "/api/%69nternal/unpair-all", "/api/internal%2funpair-all", "/api/chats/../internal/unpair-all", "/api/x/..%2finternal/unpair-all"];
-		for (const p of internal) {
+		for (const p of INTERNAL_PATHS) {
 			for (const [who, cookie] of [["signed out", undefined], ["owner", owner], ["A", a.cookie]]) {
 				expect(`POST ${p} (${who})`, (await request("POST", p, { cookie, headers: { "x-lh-scope": "internal" }, body: {} })).status, [400, 404]);
 			}
 		}
-		const tricks = ["/_next/a#/../../api/chats", "/_next/static/../../api/chats", "/_next/static/%2e%2e/%2e%2e/api/chats", "/_next/a%23/../../api/chats", "//api/chats", "/icons/../api/chats", "/favicon.ico/../api/chats", "/fonts/..%2f..%2fapi/chats", "/login/../api/chats", "/api/server-auth/../chats", "/api/sync/pair/../../chats", `${BASE.protocol}//evil.example/api/chats`];
-		for (const p of tricks) {
-			expect(`GET ${p} (signed out)`, (await request("GET", p)).status, refusedStatus);
+		for (const p of TRICK_PATHS.map((x) => x.replace(" (absolute form)", ""))) {
+			const out = await request("GET", p);
+			expect(`GET ${p} (signed out)`, servedNothing(out) ? "refused" : `${out.status} served`, "refused", String(out.status));
 			const r = await request("GET", p, { cookie: a.cookie });
 			const ids = r.status === 200 ? (jsonOf(r)?.chats ?? []).map((c) => c.id) : [];
-			expect(`GET ${p} (A) -> refused, or A's own and nothing else`, refusedStatus(r.status) || (ids.includes(markers.a) && !ids.includes(markers.b) && !ids.includes(markers.owner)) || (r.status === 200 && !r.text.includes("chat_")) ? "safe" : `${r.status} crossed`, "safe");
+			expect(`GET ${p} (A) -> refused, or A's own and nothing else`, servedNothing(r) || (ids.includes(markers.a) && !ids.includes(markers.b) && !ids.includes(markers.owner)) || (r.status === 200 && !r.text.includes("chat_")) ? "safe" : `${r.status} crossed`, "safe");
 		}
 		expect("a Service-Worker: script request -> 403", (await request("GET", "/sw.js", { cookie: a.cookie, headers: { "service-worker": "script" } })).status, 403);
 
@@ -304,10 +311,53 @@ async function main() {
 				await op(owner, { op: "delete-now", id: m.id });
 			} catch { console.error(`Could not clean up ${m.name}; remove it in Settings → Accounts.`); }
 		}
+		// The owner's copy forgets the test's desktop; its marker session stays (a session can't be deleted without a model run's checks).
+		if (ownerDevice) await request("POST", "/api/server-auth/desktops", { cookie: owner, body: { op: "remove", id: ownerDevice } }).catch(() => {});
 		await request("POST", "/api/server-auth/logout", { cookie: owner }).catch(() => {});
 	}
 	printTable();
 	process.exit(failed ? 1 : 0);
 }
 
+const INTERNAL_PATHS = ["/api/internal/unpair-all", "/api/Internal/unpair-all", "/API/internal/unpair-all", "/api//internal/unpair-all", "//api/internal/unpair-all", "/api/./internal/unpair-all", "/api/%69nternal/unpair-all", "/api/internal%2funpair-all", "/api/chats/../internal/unpair-all", "/api/x/..%2finternal/unpair-all"];
+const TRICK_PATHS = ["/_next/a#/../../api/chats", "/_next/static/../../api/chats", "/_next/static/%2e%2e/%2e%2e/api/chats", "/_next/a%23/../../api/chats", "//api/chats", "/icons/../api/chats", "/favicon.ico/../api/chats", "/fonts/..%2f..%2fapi/chats", "/login/../api/chats", "/api/server-auth/../chats", "/api/sync/pair/../../chats", "https://evil.example/api/chats (absolute form)"];
+
+/** --list: every crossing the run tries, with what counts as refused. Keep in step with main(). */
+const PLAN = [
+	["setup", "two member accounts A and B through New invite code + /api/server-auth/invite; a marker session in each copy and the owner's; a paired test device on each"],
+	["each cookie lists its own marker and no other (owner, A, B)", "own only"],
+	["pairing code lengths member/owner", "13/9"],
+	["device key lengths member/owner", "46/43"],
+	["A's cookie + forged X-LH-Upstream/Gate/Scope/Relay/Client-Addr naming B", "A's library only"],
+	["signed out + every forged X-LH-* header", "401"],
+	["A's and B's cookies in one Cookie header", "one library, or refused"],
+	["A's key reads A's marker (control)", "200"],
+	["B's key on A's marker", "401/403/404"],
+	["A's key with B's tag", "401"],
+	["A's key without its tag (the owner's copy)", "401"],
+	["the owner's key with A's tag in front", "401"],
+	["A's key on the owner's marker", "401/403/404"],
+	["A's pairing code with B's tag", "400/401/404"],
+	["A's pairing code with no tag", "400/401/404"],
+	["client X-LH-Scope: internal on /api/sync/hello with A's key (control)", "200"],
+	["from A's copy: B's copy, the owner's copy, the gateway, the maker", "unreachable"],
+	["from the owner's copy: A's copy, B's copy, the gateway, the maker", "unreachable"],
+	["from A's / the owner's copy: the relay with a wrong token, and with none", "404"],
+	["from B's copy: the maker", "unreachable"],
+	["from the gateway: A's copy directly", "unreachable"],
+	...INTERNAL_PATHS.map((p) => [`POST ${p} (signed out, owner, A; client X-LH-Scope: internal)`, "400/404"]),
+	...TRICK_PATHS.flatMap((p) => [[`GET ${p} (signed out)`, "refused or empty"], [`GET ${p} (A)`, "refused, empty, or A's own only"]]),
+	["Service-Worker: script", "403"],
+	["pause A: A's cookie / A's key / A's container / B's key", "refused / 503 / exited / 200"],
+	["resume A: A's key", "200"],
+	["remove A: A's cookie / A's key / A's container", "refused / 503 / gone"],
+	["delete A now: A's key / A's cookie / A's volume / A's sign-in", "401 not_paired / refused / gone / 401"],
+	["cleanup", "B removed and deleted; the owner's test device removed; the owner's marker session stays"],
+];
+
+if (args.list) {
+	for (const [name, want] of PLAN) console.log(`${name.padEnd(90)}  ${want}`);
+	console.log(`\n${PLAN.length} lines (the paths expand to ${INTERNAL_PATHS.length * 3 + TRICK_PATHS.length * 2} requests).`);
+	process.exit(0);
+}
 await main();
