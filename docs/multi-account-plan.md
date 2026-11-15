@@ -86,8 +86,9 @@ Asked one at a time, each with pictures of the options.
 
 ### Signing in
 
-- `/login` is the gateway's page: name and password, and a link for an invite code. The cookie keeps its name (`__Host-lh_session`) and its rules (HttpOnly, Secure, SameSite=Lax, a fixed 30 days, only a hash stored); it now names a gateway session, which names an account.
-- The existing rules carry over, per account where they were per site: a password of at least 8 characters as a scrypt hash; 5 wrong tries from one address pause sign-ins from it for 15 minutes, doubling to 24 hours; writes must come from the site itself.
+- `/login` is the gateway's page: name and password, and a link for an invite code. The cookie keeps its name (`__Host-lh_session`) and its rules (HttpOnly, Secure, SameSite=Lax, only a hash stored); it now names a gateway session, which names an account.
+- **A sign-in is extended by use** (the owner's decision, a change from today's fixed 30 days): it lasts **30 days from the last use, and at most 6 months from the sign-in**. A device left unused for 30 days is signed out; a device in constant use signs in again after 6 months. The upper limit is there so that a sign-in copied off a device can't be kept alive for ever by being used. Behind a gateway only: a single-copy server keeps its fixed 30 days.
+- The other existing rules carry over, per account where they were per site: a password of at least 8 characters as a scrypt hash; 5 wrong tries from one address pause sign-ins from it for 15 minutes, doubling to 24 hours; writes must come from the site itself.
 - A wrong name and a wrong password give the same answer and take the same time.
 - One browser holds one signed-in account at a time.
 
@@ -180,6 +181,7 @@ Asked so that the build can run in one go once the owner says "build it".
 | Accounts in Settings | A row of its own under Account on a computer and a tablet. **On a phone it is a second group inside Account**, under a divider, as Obsidian sits inside Cloud; the phone's list stays at eight rows. Shown to the owner only. |
 | Colours before sign-in | **The app's standard dark theme, always**, for the sign-in, first-start, invite, recovery-code and reset pages. **The home-screen app's start-up colours too** (the manifest, which is fetched with no sign-in). Behind a gateway only: a single-copy server keeps its themed sign-in pages. Signed in, everyone has their own theme as now. |
 | The Windows app's pairing box | **May be widened** if a 13-character code doesn't fit; nothing else on that form changes. It rides with the Windows release that the shipping causes anyway. |
+| How long a sign-in lasts | **30 days since the last use, at most 6 months** (asked after the owner wanted sign-ins extended by use; the other choices were no upper limit, and today's fixed 30 days). |
 | Changing the cap | **In the server's settings file** (`LH_MAX_ACCOUNTS` in `deploy/.env`, then `./update.sh`), with a short guide. Not on the Accounts screen. |
 
 ## Still for the owner, after the build
