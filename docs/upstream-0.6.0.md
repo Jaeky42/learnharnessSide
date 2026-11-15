@@ -202,6 +202,10 @@ Five things the plan had left open, or that came out differently than the plan s
     - not after Stop or a provider's error. The wrap-up call is counted in the job's usage like any other;
     - a run that ends with a brief makes no extra call, and nothing on screen changed.
   - **Not changed:** the PDF reader (its own loop and limit) and every other helper.
+  - **State:** built on `claude/upbeat-goodall-391yam` (cut from `side-tutor` at `e9b225e`) and pushed there; that branch builds nothing. **Not shipped:** neither the Windows app nor the server has it. No protocol or format change.
+  - **Checked** with scripted model replies only, by the implementer and then by an independent verifier with a script of its own: each of the four ways and the quiet variant now ends in the wrap-up's brief; 16 tool calls make exactly 17 model calls; a tool call in the wrap-up reply never ran; a wrap-up reply without text gives the old failure and no second wrap-up; a run that ends with a brief makes no extra call; a caller without `wrapUp` is as before. Typecheck clean, lint with its one existing warning.
+  - **Not checked:** a real model (whether it follows the wrap-up message, and how a real provider takes a refused tool call), and a job through the real screen.
+  - **Tests:** `tests/researcher-wrap-up.test.ts`.
   - **Known limit:** a brief written beside one more tool call, followed by a closing message that has some text ("Done."), still delivers the closing text. A real brief can't be told from a closing remark without guessing.
 
 ### The Drawing Pad, as tried on a computer (nothing of upstream's changed)

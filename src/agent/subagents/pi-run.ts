@@ -183,7 +183,10 @@ export async function runSubagent(tools: AgentTool<any, any>[], opts: SubagentRu
 		// FORK (research wrap-up): a last message that is a tool call (turn cap)
 		// or has no text gets one request to write the deliverable.
 		if (opts.wrapUp && !aborted && !opts.abortSignal?.aborted && errorMessage === undefined) {
-			const lastRun = [...agent.state.messages]
+			// Same slice as the result below: the seeded system message is
+			// dropped first, so an input message can't be taken for the run's.
+			const lastRun = agent.state.messages
+				.filter((m) => (m as { role?: string }).role !== "system")
 				.slice(before)
 				.reverse()
 				.find((m) => (m as { role?: string }).role === "assistant") as AssistantMessage | undefined;
