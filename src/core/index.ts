@@ -110,6 +110,10 @@ export * from "./obsidian-sync.ts";
 // server address rule the pairing form shares with the engine. Both pure.
 export * from "./sync/screens.ts";
 export { normalizeServerAddress, type ServerAddress } from "./sync/address.ts";
+// Accounts on one server: the approved wording for the account screens
+// (import-free, browser-safe; a test keeps it so) and the owner screen's view type.
+export * from "./account-screens.ts";
+export type { AccountsView } from "./accounts.ts";
 // side-chat.ts (shared side conversations): ask-input validation,
 // thread lookup and the side model's lesson document. Pure, browser-safe.
 export * from "./side-chat.ts";

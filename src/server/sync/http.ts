@@ -26,6 +26,12 @@
  *
  * Everything answers 404 outside server mode. The gate for /api/sync/* is
  * syncGate in server-auth.ts: a device key, never the login cookie.
+ *
+ * Multi-account: LH_ACCOUNT_TAG (an account's copy) tags the codes and keys
+ * issued here (core/sync/devices.ts). Unset: untagged, as before. Set to
+ * anything but a valid tag: pairing is refused (500), never untagged.
+ * Behind the gateway the copy has no password of its own, so pairing
+ * doesn't ask for one there.
  */
 
 import {
@@ -39,6 +45,7 @@ import {
 	cleanDeviceName,
 	completePairing,
 	findDevice,
+	isAccountTag,
 	isDeviceId,
 	MAX_DEVICES,
 	pairingCodeMatches,
@@ -48,13 +55,30 @@ import {
 import { parseProtocolHeader, protocolVerdict, SYNC_PROTOCOL_HEADER, SYNC_PROTOCOL_VERSION } from "../../core/sync/protocol.ts";
 import { readServerAuthState, updateServerAuthState } from "../../store/server-auth.ts";
 import { MAX_BUNDLE_BYTES } from "../../core/sync/sessions.ts";
-import { clientAddress, json, lockedMessage, notFound, readBody, serverModeEnabled, signedIn } from "../server-auth.ts";
+import { behindGateway, clientAddress, json, lockedMessage, notFound, readBody, serverModeEnabled, signedIn } from "../server-auth.ts";
 import { syncAuthority } from "./engine.ts";
 import { graphAuthority } from "./graph-engine.ts";
 import { flashcardsAuthority } from "./flashcards-engine.ts";
 import { mapsAuthority } from "./maps-engine.ts";
 
 const NOT_PAIRED = { error: "This desktop app isn't paired with this server.", code: "not_paired" } as const;
+
+type Env = Record<string, string | undefined>;
+const tagWarning = globalThis as typeof globalThis & { __lhAccountTagWarned?: boolean };
+
+/** This copy's account tag, read at request time: null when the variable is
+ *  unset, undefined when it is set but not a valid tag (fail closed). */
+export function accountTag(env: Env = process.env): string | null | undefined {
+	const value = env.LH_ACCOUNT_TAG;
+	if (value === undefined) return null;
+	if (isAccountTag(value)) return value;
+	if (!tagWarning.__lhAccountTagWarned) console.error("[LearnHarness] LH_ACCOUNT_TAG is not three characters of the code alphabet; pairing is refused.");
+	tagWarning.__lhAccountTagWarned = true;
+	return undefined;
+}
+
+/** No error text: the screens fall back to their own generic line. */
+const TAG_REFUSAL = { code: "account_tag_invalid" } as const;
 
 /** The paired desktop a sync request comes from, or null. */
 export function deviceFromRequest(request: Request): DeviceRecord | null {
@@ -79,14 +103,16 @@ export async function desktopsResponse(request: Request, now = Date.now()): Prom
 	if (!serverModeEnabled()) return notFound();
 	const body = await readBody(request);
 	if (!body) return json({ error: "Expected JSON." }, 400);
+	const tag = accountTag();
 	type Outcome = { status: number; body: Record<string, unknown> };
 	const outcome = updateServerAuthState<Outcome>((state) => {
 		if (!signedIn(request, state, now)) return { state: null, result: { status: 401, body: { error: "Sign in to LearnHarness first." } } };
 		if (body.op === "code") {
+			if (tag === undefined) return { state: null, result: { status: 500, body: TAG_REFUSAL } };
 			if (state.devices.length >= MAX_DEVICES) {
 				return { state: null, result: { status: 409, body: { error: `This server already has ${MAX_DEVICES} desktop apps paired. Remove one first.` } } };
 			}
-			const started = startPairing(state, now);
+			const started = startPairing(state, now, tag);
 			return { state: started.state, result: { status: 200, body: { code: started.code, expiresAt: started.expiresAt } } };
 		}
 		if (body.op === "remove") {
@@ -103,6 +129,10 @@ export async function desktopsResponse(request: Request, now = Date.now()): Prom
 /** A desktop app trades the pairing code for its own key. */
 export async function pairResponse(request: Request, now = Date.now()): Promise<Response> {
 	if (!serverModeEnabled()) return notFound();
+	const tag = accountTag();
+	if (tag === undefined) return json(TAG_REFUSAL, 500);
+	// An account's copy behind the gateway never has a password of its own.
+	const needsPassword = !behindGateway();
 	const body = await readBody(request);
 	if (!body) return json({ error: "Expected JSON." }, 400);
 	const name = cleanDeviceName(body.name);
@@ -111,7 +141,7 @@ export async function pairResponse(request: Request, now = Date.now()): Promise<
 	const address = clientAddress(request.headers);
 	type Outcome = { status: number; body: Record<string, unknown> };
 	const outcome = updateServerAuthState<Outcome>((state) => {
-		if (!state.password) return { state: null, result: { status: 409, body: { error: "This server isn't set up yet. Open its site and choose a password first." } } };
+		if (needsPassword && !state.password) return { state: null, result: { status: 409, body: { error: "This server isn't set up yet. Open its site and choose a password first." } } };
 		const wait = lockedFor(state, address, now);
 		if (wait) return { state: null, result: { status: 429, body: { error: lockedMessage(wait) } } };
 		if (!pairingCodeMatches(state, body.code, now)) {
@@ -125,7 +155,7 @@ export async function pairResponse(request: Request, now = Date.now()): Promise<
 				},
 			};
 		}
-		const paired = completePairing(clearFailures(state, address), deviceId, name, now);
+		const paired = completePairing(clearFailures(state, address), deviceId, name, now, tag);
 		if (!paired.ok) {
 			return { state: null, result: { status: 409, body: { error: `This server already has ${MAX_DEVICES} desktop apps paired. Remove one first.` } } };
 		}

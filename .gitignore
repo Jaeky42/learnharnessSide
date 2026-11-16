@@ -32,3 +32,4 @@ xai-credentials.json*
 
 # server-mode login (side-tutor fork, src/store/server-auth.ts)
 server-login.json*
+/gateway-dist/

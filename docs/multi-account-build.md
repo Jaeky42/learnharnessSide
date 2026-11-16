@@ -1,6 +1,6 @@
 # Build steps: accounts on one server
 
-The step-by-step companion to `docs/multi-account-plan.md` (the approved plan: read it first; it holds the owner's decisions and the design). This file says what to build, in what order, in which files, and how to prove each step. **Nothing here is built, and nothing is to be built until the owner says so.**
+The step-by-step companion to `docs/multi-account-plan.md` (the approved plan: read it first; it holds the owner's decisions and the design). This file says what to build, in what order, in which files, and how to prove each step. **Status: built on `claude/dazzling-maxwell-j6mfy1` and shipped to both branches** with the owner's word after the page of screenshots; the owner's server is switched over by hand, with the guide. What was built, the builder's rulings and what is still open are in `docs/cloud-sync.md` ("Accounts on one server" under "Hosting"). The sections below are the guide as it was written; where the build differs, the text says "(changed while building: reason)", so the contracts here match the code.
 
 The names, routes and file shapes under "Contracts" are the planner's proposals for the inside of the system; a builder may change one for a good reason and should then change it here too. What the owner decided, and every word on a screen, is not the builder's to change.
 
@@ -23,11 +23,17 @@ The names, routes and file shapes under "Contracts" are the planner's proposals 
 
 | Piece | Image and command | Listens | Networks |
 |---|---|---|---|
-| Caddy | `caddy:2` | 80, 443 (public) | front; every account's network |
+| Caddy (container `lh-caddy`) | `caddy:2` | 80, 443 (public); 9200 (the internal relay, never published) | front; owner; every account's network |
 | gateway | the LearnHarness image, `lh-gateway` | 9000 | front; maker |
 | maker | the LearnHarness image, `lh-maker` | 9100 | maker only; mounts the Docker socket |
-| owner's copy | the LearnHarness image, default command; compose service `lh`, volume `lh-data` (both as today) | 3000 | front |
+| owner's copy | the LearnHarness image, default command; compose service `lh`, volume `lh-data` (both as today) | 3000 | owner |
 | an account's copy | the same; container `lh-acct-<tag>`, volume `lh-acct-<tag>-data` | 3000 | `lh-acct-<tag>-net` |
+
+**(Changed while building: the plan says each copy's network is joined only by Caddy, and nothing else may reach the gateway.)** Networks, as built: `front` (named `lh-0-front`) = Caddy and the gateway only; `owner` (`lh-1-owner`) = Caddy and the owner's copy; `maker` (`lh-2-maker`) = gateway and maker (`internal: true`); each account's `lh-acct-<tag>-net` = that copy and Caddy (not internal: the copy needs outbound access). So nothing but Caddy reaches the gateway, and no copy shares a network with another copy, the gateway or the maker. The owner's copy sat on `front` in the first table; it now has its own network. **(Changed after a CI run:** the three have fixed names, chosen so `lh-0-front` sorts before every `lh-acct-` network: Docker routes a container on several networks, published ports included, through the network whose name sorts first, so a project named `stack` let the first account network take Caddy's ports and cut a request in flight. The maker also joins Caddy with `GwPriority` −1. One stack per host; "Networks, as built" in `docs/cloud-sync.md`.)
+
+**The relay (changed while building: the same reason).** The gateway can't reach a copy directly, yet it must forward a pairing request and call a copy's `/api/internal/unpair-all`. It does both through an internal site in Caddy (`http://:9200`, plain HTTP, never published), which opens only for `LH_RELAY_TOKEN` (`X-LH-Relay`) and only for an upstream that is a copy's address; the gateway sends the copy's address and secret (`X-LH-Upstream`, `X-LH-Gate`), the scope (`X-LH-Scope`: `sync` or `internal`) and the real client's address (`X-LH-Client-Addr`, which Caddy turns into the copy's `X-Forwarded-For`). The relay is reachable from every network Caddy is on, so the token is what keeps a copy's programs out.
+
+**Limits (changed while building: for the owner to confirm).** The owner's own copy in `deploy/compose.yaml` has the same limits as an account's copy (1 GB memory, 2 GB with swap, 512 processes, no capabilities, `no-new-privileges`, init); a test keeps them equal to the maker's template. The gateway has 256 MB and 128 processes, a read-only root and `/tmp` as tmpfs; the maker 128 MB and 64 processes, a read-only root, the socket's group added (`group_add: LH_DOCKER_GID`) so it stays the image's `node` user. The maker needs **Docker 25 or newer** (Engine API 1.44).
 
 ### Environment variables
 
@@ -38,33 +44,41 @@ The names, routes and file shapes under "Contracts" are the planner's proposals 
 | `LH_SEED_WORKER_CONCURRENCY` | an account's copy | Read by the entrypoint only when the volume has no `settings.json` yet: writes "helpers at once" (3). |
 | `LH_GATEWAY_FILE` | gateway | Its state file (`/gateway/accounts.json`, on its own volume). |
 | `LH_MAX_ACCOUNTS` | gateway | The cap (4). From `deploy/.env`. |
-| `LH_OWNER_UPSTREAM`, `LH_OWNER_GATE_SECRET` | gateway | The owner's copy (`lh:3000`) and its secret. |
+| `LH_OWNER_UPSTREAM`, `LH_OWNER_GATE_SECRET` | gateway | The owner's copy (`lh:3000`) and its secret (the copy's `LH_GATE_SECRET`; at least 32 characters). |
 | `LH_MAKER_URL`, `LH_MAKER_TOKEN` | gateway, maker | Where the maker is, and the shared token for it. |
-| `LH_IMAGE`, `LH_CADDY_CONTAINER` | maker | The image every copy is made from (the maker's own), and Caddy's container name (to join it to a new account's network). |
+| `LH_RELAY_URL`, `LH_RELAY_TOKEN` | gateway; Caddy (the token) | Caddy's internal relay (`http://caddy:9200`) and its token (at least 32 characters). *(Added while building: the relay, above.)* |
+| `LH_IMAGE`, `LH_CADDY_CONTAINER` | maker | The image every copy is made from (compose passes the image the whole stack runs; without it, the maker's own container's image), and Caddy's container name (`lh-caddy`, to join it to a new account's network). |
+| `LH_DOCKER_GID`, `LH_DOCKER_SOCKET` | compose | The Docker socket's group id (added to the maker's groups) and the socket's path if it isn't `/var/run/docker.sock`. *(Added while building: the maker doesn't run as root.)* |
 
-`LH_GATE_SECRET` (owner's copy) and `LH_MAKER_TOKEN` are made once by `deploy/make-secrets.sh` into `deploy/.env`. An account copy's secret is made by the maker and kept in the gateway's file.
+`LH_GATE_SECRET` (owner's copy), `LH_MAKER_TOKEN` and `LH_RELAY_TOKEN` are made once by `deploy/make-secrets.sh` into `deploy/.env`, which also adds `LH_DOCKER_GID` (changed while building: the relay and the maker's group). An account copy's secret is made by the maker and kept in the gateway's file.
 
 ### Headers between Caddy, the gateway and a copy
 
-- Caddy removes any `X-LH-Upstream` and `X-LH-Gate` a client sent, before anything else.
-- Caddy asks `GET gateway:9000/gate` with the original method, path, `Cookie`, `Authorization`, `Origin` and `Host` (Caddy's `forward_auth` passes the method and path as `X-Forwarded-Method` and `X-Forwarded-Uri`; *from its documentation, proven in slice 0*).
-- The gateway's 200 carries `X-LH-Upstream: <host>:3000` and `X-LH-Gate: <that copy's secret>`; Caddy copies both onto the request and proxies to the upstream named. Any other answer goes back to the client as it is.
+- Caddy removes any `X-LH-Upstream`, `X-LH-Gate`, `X-LH-Scope`, `X-LH-Relay` and `X-LH-Client-Addr` a client sent, before anything else. *(Changed while building: three more headers than the first two.)*
+- Caddy asks `GET gateway:9000/gate` with the original method, path, `Cookie`, `Authorization`, `Origin` and `Host` (Caddy's `forward_auth` passes the method and path as `X-Forwarded-Method` and `X-Forwarded-Uri`; proven in slice 0).
+- The gateway's 200 carries `X-LH-Upstream: <host>:3000`, `X-LH-Gate: <that copy's secret>` and **`X-LH-Scope`** (`public`, `sync` or `session`); Caddy copies all three onto the request and proxies to the upstream named. Any other answer goes back to the client as it is. **(Changed while building: `X-LH-Scope` is new. A security review showed that the gateway and a copy could read one request path differently, because Caddy forwards request targets raw to both. The gateway now says what kind of request it let through, and the copy re-checks that against the path as the copy itself parses it; the gateway also refuses any non-canonical path with 400, and its public list is narrower than the copy's.)**
+- **Caddy also (changed while building, for the reasons in `docs/cloud-sync.md`):** strips the session cookie (`__Host-lh_session`) before a request reaches any copy, so a program inside a copy can't act as that person against the gateway; refuses a request with a `Service-Worker` header (403) and strips `Service-Worker-Allowed` from answers (one shared origin, no service worker in the app); has `admin off`; and fails closed (502) when the gateway's answer has no upstream, no scope, or an upstream that isn't a copy's address.
 
 ### What `/gate` decides, in this order
 
+**(Changed while building: the order below is what `decideGate` in `gateway/gate.ts` does; the guide's first draft had the same six steps without the canonical-path check, the damaged-file answer and the unpair marks.)**
+
+0. A request target that isn't in one canonical form (a fragment, the absolute form, a control character, space or backslash; dot segments, encoded slashes, `%2e`, `%00`, `%23` or doubled slashes in the path; anything a URL parser would change) → 400.
 1. `/api/internal/*` → 404 (Caddy refuses it too).
-2. A sync path (`isSyncPath`): the tag is read from the Bearer key (46 characters: the first 3 are the tag; 43: the owner's). Account active → 200. Paused, or removed and still kept → **503** (the desktop app reads that as offline and keeps its key). No such account, or no key → 401 `{code: "not_paired"}`, the shape the desktop app already understands.
-3. A public file (`/favicon.ico`, `/robots.txt`, `/_next/`, `/fonts/`, `/icons/`: the list in `isPublic`, without the manifest) → 200, the owner's copy. **`/manifest.webmanifest` is the gateway's own**, with the standard dark colours (the owner's decision), so Caddy sends that path to the gateway.
+2. A sync path (`isSyncPath`): the tag is read from the Bearer key (46 characters: the first 3 are the tag; 43: the owner's). A damaged state file → 503. A key of no valid shape, or none → 401 `{code: "not_paired"}`, the shape the desktop app already understands. Untagged → the owner's copy (503 while its unpair is owed). Tagged: no owner yet → 503; no such account, the owner's, or an account being deleted → 401 `not_paired`; paused, removed (still kept), without a copy yet or owing an unpair-all → **503** (the desktop app reads that as offline and keeps its key); active → 200, scope `sync`.
+3. A public file (`/favicon.ico`, `/robots.txt`, `/_next/static/`, `/fonts/`, `/icons/`: `isPublicFile`, narrower than the copy's own list, without the manifest and without other `/_next/` paths) → 200, the owner's copy, scope `public`. **`/manifest.webmanifest` is the gateway's own**, with the standard dark colours (the owner's decision), so Caddy sends that path to the gateway.
 4. A write that doesn't come from the site itself (`sameOrigin`) → 403.
-5. A valid session cookie of an active account → 200, that account's copy. "Last seen" is touched at most every 5 minutes, and with it the session is extended: valid until 30 days after its last use, never past 6 months after its sign-in (the owner's decision).
-6. Otherwise: an API path → 401 "Sign in to LearnHarness first."; a page → a redirect to `/login` (to `/setup` while no owner exists).
+5. A damaged state file → 503.
+6. A valid session cookie of an active account with a ready copy → 200, that account's copy, scope `session`. "Last seen" is touched at most every 5 minutes, and with it the session is extended: valid until 30 days after its last use, never past 6 months after its sign-in (the owner's decision).
+7. Otherwise: an API path → 401 "Sign in to LearnHarness first."; a page → a redirect to `/login` (to `/setup` while no owner exists).
 
 ### The gateway's own routes
 
 | Route | Who | Does |
 |---|---|---|
+| `GET /gate`, `GET /healthz` | Caddy | The decision above; a plain "ok". |
 | `GET /login`, `/invite`, `/reset`, `/setup` | anyone | The pages (plain HTML, built like `server-auth-pages.ts`, in the app's standard dark theme, always: the owner's decision; the palette is the default theme's, read from the app's own theme definitions at build time, never from anyone's saved theme). |
-| `POST /api/server-auth/setup` | anyone, once | The first start: setup code, name, password → the owner's account, bound to the owner's copy. |
+| `POST /api/server-auth/setup` | anyone, once | The first start: setup code, name, password → the owner's account, bound to the owner's copy, signed in. *(Added while building: the answer carries the owner's four recovery codes, once.)* |
 | `POST /api/server-auth/login` | anyone | Name and password → the cookie. |
 | `POST /api/server-auth/invite` | anyone | Invite code, name, password → asks the maker for a copy, signs in, returns the recovery codes once. |
 | `POST /api/server-auth/reset` | anyone | A recovery code or the owner's reset code, the name, a new password. |
@@ -73,33 +87,38 @@ The names, routes and file shapes under "Contracts" are the planner's proposals 
 | `POST /api/server-auth/recovery-codes` | signed in, with the password | Replaces the 4 codes; returns them once. |
 | `POST /api/server-auth/delete-account` | signed in, with the password; not the owner | Deletes at once (the owner's decision): ends every session, has the maker remove the container and delete the volume, then erases the account's record. No `removed` state, no 30 days. |
 | `GET /api/accounts`, `POST /api/accounts {op}` | the owner | The list, and `invite`, `cancel-invite`, `reset`, `pause`, `resume`, `remove`, `restore`, `delete-now`. |
-| `POST /api/sync/pair` | a desktop app | Reads the tag from the code in the body, passes the request to that copy with its secret, passes the answer back. |
+| `POST /api/sync/pair` | a desktop app | Reads the tag from the code in the body, passes the request to that copy (through the relay) with its secret and the client's address, passes the answer back. |
+| `POST /control/reset-owner` | the `lh-gateway reset-owner` command only | *(Added while building.)* Loopback only, never with a forwarding header (Caddy always adds one); not routed by Caddy. The owner's last way back in. |
 
 `POST /api/server-auth/desktops` (pairing codes, removing a PC) stays the copy's own route, reached through `/gate` like any other.
 
 ### A copy's new internal routes (reachable only with the gate secret; never from outside)
 
-- `POST /api/internal/unpair-all`: `removeAllDevices`. The gateway calls it after a password change, either reset, Sign out everywhere, Pause and Remove.
+- `POST /api/internal/unpair-all`: `removeAllDevices`. The gateway calls it (through the relay, scope `internal`) after a password change, either reset and Sign out everywhere. **(Changed while building, settled by the plan: the guide said "Pause and Remove" too. The plan says a paused or removed account's desktop app keeps its key and carries on after Restore, so Pause and Remove end browser sessions only; the app gets 503 meanwhile and 401 `not_paired` only after the data is deleted for good.)** The account is marked `unpairPending` in the same write as the change, the call is retried until the copy confirms, and while the mark is set that account's sync requests get 503 and new pairings are refused.
 - `GET /api/account/export`: the download (a normal signed-in request, not internal).
 
 ### The maker's API (Bearer `LH_MAKER_TOKEN`; internal network only)
 
 | Call | Does |
 |---|---|
-| `POST /copies {tag}` | Makes the network, the volume and the container from the fixed template, joins Caddy to the network, starts it. Answers `{upstream, gateSecret}`. |
-| `POST /copies/<tag>/stop`, `/start` | Pause and resume. |
-| `DELETE /copies/<tag>` | Removes the container and its network. The volume stays. |
-| `DELETE /volumes/<tag>` | The final deletion. |
-| `GET /copies` | Each copy's state and image. |
+| `POST /copies {tag, start?, fresh?}` | Makes the network, the volume and the container from the fixed template, joins Caddy to the network, starts it (not when `start` is literally `false`). `fresh: true` (a new account only): 409 `copy_exists` / `volume_exists` and nothing made when the tag's container, a swap's leftover or its volume exists. On an existing copy: re-created on the same volume with a new secret. Answers `{upstream, gateSecret}`. |
+| `POST /copies/<tag>/stop`, `/start` | Pause and resume. 404 `no_copy` when there is none. |
+| `DELETE /copies/<tag>` | Removes the container (a swap's leftovers too) and its network. The volume stays. |
+| `DELETE /volumes/<tag>` | The final deletion. 409 `volume_in_use` while a container uses it. |
+| `GET /copies` | Each copy's state and image: `[{tag, state, image, upToDate}]`. |
+| `GET /volumes` | `[{tag}]` for every `lh-acct-<tag>-data` volume. |
+| `POST /reconcile` | Finishes interrupted swaps, joins Caddy to every account network, brings every copy onto the current image, one at a time. Also run at the maker's start. |
 
-A tag must be exactly three characters of the code alphabet, or the call is refused. The template takes nothing else from a request: image `LH_IMAGE`; `Memory` 1 GB and `MemorySwap` 2 GB; `CpuShares` equal for all; `PidsLimit` 512; `CapDrop: ALL`; `no-new-privileges`; restart `unless-stopped`; the four variables above.
+*(Changed while building: `start: false` and `fresh: true` on create, `GET /volumes` and `POST /reconcile` are new. `fresh` exists so a new account can never be given another person's leftover data (a lost state file, an abandoned attempt); `start: false` lets a paused account's copy be re-created without running; `GET /volumes` lets the gateway avoid tags whose volume exists.)*
+
+A tag must be exactly three characters of the code alphabet, or the call is refused. The template takes nothing else from a request: image `LH_IMAGE`; `User: node`; the volume as the only mount; `Memory` 1 GB and `MemorySwap` 2 GB; `CpuShares` equal for all; `PidsLimit` 512; `CapDrop: ALL`; `no-new-privileges`; `Init: true`; a log-size bound (3 files of 10 MB); restart `unless-stopped`; the variables `LH_GATE_SECRET`, `LH_ACCOUNT_TAG`, `LH_SEED_WORKER_CONCURRENCY`, `LH_TRUST_PROXY=1` and the maker's `TZ`. *(Changed while building: `Init`, the log bound, `User: node` and `LH_TRUST_PROXY` are added.)* **Re-creating a copy** (on a new image, or with a new secret) keeps the old container, renamed `lh-acct-<tag>-old-running` / `-old-stopped`, until the new one runs, and an interrupted swap is finished at the next call or start; on SIGTERM the maker waits for work under way. The maker reaches Docker over the socket with the Engine API 1.44, so the server needs Docker 25 or newer; socket access is through `group_add` of the socket's group id (`LH_DOCKER_GID`, written by `make-secrets.sh`). Its entry file is `gateway/maker-main.ts` (`maker.ts` never starts itself, so tests can import it).
 
 ### The gateway's state file
 
 `{version, accounts[], sessions[], invites[], resets[], lockouts{}, setupCodeHash}`; hashes only; mode 0600; written atomically; a damaged file closes the site (503).
 
-- account: `id`, `tag`, `name`, `nameKey` (lower case), `password` (scrypt), `recoveryCodes[]` (hashes), `role` (`owner` | `member`), `state` (`active` | `paused` | `removed`), `createdAt`, `lastSeenAt`, `removedAt`, `upstream`, `gateSecret`.
-- session: today's `SessionRecord` plus `accountId`; `expiresAt` moves with use (`lastSeenAt` + 30 days, capped at `createdAt` + 180 days). The cookie itself is set once, at sign-in, with a 180-day lifetime, and the gateway decides whether it still counts: `/gate` answers through Caddy's `forward_auth`, which can't hand a fresh cookie back to the browser. New constants beside `SESSION_LIFETIME_MS` in the account rules (30 days idle, 180 days in all); `src/core/server-auth.ts`'s own fixed 30 days are not changed. invite / reset: `codeHash`, `expiresAt` (reset: `accountId`).
+- account: `id`, `tag`, `name`, `nameKey` (lower case), `password` (scrypt), `recoveryCodes[]` (hashes), `role` (`owner` | `member`), `state` (`active` | `paused` | `removed` | `deleting`), `createdAt`, `lastSeenAt`, `removedAt`, `upstream`, `gateSecret`. *(Changed while building: `deleting` is a fourth state, an account whose deletion started and must be finished (no slot, no sign-in; its name and tag are kept until the record is erased); and four optional marks: `unpairPending`, `copyPending`, `keepVolume`, `codeFailures`.)*
+- session: today's `SessionRecord` plus `accountId`; `expiresAt` moves with use (`lastSeenAt` + 30 days, capped at `createdAt` + 180 days). The cookie itself is set once, at sign-in, with a 180-day lifetime, and the gateway decides whether it still counts: `/gate` answers through Caddy's `forward_auth`, which can't hand a fresh cookie back to the browser. New constants beside `SESSION_LIFETIME_MS` in the account rules (30 days idle, 180 days in all); `src/core/server-auth.ts`'s own fixed 30 days are not changed. invite / reset: `codeHash`, `expiresAt` (reset: `accountId`). Also `lockoutPauseUntil?` (a full lockout table's pause) and, in each lockout record, `against` (whose password every counted failure was against). The file has a daily backup beside it (`accounts.json.bak`), and a missing file with a backup beside it reads as damaged, not as "no accounts". *(Added while building.)*
 
 ### Tags in codes and keys
 
@@ -151,6 +170,138 @@ Slices 4 and 5 can be built side by side. Inside a slice, the lettered parts wit
 - **In the sandbox:** Docker works after starting `dockerd`, but Docker Hub may refuse the `caddy` image (429). Then run this slice as a job started by hand in GitHub Actions.
 - **Worker:** routine. **Done when:** the six proofs are written down in this file, with the Caddyfile that passed.
 
+**Result: it held** (real Caddy, 2.11.9 at slice 0 from `caddy:2`; a stand-in gateway and two stand-in copies; run in the sandbox with `--network host`). Caddy chooses the upstream from the gateway's answer, so the fallback (the gateway carrying requests itself) was **not needed**. Slice 0 ran with stand-in copies, not built ones (a build could not run while other files were being edited); built copies ran later in the real stack.
+
+**The proofs** (the six asked for, plus the ones the design added):
+
+1. **The answer picks the copy:** one request signed as A reached copy A with A's secret; as B, copy B with B's.
+2. **Streams arrive in pieces:** a server-sent stream arrived in ten chunks over 3 s, also with gzip (`encode zstd gzip`); the events channel is the same case. (`flush_interval -1`.)
+3. **A 26 MB upload arrives whole:** a 27,262,976-byte POST arrived with the same bytes and the same SHA-256.
+4. **A client can't name its copy:** client-sent `X-LH-Upstream`, `X-LH-Gate`, `X-LH-Relay` and `X-LH-Client-Addr` never reached a copy (only the gateway's values) and never reached `/gate`.
+5. **The gateway's 401, 302 and 503 reach the client unchanged** (status, headers, body).
+6. **`/gate` sees the real request:** `X-Forwarded-Method`, `X-Forwarded-Uri` (path and query), `Cookie`, `Authorization`, `Origin` and the original `Host`; a client's `X-Forwarded-For` is replaced, not appended (no `trusted_proxies`).
+7. **Paths:** `/api/internal/*` → 404 with no `/gate` call; `/api/server-auth/desktops` → `/gate` → the copy; `/api/server-auth/login`, `POST /api/sync/pair` (body intact), `/login` → the gateway directly with no `/gate` call.
+8. **The relay:** the right token reaches the copy (its secret kept, `X-LH-Relay` and `X-LH-Client-Addr` removed, the client's address as `X-Forwarded-For`, a client-supplied one gone; a stream passes); a wrong token, none, or an empty `X-LH-Relay` → 404; with `LH_RELAY_TOKEN` empty → 404 for everything.
+9. **Failing closed:** a gateway answer naming a dead upstream → 502; the gateway down → 502.
+10. **No `X-LH-*` header in any response to a client.**
+
+**Re-run on the Caddyfile as built:** the ten proofs at slice 0 (the first production Caddyfile, validated with `caddy validate`); **fourteen** after the first review's changes; **eighteen plus 27 stand-in checks** after the second review's (real `caddy:2` with the repo's `deploy/Caddyfile` unmodified and a stand-in gateway and copies on one network: the cookie strip in every position of the `Cookie` header, a missing or client-sent `X-LH-Scope`, the upstream allow-list, the relay passing the scope). Re-run them whenever the Caddyfile changes; the file is also pinned by `tests/deploy-files.test.ts`. Not tested: Caddy's certificate path for a real domain, HTTP/2 and HTTP/3 clients, `trusted_proxies` behind another proxy.
+
+**Differences from the sketch above** (slice 0 settled the syntax): the `to_copy` snippet must be defined before its first `import`; `request_header` and `forward_auth` are ordered with an explicit `route { }`, the `handle` blocks inside it; the relay's token uses the parse-time `{$LH_RELAY_TOKEN}` (the runtime `{env.X}` placeholder breaks CEL expressions); `/api/accounts/*` is added to the gateway's paths; and, from the reviews, `admin off`, the extra stripped headers, the scope, the cookie strip, the `Service-Worker` refusal and the fail-closed 502s.
+
+**The Caddyfile that passed** (`deploy/Caddyfile`, as it is now):
+
+```
+{
+	# Nothing here reloads the config (update.sh re-creates the container), and
+	# Caddy sits on every account's network: no admin endpoint at all.
+	admin off
+	servers {
+		# no trusted_proxies: client X-Forwarded-* is never trusted
+	}
+}
+
+(strip) {
+	request_header -X-LH-Upstream
+	request_header -X-LH-Gate
+	request_header -X-LH-Relay
+	request_header -X-LH-Client-Addr
+	request_header -X-LH-Scope
+}
+
+# The only upstreams there are: the owner's copy, or an account's (tag: the
+# setup code's alphabet; a test keeps the class equal to it). The public route
+# and the relay both require it.
+(copy_upstream) {
+	header_regexp X-LH-Upstream ^(lh|lh-acct-[0-9A-HJKMNP-TV-Z]{3}):3000$
+}
+
+(to_copy) {
+	forward_auth gateway:9000 {
+		uri /gate
+		copy_headers X-LH-Upstream X-LH-Gate X-LH-Scope
+	}
+	# Fail closed: a gateway answer that names no upstream, an upstream that
+	# isn't a copy, or no scope never proxies anywhere.
+	@noUpstream expression `{http.request.header.X-LH-Upstream} == ""`
+	respond @noUpstream 502
+	@notACopy not {
+		import copy_upstream
+	}
+	respond @notACopy 502
+	@noScope expression `{http.request.header.X-LH-Scope} == ""`
+	respond @noScope 502
+	reverse_proxy {http.request.header.X-LH-Upstream} {
+		flush_interval -1
+		# All accounts share one origin: a copy must not plant a service worker.
+		header_down -Service-Worker-Allowed
+		# A copy never gets the gateway's session cookie (its proof is the gate
+		# secret): code inside a copy can't act as that person, or the owner,
+		# against the gateway. Every other cookie passes unchanged; the
+		# forward_auth request above still carries the full header. First the
+		# cookie with the separator before it, then a separator left at the start.
+		header_up Cookie "(^|;\s*)__Host-lh_session=[^;]*" ""
+		header_up Cookie "^;\s*" ""
+	}
+}
+
+{$LH_DOMAIN} {
+	encode zstd gzip
+
+	route {
+		import strip
+
+		# Browsers send this header when fetching a worker script. The app has
+		# no service worker, so none is ever served or registered.
+		@serviceWorker header Service-Worker *
+		handle @serviceWorker {
+			respond 403
+		}
+
+		handle /api/internal/* {
+			respond 404
+		}
+
+		@copyOwn path /api/server-auth/desktops
+		@gateway path /login /setup /invite /reset /manifest.webmanifest /api/accounts /api/accounts/* /api/sync/pair /api/server-auth/*
+
+		handle @copyOwn {
+			import to_copy
+		}
+		handle @gateway {
+			reverse_proxy gateway:9000
+		}
+		handle {
+			import to_copy
+		}
+	}
+}
+
+# Internal relay: plain HTTP, internal network only (never published).
+http://:9200 {
+	route {
+		# The token, and an upstream that is a copy (X-LH-Scope, set by the
+		# gateway, passes through untouched).
+		@ok {
+			expression `"{$LH_RELAY_TOKEN}" != "" && {header.X-LH-Relay} == "{$LH_RELAY_TOKEN}"`
+			import copy_upstream
+		}
+		handle @ok {
+			reverse_proxy {http.request.header.X-LH-Upstream} {
+				flush_interval -1
+				header_up -X-LH-Relay
+				header_down -Service-Worker-Allowed
+				header_up X-Forwarded-For {http.request.header.X-LH-Client-Addr}
+				header_up -X-LH-Client-Addr
+			}
+		}
+		handle {
+			respond 404
+		}
+	}
+}
+```
+
 ### Slice 1: the gateway and one account
 
 After it, the owner's server does what it does today, through the gateway, with a name on the sign-in page.
@@ -164,7 +315,7 @@ After it, the owner's server does what it does today, through the gateway, with 
   - Also: `accountResponse`, `changePasswordResponse`, `logoutResponse`, `signOutEverywhereResponse`, `loginResponse`, `setupResponse` answer 404 in this mode (the gateway owns those paths). `desktopsResponse` (`src/server/sync/http.ts`) keeps working: today it asks `signedIn(request, state, now)`, which reads the copy's own session list; in this mode the gate secret is the proof. Give `signedIn` that rule once, and check its every caller.
   - New route `app/api/internal/unpair-all/route.ts` → 404 unless the mode is on.
   - Tests: `tests/gate-secret.test.ts`. The existing `tests/server-auth.test.ts` passes untouched.
-- **1d. Build and deploy files:** `scripts/build-gateway.mjs` bundles `gateway/main.ts` and `gateway/maker.ts` with esbuild into single `.mjs` files (add `esbuild` as a dev dependency with npm 11; it is in `node_modules` today only through `tsx`). `Dockerfile`: run it in the build stage, copy the two files, add `lh-gateway` and `lh-maker` wrappers like `reset-password`. `deploy/compose.yaml`: the `gateway` service and its volume, `LH_GATE_SECRET` on `lh`, a fixed `container_name` for Caddy. `deploy/Caddyfile` from slice 0. `deploy/make-secrets.sh`. `deploy/.env.example`. `scripts/server-reset-password.mjs`: with `LH_GATEWAY_FILE` set it resets the owner's account in the gateway's file (and `reset-password` runs in the gateway's container).
+- **1d. Build and deploy files:** `scripts/build-gateway.mjs` bundles `gateway/main.ts` and `gateway/maker-main.ts` (changed while building: the maker's entry file; `maker.ts` itself never starts on import) with esbuild into single `.mjs` files (add `esbuild` as a dev dependency with npm 11; it is in `node_modules` today only through `tsx`). `Dockerfile`: run it in the build stage, copy the two files, add `lh-gateway` and `lh-maker` wrappers like `reset-password`. `deploy/compose.yaml`: the `gateway` service and its volume, `LH_GATE_SECRET` on `lh`, a fixed `container_name` for Caddy. `deploy/Caddyfile` from slice 0. `deploy/make-secrets.sh`. `deploy/.env.example`. `scripts/server-reset-password.mjs`: with `LH_GATEWAY_FILE` set it resets the owner's account in the gateway's file (and `reset-password` runs in the gateway's container). **(Changed while building: the script is unchanged. The image's `reset-password` wrapper starts `lh-gateway reset-owner` where `LH_GATEWAY_FILE` is set and the old script everywhere else; `reset-owner` asks the running gateway through a loopback-only control route, because the state file has one writer. It prints the owner's name and a one-time reset code instead of wiping the password: see "Rulings made while building" in `docs/cloud-sync.md`.)**
   - The desktop build must not pick the gateway up: `scripts/build-server.mjs` is not changed.
 - **Run:** Caddy, the gateway and one copy with the golden data, in a browser at computer and phone size: first-start claim, sign in, a lesson, Settings → Account, sign out, the lockout, the home-screen manifest and icons while signed out.
 - **Risk:** high. Complex implementer for 1b and 1c, routine for 1a and 1d; one deep review of 1b + 1c together.
@@ -199,10 +350,10 @@ After it, the owner's server does what it does today, through the gateway, with 
 ### Slice 5: each person's own
 
 - **Already answered:** the new parts of Settings → Account and their boxes, the reset page (one box for either code), and the download's file type (.zip).
-- **Delete my account is immediate** (the owner's decision): the gateway checks the password, ends every session, calls the maker's `DELETE /copies/<tag>` and `DELETE /volumes/<tag>`, and only then erases the record. If the maker fails part-way, the account stays signed out and marked for deletion and the gateway tries again; it is never left usable with half its data gone.
+- **Delete my account is immediate** (the owner's decision): the gateway checks the password, ends every session, calls the maker's `DELETE /copies/<tag>` and `DELETE /volumes/<tag>`, and only then erases the record. If the maker fails part-way, the account stays signed out and marked for deletion and the gateway tries again; it is never left usable with half its data gone. *(As built: the account is marked `deleting` and signed out in one write and the answer returns at once; the maker's steps run in the background and in the lifecycle loop, and the record is erased only after the maker confirmed the volume is gone.)*
 - **5a. Settings → Account** (`components/settings/account-section.tsx`): reads the gateway's wider answer; the three new blocks only when the answer has them, so a single-copy server's screen is unchanged.
 - **5b. Reset** in the gateway: recovery code or owner's code, both counted by the one lockout, both ending every session and unpairing.
-- **5c. Download my data:** `app/api/account/export/route.ts` and `src/server/account-export.ts`: the parts `src/store/sync/backup.ts` lists (`chats`, `graph`, `jobs`, `settings.json`, `prompts`, `themes`, `notes/sessions`, `plugins-state.json`, `core-plugin-data`), streamed, never `sync/`, the secrets folder, the home folder or the vault. The owner chose **.zip**; the repo has no archive library, so add one small zip writer (with npm 11, for the lockfile), or write the store-only zip format by hand if nothing suitable is found. The file is named `learnharness-<name>-<date>.zip`.
+- **5c. Download my data:** `app/api/account/export/route.ts` and `src/server/account-export.ts`: the parts `src/store/sync/backup.ts` lists (`chats`, `graph`, `jobs`, `settings.json`, `prompts`, `themes`, `notes/sessions`, `plugins-state.json`, `core-plugin-data`), streamed, never `sync/`, the secrets folder, the home folder or the vault. The owner chose **.zip**; the repo has no archive library, so add one small zip writer (with npm 11, for the lockfile), or write the store-only zip format by hand if nothing suitable is found. *(As built: `src/server/zip-writer.ts`, written here, streamed and deflated, no dependency, no Zip64: the route refuses above 3.5 GiB or 65,000 files.)* The file is named `learnharness-<name>-<date>.zip`.
 - **5d. Browser storage at sign-out:** the app's stored keys are window and view state (`lh:side-tutor:pos`, `lh:side-tutor:size`, `lh:notes-*`, `lh:sidebar-open`, `lh:session-kind-filter`, `lh:zoom`, `lh.graph.camera.v1`). Check the files that touch storage (`components/chat.tsx`, `opening-prompt.ts`, `sidebar.tsx`, `graph-view.tsx`, `graph-canvas.ts`, `notes/notes-drawer.tsx`, `side-tutor.tsx`, `settings/settings-dialog.tsx`, `settings/keyboard-section.tsx`) for anything that holds a person's words, and clear that at sign-out.
 - **Tests:** `tests/gateway-reset.test.ts`, `tests/account-export.test.ts` (what is in, what is never in), more cases in `tests/server-auth-ui`-style tests for the Account screen.
 - **Risk:** moderate; the reset paths get the deep reviewer's eye with slice 1's.

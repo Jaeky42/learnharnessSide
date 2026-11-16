@@ -1,9 +1,108 @@
-# HTTPS for LearnHarness. Caddy gets and renews the certificate itself.
+{
+	# Nothing here reloads the config (update.sh re-creates the container), and
+	# Caddy sits on every account's network: no admin endpoint at all.
+	admin off
+	servers {
+		# no trusted_proxies: client X-Forwarded-* is never trusted
+	}
+}
+
+(strip) {
+	request_header -X-LH-Upstream
+	request_header -X-LH-Gate
+	request_header -X-LH-Relay
+	request_header -X-LH-Client-Addr
+	request_header -X-LH-Scope
+}
+
+# The only upstreams there are: the owner's copy, or an account's (tag: the
+# setup code's alphabet; a test keeps the class equal to it). The public route
+# and the relay both require it.
+(copy_upstream) {
+	header_regexp X-LH-Upstream ^(lh|lh-acct-[0-9A-HJKMNP-TV-Z]{3}):3000$
+}
+
+(to_copy) {
+	forward_auth gateway:9000 {
+		uri /gate
+		copy_headers X-LH-Upstream X-LH-Gate X-LH-Scope
+	}
+	# Fail closed: a gateway answer that names no upstream, an upstream that
+	# isn't a copy, or no scope never proxies anywhere.
+	@noUpstream expression `{http.request.header.X-LH-Upstream} == ""`
+	respond @noUpstream 502
+	@notACopy not {
+		import copy_upstream
+	}
+	respond @notACopy 502
+	@noScope expression `{http.request.header.X-LH-Scope} == ""`
+	respond @noScope 502
+	reverse_proxy {http.request.header.X-LH-Upstream} {
+		flush_interval -1
+		# All accounts share one origin: a copy must not plant a service worker.
+		header_down -Service-Worker-Allowed
+		# A copy never gets the gateway's session cookie (its proof is the gate
+		# secret): code inside a copy can't act as that person, or the owner,
+		# against the gateway. Every other cookie passes unchanged; the
+		# forward_auth request above still carries the full header. First the
+		# cookie with the separator before it, then a separator left at the start.
+		header_up Cookie "(^|;\s*)__Host-lh_session=[^;]*" ""
+		header_up Cookie "^;\s*" ""
+	}
+}
+
 {$LH_DOMAIN} {
 	encode zstd gzip
-	reverse_proxy lh:3000 {
-		# Lesson replies and the live event stream arrive in pieces:
-		# pass them on immediately instead of buffering.
-		flush_interval -1
+
+	route {
+		import strip
+
+		# Browsers send this header when fetching a worker script. The app has
+		# no service worker, so none is ever served or registered.
+		@serviceWorker header Service-Worker *
+		handle @serviceWorker {
+			respond 403
+		}
+
+		handle /api/internal/* {
+			respond 404
+		}
+
+		@copyOwn path /api/server-auth/desktops
+		@gateway path /login /setup /invite /reset /manifest.webmanifest /api/accounts /api/accounts/* /api/sync/pair /api/server-auth/*
+
+		handle @copyOwn {
+			import to_copy
+		}
+		handle @gateway {
+			reverse_proxy gateway:9000
+		}
+		handle {
+			import to_copy
+		}
+	}
+}
+
+# Internal relay: plain HTTP, internal network only (never published).
+http://:9200 {
+	route {
+		# The token, and an upstream that is a copy (X-LH-Scope, set by the
+		# gateway, passes through untouched).
+		@ok {
+			expression `"{$LH_RELAY_TOKEN}" != "" && {header.X-LH-Relay} == "{$LH_RELAY_TOKEN}"`
+			import copy_upstream
+		}
+		handle @ok {
+			reverse_proxy {http.request.header.X-LH-Upstream} {
+				flush_interval -1
+				header_up -X-LH-Relay
+				header_down -Service-Worker-Allowed
+				header_up X-Forwarded-For {http.request.header.X-LH-Client-Addr}
+				header_up -X-LH-Client-Addr
+			}
+		}
+		handle {
+			respond 404
+		}
 	}
 }

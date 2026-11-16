@@ -61,7 +61,10 @@ jobs:
       - name: Cloud sync tests on Windows
         # The sync engine and its screens run inside the desktop app. A test
         # that fails here stops the run before anything is published.
-        run: npx tsx --test tests/sync-*.test.ts tests/cloud-*.test.tsx
+        # Also the account rules and the two Settings screens for accounts on one
+        # server: pure rules and screens the desktop app's bundle carries too.
+        # (The gateway, the maker and the copy's gate are Linux-only: server-image.yml.)
+        run: npx tsx --test tests/sync-*.test.ts tests/cloud-*.test.tsx tests/accounts-core.test.ts tests/accounts-ui.test.tsx tests/account-own-ui.test.tsx tests/sign-out-storage.test.ts
         env:
           NODE_ENV: test
       - name: Flashcards store and back-end tests on Windows

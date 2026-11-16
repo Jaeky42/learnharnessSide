@@ -35,7 +35,7 @@ import {
 	type Ref,
 	type RefObject,
 } from "react";
-import { BotIcon, CloudIcon, KeyIcon, KeyboardIcon, NotebookPenIcon, PaletteIcon, PlugIcon, PuzzleIcon, SettingsIcon, UserIcon, WaypointsIcon, type LucideIcon } from "lucide-react";
+import { BotIcon, CloudIcon, KeyIcon, KeyboardIcon, NotebookPenIcon, PaletteIcon, PlugIcon, PuzzleIcon, SettingsIcon, UserIcon, UsersIcon, WaypointsIcon, type LucideIcon } from "lucide-react";
 import { HostDialog } from "@/components/host-dialog";
 import { useInteractionLayers, type CloseOutcome } from "@/components/interaction-layers";
 import {
@@ -67,8 +67,11 @@ import { ObsidianSection } from "./obsidian-section.tsx";
 import { CloudSection } from "./cloud-section.tsx";
 import { CloudServerSection } from "./cloud-server-section.tsx";
 import { CloudObsidianGroup } from "./cloud-obsidian-group.tsx";
+import { AccountsSection } from "./accounts-section.tsx";
+import { AccountAccountsGroup, phoneSection } from "./account-accounts-group.tsx";
+import { isOwnerMode } from "./owner-mode";
 import { isPhoneNow, useIsPhone } from "@/components/phone/use-phone";
-import { isPhoneHiddenSettingsSection, phoneSettingsBack, phoneSettingsSection } from "@/components/phone/phone-plugins";
+import { isPhoneHiddenSettingsSection, phoneSettingsBack } from "@/components/phone/phone-plugins";
 import { isServerMode } from "./server-mode";
 
 /** Owner (2026-09-20): hints earn their place — mechanics-explaining
@@ -89,6 +92,10 @@ const SECTIONS = [
 	{ id: "obsidian", label: "Obsidian", icon: NotebookPenIcon },
 	{ id: "cloud", label: "Cloud", icon: CloudIcon },
 	{ id: "account", label: "Account", icon: UserIcon },
+	// Side-tutor fork (several accounts on one server): Accounts, for the
+	// server's owner only (the lh_owner marker; accounts-section.tsx). On a
+	// phone it is a group inside Account, with no row.
+	{ id: "accounts", label: "Accounts", icon: UsersIcon },
 ] as const;
 type SectionId = (typeof SECTIONS)[number]["id"] | "plugins" | "core-plugins" | `plugin:${string}`;
 /** PHONE: the closing fade's length; app/phone.css uses the same 150ms. */
@@ -343,13 +350,16 @@ export function SettingsDialogBody({
 	// ask; phone-plugins.ts). A link to it, or the layout turning into the
 	// phone one on it, shows Cloud with the group scrolled into view; Cloud
 	// then stays when the layout turns wide again.
-	const phoneMoved = phone && phoneSettingsSection(active) !== active;
+	// Accounts (the owner's screen) is the same on a phone: a group inside Account.
+	const phoneMoved = phone && phoneSection(active) !== active;
 	const [scrollToObsidian, setScrollToObsidian] = useState(false);
+	const [scrollToAccounts, setScrollToAccounts] = useState(false);
 	const obsidianScrolled = useCallback(() => setScrollToObsidian(false), []);
+	const accountsScrolled = useCallback(() => setScrollToAccounts(false), []);
 	useEffect(() => {
 		if (!phoneMoved) return;
-		setActive(phoneSettingsSection(active) as SectionId);
-		setScrollToObsidian(true);
+		setActive(phoneSection(active) as SectionId);
+		if (active === "accounts") setScrollToAccounts(true); else setScrollToObsidian(true);
 	}, [phoneMoved, active]);
 
 	const enabledPlugins = snapshot.plugins.filter(plugin => plugin.info.enabled);
@@ -362,10 +372,11 @@ export function SettingsDialogBody({
 	useEffect(() => {
 		if (missingPlugin) setActive(management);
 	}, [missingPlugin, management]);
-	const selected = missingPlugin ? management : phoneMoved ? phoneSettingsSection(active) as SectionId : active;
+	const selected = missingPlugin ? management : phoneMoved ? phoneSection(active) as SectionId : active;
 	// Side-tutor fork: a scroll to the Obsidian group that never happened is dropped once Cloud is left.
 	useEffect(() => {
 		if (!phone || selected !== "cloud") setScrollToObsidian(false);
+		if (!phone || selected !== "account") setScrollToAccounts(false);
 	}, [phone, selected]);
 	// Side-tutor fork: the server-only rows (on a phone, Account shows from
 	// the first frame on the server, from the lh_server cookie, so it doesn't
@@ -374,7 +385,8 @@ export function SettingsDialogBody({
 	const nativeSections = SECTIONS.filter((s) =>
 		(s.id !== "account" || account.devices || (phone && account.devices === undefined && isServerMode())) &&
 		(s.id !== "obsidian" || isServerMode()) &&
-		!(phone && (s.id === "keyboard" || phoneSettingsSection(s.id) !== s.id)));
+		(s.id !== "accounts" || (!phone && isServerMode() && isOwnerMode())) &&
+		!(phone && (s.id === "keyboard" || phoneSection(s.id) !== s.id)));
 	// Side-tutor fork: a phone lists Core plugins; no Community plugins row,
 	// no plugin's own page (it opens from its settings button on Core
 	// plugins; owner's ask) and none of the dividers that set the plugin rows
@@ -630,9 +642,16 @@ export function SettingsDialogBody({
 									{phone && isServerMode() && <CloudObsidianGroup scrollIntoView={scrollToObsidian} onScrolled={obsidianScrolled} />}
 								</SettingsSection>
 							)}
+							{selected === "accounts" && isServerMode() && isOwnerMode() && (
+								<SettingsSection title="Accounts" testid="section-accounts">
+									<AccountsSection />
+								</SettingsSection>
+							)}
 							{active === "account" && account.devices && (
 								<SettingsSection title="Account" testid="section-account">
 									<AccountSection devices={account.devices} reload={account.reload} />
+									{/* Side-tutor fork: on a phone, Accounts is a group here, for the owner only. */}
+									{phone && isServerMode() && isOwnerMode() && <AccountAccountsGroup scrollIntoView={scrollToAccounts} onScrolled={accountsScrolled} />}
 								</SettingsSection>
 							)}
 							{/* PHONE: the Account row shows from the first frame on the

@@ -132,6 +132,52 @@ jobs:
           docker exec lh test -x /usr/bin/chromium || { echo "::error::no Chromium in the image; demos can't be checked"; exit 1; }
           docker exec lh chromium --headless --no-sandbox --disable-gpu --disable-dev-shm-usage --dump-dom 'data:text/html,<p id=o></p><script>document.getElementById("o").textContent=6*7</script>' | grep -q '<p id="o">42</p>' || { echo "::error::Chromium does not run a page in the image"; exit 1; }
           docker rm -f lh
+      # Several accounts on one server (docs/multi-account-build.md, slice 6):
+      # the real deploy/ stack (Caddy, the gateway, the maker, the owner's
+      # copy) on the image just built, then the crossing tests: two accounts
+      # made through the real invite flow, every way one could reach the
+      # other refused. Only the local image is used: compose pulls Caddy and
+      # nothing else (--pull missing), and no sandbox file is involved.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "26"
+      - name: Multi-account stack and crossing tests
+        run: |
+          set -euo pipefail
+          stack="$RUNNER_TEMP/stack"
+          # The folder is the compose project's name ("stack", not "deploy" as on a server): the
+          # stack must not depend on it (Caddy's default route; deploy/compose.yaml names its networks).
+          cp -r deploy "$stack"
+          cd "$stack"
+          rm -f .env
+          # The compose file names the fork's image; a fork of the fork builds it under its own name.
+          docker tag "$IMAGE:$CHANNEL" "ghcr.io/jaeky42/learnharnessside:$CHANNEL"
+          # As on a server: make-secrets.sh starts .env from .env.example (the runner is not root).
+          ./make-secrets.sh
+          sed -i -e 's/^LH_DOMAIN=.*/LH_DOMAIN=localhost/' -e "s/^LH_CHANNEL=.*/LH_CHANNEL=$CHANNEL/" .env
+          cleanup() {
+            docker compose down -v --remove-orphans >/dev/null 2>&1 || true
+            for c in $(docker ps -aq --filter name='^lh-acct-'); do docker rm -f "$c" >/dev/null || true; done
+            for n in $(docker network ls -q --filter name='^lh-acct-'); do docker network rm "$n" >/dev/null || true; done
+            for v in $(docker volume ls -q --filter name='^lh-acct-'); do docker volume rm "$v" >/dev/null || true; done
+          }
+          trap cleanup EXIT
+          # Caddy's networks and default route too: joining an account network must never move the route (deploy/compose.yaml, "fixed names").
+          dump() { docker compose ps -a || true; docker inspect lh-caddy --format '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{$v.IPAddress}} priority {{$v.GwPriority}}{{"\n"}}{{end}}' || true; docker exec lh-caddy ip route || true; docker compose logs --no-color 2>&1 | sed -E 's/(Setup code: )[0-9A-Z-]+/\1<hidden>/' || true; for c in $(docker ps -aq --filter name='^lh-acct-'); do docker logs "$c" 2>&1 | tail -n 50 || true; done; }
+          docker compose up -d --pull missing
+          for i in $(seq 1 60); do
+            docker compose logs --no-log-prefix gateway 2>/dev/null | grep -q "Setup code: [0-9A-Z]\{4\}-[0-9A-Z]\{4\}" && break
+            sleep 2
+          done
+          for i in $(seq 1 30); do
+            docker cp lh-caddy:/data/caddy/pki/authorities/local/root.crt "$RUNNER_TEMP/caddy-root.crt" 2>/dev/null && break
+            sleep 2
+          done
+          for i in $(seq 1 60); do
+            [ "$(curl -s --cacert "$RUNNER_TEMP/caddy-root.crt" -o /dev/null -w '%{http_code}' https://localhost/)" = "303" ] && break
+            sleep 2
+          done
+          node test/crossing.mjs --base https://localhost --ca "$RUNNER_TEMP/caddy-root.crt" --compose-dir "$stack" || { echo "::error::a crossing between accounts was not refused (or the run could not finish)"; dump; exit 1; }
       - name: Publish
         if: github.event_name == 'push'
         env:
