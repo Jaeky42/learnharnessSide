@@ -225,7 +225,8 @@ export const mapFiles: MapFiles = {
 	},
 	apply(changes) {
 		// Prompt texts and theme files first: a switch that arrives with its
-		// text, or a setting naming a theme that arrives with it, finds the file.
+		// text finds the file. (The theme a device uses is its own setting now,
+		// not synced; the theme files themselves still travel.)
 		for (const [key, value] of changes) {
 			const kind = kindOf(key);
 			try {

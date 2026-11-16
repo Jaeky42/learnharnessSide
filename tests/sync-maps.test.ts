@@ -3,7 +3,8 @@
  * item at a time, latest change wins.
  *
  * Pins the owner's decisions: the settings split (what travels and what
- * stays per device); at a desktop's first sync the desktop's value is kept
+ * stays per device; appearance is per device since it was retired, and
+ * older builds on the other side are met without a reset either way); at a desktop's first sync the desktop's value is kept
  * where the two sides differ; afterwards the latest change wins, on the
  * server's clock, also when the PC's clock is off; the chains-view folders,
  * imported-file records and node places travel item by item; the desktop
@@ -23,8 +24,10 @@ process.env.LH_AUTH_FILE = path.join(TMP, "prod", "secrets", "auth.json");
 process.env.LH_DATA_DIR = path.join(TMP, "prod", "data");
 
 const maps = await import("../src/core/sync/maps.ts");
+const { COLOR_OVERRIDE_KEYS, THEME_COLOR_KEYS } = await import("../src/core/themes.ts");
 const { stateFile } = await import("../src/store/sync/state-file.ts");
-const { createMapsAuthority, createMapsDesktop, isAuthorityMapsState, isDesktopMapsState } = await import("../src/server/sync/maps-sync.ts");
+const { createMapsAuthority, createMapsDesktop, isAuthorityMapsState, isDesktopMapsState, MAP_RULES } = await import("../src/server/sync/maps-sync.ts");
+import type { ExchangeRules } from "../src/server/sync/maps-sync.ts";
 import type { SyncReply } from "../src/server/sync/client.ts";
 import type { MapFiles, MapItem } from "../src/server/sync/map-views.ts";
 import type { MapKind } from "../src/core/sync/maps.ts";
@@ -41,10 +44,13 @@ function memoryFiles(clock: () => number) {
 	const unreadable = new Set<MapKind>();
 	const unreadableKeys = new Set<string>();
 	let adjust: (key: string, value: unknown) => unknown = (_key, value) => value;
+	/** Keys the files don't report or take (a new build's settings store and appearance). */
+	let hidden: (key: string) => boolean = () => false;
 	const files: MapFiles = {
-		read: () => ({ items: new Map(items), unreadable: new Set(unreadable), unreadableKeys: new Set(unreadableKeys), fileTimes: new Map() }),
+		read: () => ({ items: new Map([...items].filter(([key]) => !hidden(key))), unreadable: new Set(unreadable), unreadableKeys: new Set(unreadableKeys), fileTimes: new Map() }),
 		apply(changes) {
 			for (const [key, value] of changes) {
+				if (hidden(key)) continue;
 				const next = value === null ? null : adjust(key, value);
 				if (next === null) items.delete(key); else items.set(key, { value: next, mtime: clock() });
 			}
@@ -61,20 +67,26 @@ function memoryFiles(clock: () => number) {
 		damageKey(key: string) { unreadableKeys.add(key); items.delete(key); },
 		repairKey(key: string, value: unknown) { unreadableKeys.delete(key); items.set(key, { value, mtime: clock() }); },
 		adjustWith(fn: typeof adjust) { adjust = fn; },
+		/** This side runs a new build: its files no longer report or take appearance. */
+		hideRetired() { hidden = maps.isRetiredSettingKey; },
 	};
 }
 
+/** The rules of a build from before appearance was retired. */
+const OLD_RULES: ExchangeRules = { ...MAP_RULES, retired: undefined };
+
 let worlds = 0;
-function world(opts: { page?: { items: number; bytes: number } } = {}) {
+function world(opts: { page?: { items: number; bytes: number }; oldServer?: boolean } = {}) {
 	const root = path.join(TMP, `w${++worlds}`);
 	/** The true time. Each side reads it through its own (possibly wrong) clock. */
 	let time = MONDAY;
 	const server = memoryFiles(() => time);
 	const folders: string[][] = [];
 	let serverState = stateFile(path.join(root, "server", "sync", "maps.json"), isAuthorityMapsState);
-	let authority = createMapsAuthority({ files: server.files, state: serverState, now: () => time, onVaultFolders: (names) => folders.push(names), page: opts.page });
+	const makeAuthority = (old: boolean) => createMapsAuthority({ files: server.files, state: serverState, now: () => time, onVaultFolders: (names) => folders.push(names), page: opts.page, ...(old ? { rules: OLD_RULES } : {}) });
+	let authority = makeAuthority(opts.oldServer === true);
 
-	function desktop(deviceId: string, o: { skewMs?: number; hold?: (body: { changes: unknown[]; more?: boolean }) => Promise<void> } = {}) {
+	function desktop(deviceId: string, o: { skewMs?: number; hold?: (body: { changes: unknown[]; more?: boolean }) => Promise<void>; old?: boolean } = {}) {
 		const skew = o.skewMs ?? 0;
 		const local = () => time + skew;
 		const side = memoryFiles(local);
@@ -82,7 +94,9 @@ function world(opts: { page?: { items: number; bytes: number } } = {}) {
 		let vault: string[] | null = null;
 		const hooks: { duringRequest?: () => void } = {};
 		const requests: Array<{ changes: number; all: boolean; vaultFolders?: string[] }> = [];
-		const sync = createMapsDesktop({
+		/** The keys each request carried. */
+		const sentKeys: string[][] = [];
+		const make = (old: boolean) => createMapsDesktop({
 			files: side.files,
 			state: stateFile(path.join(root, deviceId, "sync", "maps-desktop.json"), isDesktopMapsState),
 			identity: () => ({ server: "https://learn.example.com", deviceId }),
@@ -91,6 +105,7 @@ function world(opts: { page?: { items: number; bytes: number } } = {}) {
 				const body = JSON.parse(JSON.stringify(init.body)) as { changes: unknown[]; all: boolean; more?: boolean; vaultFolders?: string[] };
 				await o.hold?.(body);
 				requests.push({ changes: body.changes.length, all: body.all, ...(body.vaultFolders ? { vaultFolders: body.vaultFolders } : {}) });
+			sentKeys.push(body.changes.map((change) => (change as { key: string }).key));
 				const result = authority.exchange(deviceId, body);
 				hooks.duringRequest?.();
 				hooks.duringRequest = undefined;
@@ -102,11 +117,20 @@ function world(opts: { page?: { items: number; bytes: number } } = {}) {
 			clockOffset: () => -skew,
 			vaultFolders: () => vault,
 			page: opts.page,
+			...(old ? { rules: OLD_RULES } : {}),
 		});
-		return { ...side, sync, requests, hooks, stateFile: path.join(root, deviceId, "sync", "maps-desktop.json"), setOnline: (value: boolean) => { online = value; }, setVault: (names: string[] | null) => { vault = names; } };
+		const api = {
+			...side, sync: make(o.old === true), requests, sentKeys, hooks, stateFile: path.join(root, deviceId, "sync", "maps-desktop.json"),
+			setOnline: (value: boolean) => { online = value; }, setVault: (names: string[] | null) => { vault = names; },
+			/** This desktop installs the new build (its state file stays as the old one left it). */
+			upgrade() { api.sync = make(false); side.hideRetired(); },
+		};
+		return api;
 	}
 	return {
 		root, server, folders, desktop,
+		/** The server installs the new build (its state file stays as the old one left it). */
+		upgradeServer() { authority = makeAuthority(false); server.hideRetired(); },
 		pass: (ms: number) => { time += ms; },
 		serverStateFile: path.join(root, "server", "sync", "maps.json"),
 		/** The server lost its sync records (reset, or restored from a backup). */
@@ -145,20 +169,8 @@ describe("the settings split", () => {
 		keyboard: { "toggle-notes": "Ctrl+Shift+N" },
 	};
 
-	it("what travels: appearance without the font, dictation language, graph, compaction, agent switches, prompt switches", () => {
+	it("what travels: dictation language, graph, compaction, agent switches, prompt switches; no appearance at all", () => {
 		assert.deepEqual(Object.fromEntries(maps.settingsItems(record)), {
-			// Still read from a raw record; the settings store itself drops it (see sync-maps-wiring).
-			"s|appearance.mode": "light",
-			"s|appearance.theme": "rose-pine",
-			"s|appearance.background": "#101010",
-			"s|appearance.colors.surface": "#111111",
-			"s|appearance.colors.accent": null,
-			"s|appearance.proseFontSize": 18,
-			"s|appearance.codeLigatures": true,
-			"s|appearance.sessionNameSerif": false,
-			"s|appearance.mdRendering.headingWeight": 700,
-			"s|appearance.mdRendering.boldColor": "#ff0000",
-			"s|appearance.mdRendering.italicColor": null,
 			"s|dictation.language": "sv",
 			"s|graph.enabled": true,
 			"s|graph.rendering": false,
@@ -175,9 +187,13 @@ describe("the settings split", () => {
 
 	it("applying items changes those settings and nothing else in the record", () => {
 		const next = maps.withSettingsItems(record, new Map<string, unknown>([
+			["s|dictation.language", "de"],
+			// Retired: never written into the record, whatever arrives.
 			["s|appearance.mode", "dark"],
+			["s|appearance.theme", "nord"],
 			["s|appearance.colors.accent", "#00ff00"],
 			["s|appearance.colors.surface", null],
+			["s|appearance.proseFontSize", null],
 			["s|agent.tools|web_search", null],
 			["s|agent.tools|run_code", false],
 			["s|compaction.thresholdTokens", null],
@@ -185,13 +201,12 @@ describe("the settings split", () => {
 			["s|models.strong", { provider: "evil", model: "z" }],
 			["s|agent.fileAccess", { restricted: false, folders: [] }],
 		]));
-		assert.equal(next.appearance.mode, "dark");
-		assert.deepEqual(next.appearance.colors, { accent: "#00ff00", notAColor: "#222222" }, "one color at a time; what isn't a synced color is left as it is");
+		assert.equal(next.dictation.language, "de");
+		assert.deepEqual(next.appearance, record.appearance, "appearance is per device: left exactly as it was");
 		assert.equal(next.agent.workerRequestConcurrency, 4);
 		assert.deepEqual(next.agent.tools, { read_file: true, run_code: false });
 		assert.equal("compaction" in next, false, "an emptied section goes");
 		for (const section of ["general", "claudeCode", "models", "customProvider", "keyboard"] as const) assert.deepEqual(next[section], record[section]);
-		assert.equal(next.appearance.fontFamily, "Georgia");
 		assert.deepEqual(next.agent.fileAccess, record.agent.fileAccess);
 		assert.deepEqual(next.agent.models, record.agent.models);
 		assert.equal(record.appearance.mode, "light", "the record passed in is not changed");
@@ -208,13 +223,17 @@ describe("the settings split", () => {
 			assert.equal(maps.checkMapChange({ key, value: true, t }), null, key);
 			if (key.startsWith("s|")) assert.equal(maps.checkMapChange({ key, value: null, t }), null, `${key} (removal)`);
 		}
-		assert.notEqual(maps.checkMapChange({ key: "s|appearance.mode", value: "dark", t }), null);
 		assert.notEqual(maps.checkMapChange({ key: "s|agent.tools|web_search", value: false, t }), null);
-		assert.notEqual(maps.checkMapChange({ key: "s|appearance.colors.warning", value: "#abcdef", t }), null);
-		assert.notEqual(maps.checkMapChange({ key: "s|appearance.colors.warning", value: null, t }), null);
-		assert.notEqual(maps.checkMapChange({ key: "s|appearance.codeLigatures", value: true, t }), null);
 		assert.notEqual(maps.checkMapChange({ key: "s|compaction.includeReasoning", value: false, t }), null);
-		assert.equal(maps.checkMapChange({ key: "s|appearance.mode", value: { nested: true }, t }), null);
+		// Retired (appearance): still accepted from an older build, so its request isn't refused whole.
+		for (const key of ["s|appearance.mode", "s|appearance.theme", "s|appearance.background", "s|appearance.colors.warning", "s|appearance.proseFontSize", "s|appearance.codeLigatures", "s|appearance.sessionNameSerif", "s|appearance.mdRendering.headingWeight", "s|appearance.mdRendering.boldColor", "s|appearance.mdRendering.italicColor"]) {
+			assert.equal(maps.isRetiredSettingKey(key), true, key);
+			assert.notEqual(maps.checkMapChange({ key, value: "x", t }), null, key);
+			assert.notEqual(maps.checkMapChange({ key, value: null, t }), null, `${key} (removal)`);
+		}
+		for (const key of COLOR_OVERRIDE_KEYS) assert.equal(maps.isRetiredSettingKey(`s|appearance.colors.${key}`), true, key);
+		for (const key of ["s|dictation.language", "s|appearance.fontFamily", "s|appearance.colors.notAColor", "s|appearance.colors", "appearance.theme", "t|dusk"]) assert.equal(maps.isRetiredSettingKey(key), false, key);
+		assert.equal(maps.checkMapChange({ key: "s|appearance.mode", value: { nested: true }, t }), null, "the value rule of a setting still holds");
 		assert.equal(maps.checkMapChange({ key: "p|teacher/20-teaching.md", value: 5, t }), null);
 		assert.equal(maps.checkMapChange({ key: "f|fold_1", value: { id: "fold_2", name: "x", parentId: null, createdAt: "2026" }, t }), null, "a folder under another folder's key");
 		assert.equal(maps.checkMapChange({ key: "x|n_1", value: { x: 1, y: Number.NaN }, t }), null);
@@ -258,8 +277,8 @@ describe("where no desktop has synced, nothing is kept", () => {
 	it("no state file on either side", () => {
 		const w = world();
 		const desk = w.desktop("dev_aaaaaaaaaaaaaaaa");
-		w.server.set("s|appearance.mode", "light");
-		desk.set("s|appearance.mode", "dark");
+		w.server.set("s|agent.search.engine", "tavily");
+		desk.set("s|agent.search.engine", "brave");
 		desk.sync.detect();
 		assert.equal(fs.existsSync(w.root), false);
 	});
@@ -270,10 +289,10 @@ describe("a desktop's first sync", () => {
 		const w = world();
 		const desk = w.desktop("dev_aaaaaaaaaaaaaaaa");
 		// The same setting, different on each side.
-		desk.set("s|appearance.mode", "dark");
-		w.server.set("s|appearance.mode", "light");
+		desk.set("s|agent.search.engine", "brave");
+		w.server.set("s|agent.search.engine", "tavily");
 		// Set on the server only: on the desktop it is at its default.
-		w.server.set("s|appearance.proseFontSize", 20);
+		w.server.set("s|graph.extractionChunkTokens", 6000);
 		w.server.set("s|agent.tools|web_search", false);
 		// Set on the desktop only.
 		desk.set("s|dictation.language", "sv");
@@ -303,7 +322,7 @@ describe("a desktop's first sync", () => {
 			"n|src_1": { id: "src_1", filePath: "/data/notes.md", importedAt: "2026-10-03" },
 			"p|system-prompt.md": "only on the server",
 			"p|teacher/20-teaching.md": "the desktop's text",
-			"s|appearance.mode": "dark",
+			"s|agent.search.engine": "brave",
 			"s|dictation.language": "sv",
 			"x|n_1": { x: 1, y: 1 },
 			"x|n_2": { x: 2, y: 2 },
@@ -324,10 +343,10 @@ describe("a desktop's first sync", () => {
 		await desk.sync.round();
 		w.resetServer();
 		const laptop = w.desktop("dev_bbbbbbbbbbbbbbbb");
-		laptop.set("s|appearance.mode", "light");
+		laptop.set("s|agent.search.engine", "tavily");
 		w.pass(HOUR);
 		await laptop.sync.round();
-		assert.equal(w.server.get("s|appearance.mode"), "light", "nobody is on record as having synced, so it brings its values");
+		assert.equal(w.server.get("s|agent.search.engine"), "tavily", "nobody is on record as having synced, so it brings its values");
 	});
 });
 
@@ -336,7 +355,7 @@ describe("a PC paired later takes the server's settings (only the first PC bring
 	async function withFirstPc() {
 		const w = world();
 		const desk = w.desktop("dev_aaaaaaaaaaaaaaaa");
-		desk.set("s|appearance.mode", "dark");
+		desk.set("s|agent.search.engine", "brave");
 		desk.set("s|dictation.language", "sv");
 		desk.set("f|fold_d", { id: "fold_d", name: "Physics", parentId: null, createdAt: "2026-10-01" });
 		desk.set("p|teacher/20-teaching.md", "the desktop's text");
@@ -360,23 +379,23 @@ describe("a PC paired later takes the server's settings (only the first PC bring
 	it("its synced settings become the server's, \"not set\" included", async () => {
 		const { w, desk } = await withFirstPc();
 		const laptop = w.desktop("dev_bbbbbbbbbbbbbbbb");
-		laptop.set("s|appearance.mode", "light"); // differs from the server's
-		laptop.set("s|appearance.proseFontSize", 22); // not set on the server
+		laptop.set("s|agent.search.engine", "tavily"); // differs from the server's
+		laptop.set("s|graph.extractionChunkTokens", 8000); // not set on the server
 		laptop.set("s|agent.tools|web_search", false); // not set on the server
 		await laptop.sync.round();
-		assert.equal(w.server.get("s|appearance.mode"), "dark");
-		assert.equal(laptop.get("s|appearance.mode"), "dark");
+		assert.equal(w.server.get("s|agent.search.engine"), "brave");
+		assert.equal(laptop.get("s|agent.search.engine"), "brave");
 		assert.equal(laptop.get("s|dictation.language"), "sv", "set on the server only: the laptop takes it");
-		assert.equal(w.server.get("s|appearance.proseFontSize"), null, "the server's stays not set");
-		assert.equal(laptop.get("s|appearance.proseFontSize"), null, "and the laptop goes back to the default");
+		assert.equal(w.server.get("s|graph.extractionChunkTokens"), null, "the server's stays not set");
+		assert.equal(laptop.get("s|graph.extractionChunkTokens"), null, "and the laptop goes back to the default");
 		assert.equal(laptop.get("s|agent.tools|web_search"), null);
 		assert.deepEqual(laptop.all(), w.server.all());
 		// It doesn't come back at the next round, on either PC.
 		w.pass(10_000);
 		assert.deepEqual(await laptop.sync.round(), { ok: true, sent: 0, applied: 0 });
 		await desk.sync.round();
-		assert.equal(desk.get("s|appearance.mode"), "dark");
-		assert.equal(desk.get("s|appearance.proseFontSize"), null);
+		assert.equal(desk.get("s|agent.search.engine"), "brave");
+		assert.equal(desk.get("s|graph.extractionChunkTokens"), null);
 	});
 
 	it("where both have the same item the server's is kept; what only the new PC has is added", async () => {
@@ -405,24 +424,24 @@ describe("a PC paired later takes the server's settings (only the first PC bring
 	it("afterwards the laptop is like any other PC: its latest change wins", async () => {
 		const { w, desk } = await withFirstPc();
 		const laptop = w.desktop("dev_bbbbbbbbbbbbbbbb");
-		laptop.set("s|appearance.mode", "light");
+		laptop.set("s|agent.search.engine", "tavily");
 		await laptop.sync.round();
-		assert.equal(laptop.get("s|appearance.mode"), "dark");
+		assert.equal(laptop.get("s|agent.search.engine"), "brave");
 		w.pass(HOUR);
-		laptop.set("s|appearance.mode", "light");
+		laptop.set("s|agent.search.engine", "tavily");
 		await laptop.sync.round();
-		assert.equal(w.server.get("s|appearance.mode"), "light");
+		assert.equal(w.server.get("s|agent.search.engine"), "tavily");
 		await desk.sync.round();
-		assert.equal(desk.get("s|appearance.mode"), "light");
+		assert.equal(desk.get("s|agent.search.engine"), "tavily");
 	});
 
 	it("the first PC removed and paired anew is still not a first PC", async () => {
 		const { w } = await withFirstPc();
 		// A new device id (it paired with another server in between, or was reinstalled).
 		const again = w.desktop("dev_cccccccccccccccc");
-		again.set("s|appearance.mode", "light");
+		again.set("s|agent.search.engine", "tavily");
 		await again.sync.round();
-		assert.equal(w.server.get("s|appearance.mode"), "dark");
+		assert.equal(w.server.get("s|agent.search.engine"), "brave");
 	});
 });
 
@@ -430,7 +449,7 @@ describe("afterwards, the latest change wins", () => {
 	async function synced(opts: { skewMs?: number } = {}) {
 		const w = world();
 		const desk = w.desktop("dev_aaaaaaaaaaaaaaaa", opts);
-		desk.set("s|appearance.mode", "dark");
+		desk.set("s|agent.search.engine", "brave");
 		desk.set("f|fold_1", { id: "fold_1", name: "Physics", parentId: null, createdAt: "2026-10-01" });
 		desk.set("p|system-prompt.md", "v1");
 		await desk.sync.round();
@@ -440,9 +459,9 @@ describe("afterwards, the latest change wins", () => {
 
 	it("a change on the desktop reaches the server, and one on the phone reaches the desktop", async () => {
 		const { w, desk } = await synced();
-		desk.set("s|appearance.mode", "light");
+		desk.set("s|agent.search.engine", "tavily");
 		assert.deepEqual(await desk.sync.round(), { ok: true, sent: 1, applied: 0 });
-		assert.equal(w.server.get("s|appearance.mode"), "light");
+		assert.equal(w.server.get("s|agent.search.engine"), "tavily");
 		w.pass(HOUR);
 		w.server.set("s|graph.rendering", false);
 		w.server.set("f|fold_1", { id: "fold_1", name: "Physics I", parentId: null, createdAt: "2026-10-01" });
@@ -457,13 +476,13 @@ describe("afterwards, the latest change wins", () => {
 		desk.sync.detect(); // the app notices while offline, and notes the time
 		w.pass(24 * HOUR);
 		w.server.set("p|system-prompt.md", "Tuesday, on the phone");
-		w.server.set("s|appearance.background", "#222222");
+		w.server.set("s|compaction.thresholdTokens", 90_000);
 		w.pass(24 * HOUR);
 		desk.setOnline(true);
 		assert.deepEqual(await desk.sync.round(), { ok: true, sent: 1, applied: 2 });
 		assert.equal(w.server.get("p|system-prompt.md"), "Tuesday, on the phone");
 		assert.equal(desk.get("p|system-prompt.md"), "Tuesday, on the phone");
-		assert.equal(desk.get("s|appearance.background"), "#222222");
+		assert.equal(desk.get("s|compaction.thresholdTokens"), 90_000);
 	});
 
 	it("the phone on Monday, the desktop on Tuesday offline: the desktop's stays", async () => {
@@ -472,13 +491,13 @@ describe("afterwards, the latest change wins", () => {
 		w.server.set("p|system-prompt.md", "Monday, on the phone");
 		w.pass(24 * HOUR);
 		desk.set("p|system-prompt.md", "Tuesday, on the desktop");
-		desk.set("s|appearance.mode", "light");
+		desk.set("s|agent.search.engine", "tavily");
 		assert.deepEqual(await desk.sync.round(), { ok: false, reason: "offline" });
 		w.pass(24 * HOUR);
 		desk.setOnline(true);
 		await desk.sync.round();
 		assert.equal(w.server.get("p|system-prompt.md"), "Tuesday, on the desktop");
-		assert.equal(w.server.get("s|appearance.mode"), "light");
+		assert.equal(w.server.get("s|agent.search.engine"), "tavily");
 		assert.deepEqual(desk.all(), w.server.all());
 	});
 
@@ -517,8 +536,8 @@ describe("afterwards, the latest change wins", () => {
 		// A hand-made request with a time a year ahead.
 		const state = stateFile(w.serverStateFile, isAuthorityMapsState);
 		const authority = createMapsAuthority({ files: w.server.files, state, now: () => MONDAY + 2 * HOUR });
-		assert.equal(authority.exchange("dev_aaaaaaaaaaaaaaaa", { cursor: 0, all: false, changes: [{ key: "s|appearance.mode", value: "light", t: MONDAY + 365 * 24 * HOUR }] }).status, 200);
-		assert.equal(state.read()!.items["s|appearance.mode"]!.t, MONDAY + 2 * HOUR);
+		assert.equal(authority.exchange("dev_aaaaaaaaaaaaaaaa", { cursor: 0, all: false, changes: [{ key: "s|agent.search.engine", value: "light", t: MONDAY + 365 * 24 * HOUR }] }).status, 200);
+		assert.equal(state.read()!.items["s|agent.search.engine"]!.t, MONDAY + 2 * HOUR);
 		void desk;
 	});
 
@@ -527,27 +546,27 @@ describe("afterwards, the latest change wins", () => {
 		desk.set("p|system-prompt.md", null);
 		w.server.set("f|fold_1", null);
 		assert.deepEqual(await desk.sync.round(), { ok: true, sent: 1, applied: 1 });
-		assert.deepEqual(desk.all(), { "s|appearance.mode": "dark" });
-		assert.deepEqual(w.server.all(), { "s|appearance.mode": "dark" });
+		assert.deepEqual(desk.all(), { "s|agent.search.engine": "brave" });
+		assert.deepEqual(w.server.all(), { "s|agent.search.engine": "brave" });
 	});
 
 	it("changed here again while the request was under way: it isn't overwritten, and goes next round", async () => {
 		const { w, desk } = await synced();
-		w.server.set("s|appearance.mode", "light");
-		desk.hooks.duringRequest = () => { w.pass(1000); desk.set("s|appearance.mode", "dark-again"); };
+		w.server.set("s|agent.search.engine", "tavily");
+		desk.hooks.duringRequest = () => { w.pass(1000); desk.set("s|agent.search.engine", "exa"); };
 		await desk.sync.round();
-		assert.equal(desk.get("s|appearance.mode"), "dark-again");
+		assert.equal(desk.get("s|agent.search.engine"), "exa");
 		w.pass(10_000);
 		await desk.sync.round();
-		assert.equal(w.server.get("s|appearance.mode"), "dark-again");
+		assert.equal(w.server.get("s|agent.search.engine"), "exa");
 	});
 
 	it("a value the server's file adjusts on the way in comes back adjusted, once", async () => {
 		const { w, desk } = await synced();
-		w.server.adjustWith((key, value) => (key === "s|appearance.proseFontSize" ? Math.min(Number(value), 24) : value));
-		desk.set("s|appearance.proseFontSize", 99);
+		w.server.adjustWith((key, value) => (key === "s|graph.extractionChunkTokens" ? Math.min(Number(value), 16_384) : value));
+		desk.set("s|graph.extractionChunkTokens", 99_999);
 		assert.deepEqual(await desk.sync.round(), { ok: true, sent: 1, applied: 1 });
-		assert.equal(desk.get("s|appearance.proseFontSize"), 24);
+		assert.equal(desk.get("s|graph.extractionChunkTokens"), 16_384);
 		w.pass(10_000);
 		assert.deepEqual(await desk.sync.round(), { ok: true, sent: 0, applied: 0 });
 	});
@@ -555,7 +574,7 @@ describe("afterwards, the latest change wins", () => {
 	it("two desktops and the phone end the same", async () => {
 		const { w, desk } = await synced();
 		const laptop = w.desktop("dev_bbbbbbbbbbbbbbbb");
-		laptop.set("s|appearance.mode", "dark");
+		laptop.set("s|agent.search.engine", "brave");
 		await laptop.sync.round();
 		w.pass(HOUR);
 		desk.set("x|n_1", { x: 1, y: 2 });
@@ -576,7 +595,7 @@ describe("a file that is there but can't be read is left alone", () => {
 	it("on the desktop: the server keeps its settings, and nothing is written into the damaged file", async () => {
 		const w = world();
 		const desk = w.desktop("dev_aaaaaaaaaaaaaaaa");
-		desk.set("s|appearance.mode", "dark");
+		desk.set("s|agent.search.engine", "brave");
 		desk.set("x|n_1", { x: 1, y: 1 });
 		await desk.sync.round();
 		w.pass(HOUR);
@@ -584,21 +603,21 @@ describe("a file that is there but can't be read is left alone", () => {
 		w.server.set("s|graph.rendering", false);
 		w.server.set("x|n_1", { x: 3, y: 3 });
 		assert.deepEqual(await desk.sync.round(), { ok: true, sent: 0, applied: 1 });
-		assert.equal(w.server.get("s|appearance.mode"), "dark", "not deleted because the desktop couldn't read its own");
+		assert.equal(w.server.get("s|agent.search.engine"), "brave", "not deleted because the desktop couldn't read its own");
 		assert.deepEqual(desk.all(), { "x|n_1": { x: 3, y: 3 } });
 	});
 
 	it("on the server: a desktop's settings changes wait, and the desktop keeps its own", async () => {
 		const w = world();
 		const desk = w.desktop("dev_aaaaaaaaaaaaaaaa");
-		desk.set("s|appearance.mode", "dark");
+		desk.set("s|agent.search.engine", "brave");
 		await desk.sync.round();
 		w.pass(HOUR);
 		w.server.damage("s");
-		desk.set("s|appearance.mode", "light");
+		desk.set("s|agent.search.engine", "tavily");
 		await desk.sync.round();
-		assert.equal(desk.get("s|appearance.mode"), "light");
-		assert.equal(w.server.get("s|appearance.mode"), null);
+		assert.equal(desk.get("s|agent.search.engine"), "tavily");
+		assert.equal(w.server.get("s|agent.search.engine"), null);
 	});
 });
 
@@ -606,7 +625,7 @@ describe("a server that lost its records", () => {
 	it("asks the desktop for everything once, and the two are joined again", async () => {
 		const w = world();
 		const desk = w.desktop("dev_aaaaaaaaaaaaaaaa");
-		desk.set("s|appearance.mode", "dark");
+		desk.set("s|agent.search.engine", "brave");
 		desk.set("f|fold_1", { id: "fold_1", name: "Physics", parentId: null, createdAt: "2026-10-01" });
 		await desk.sync.round();
 		w.pass(HOUR);
@@ -641,15 +660,14 @@ describe("the vault's folder names", () => {
 	});
 });
 
-const { COLOR_OVERRIDE_KEYS, THEME_COLOR_KEYS } = await import("../src/core/themes.ts");
 
 describe("upstream 0.6.0: colors, and custom theme files", () => {
 	const palette = (accent: string) => Object.fromEntries(THEME_COLOR_KEYS.map((key) => [key, key === "accent" ? accent : "#123456"]));
 	const theme = (name: string, accent = "#ff8800") => ({ name, mode: "dark", colors: palette(accent) });
 
-	it("each color override travels as its own setting", () => {
+	it("color overrides are per device: none is read as a setting any more", () => {
 		for (const key of COLOR_OVERRIDE_KEYS) {
-			assert.deepEqual([...maps.settingsItems({ appearance: { colors: { [key]: "#010203" } } })], [[`s|appearance.colors.${key}`, "#010203"]], key);
+			assert.deepEqual([...maps.settingsItems({ appearance: { colors: { [key]: "#010203" } } })], [], key);
 		}
 	});
 
@@ -729,38 +747,38 @@ describe("upstream 0.6.0: colors, and custom theme files", () => {
 	});
 });
 
-describe("a setting the app no longer keeps (appearance.mode, gone since upstream 0.6.0)", () => {
+describe("a setting a file drops on the way in", () => {
 	it("an old record naming it on either side: the deletion is exchanged once, then nothing; it never stalls or comes back", async () => {
 		const w = world();
 		const desk = w.desktop("dev_aaaaaaaaaaaaaaaa");
-		desk.set("s|appearance.mode", "light");
-		desk.set("s|appearance.theme", "rose-pine");
+		desk.set("s|compaction.includeReasoning", true);
+		desk.set("s|agent.search.engine", "brave");
 		await desk.sync.round();
 		w.pass(HOUR);
-		desk.set("s|appearance.mode", "dark");
+		desk.set("s|compaction.includeReasoning", false);
 		desk.sync.detect(); // a change noted before the update, never sent
-		assert.equal(w.server.get("s|appearance.mode"), "light");
+		assert.equal(w.server.get("s|compaction.includeReasoning"), true);
 
 		// Both sides update: the settings store no longer reads the key, and drops it on every write.
-		const drop = (key: string, value: unknown) => (key === "s|appearance.mode" ? null : value);
-		for (const side of [w.server, desk]) { side.set("s|appearance.mode", null); side.adjustWith(drop); }
+		const drop = (key: string, value: unknown) => (key === "s|compaction.includeReasoning" ? null : value);
+		for (const side of [w.server, desk]) { side.set("s|compaction.includeReasoning", null); side.adjustWith(drop); }
 		w.pass(HOUR);
 		assert.deepEqual(await desk.sync.round(), { ok: true, sent: 1, applied: 0 }, "the desktop says it is gone");
-		assert.equal(w.server.get("s|appearance.mode"), null);
+		assert.equal(w.server.get("s|compaction.includeReasoning"), null);
 		w.pass(10_000);
 		assert.deepEqual(await desk.sync.round(), { ok: true, sent: 0, applied: 0 }, "and then there is nothing more to say");
 		w.pass(10_000);
 		assert.deepEqual(await desk.sync.round(), { ok: true, sent: 0, applied: 0 });
-		assert.equal(desk.get("s|appearance.theme"), "rose-pine", "the other settings carry on");
+		assert.equal(desk.get("s|agent.search.engine"), "brave", "the other settings carry on");
 
 		// A desktop that still sends a value for it (a hand-edited state, say): taken, dropped, and answered as gone.
 		const laptop = w.desktop("dev_bbbbbbbbbbbbbbbb");
 		laptop.adjustWith(drop);
-		laptop.set("s|appearance.mode", "dark");
+		laptop.set("s|compaction.includeReasoning", false);
 		w.pass(HOUR);
 		assert.equal((await laptop.sync.round()).ok, true);
-		assert.equal(w.server.get("s|appearance.mode"), null);
-		assert.equal(laptop.get("s|appearance.mode"), null, "it drops out there too");
+		assert.equal(w.server.get("s|compaction.includeReasoning"), null);
+		assert.equal(laptop.get("s|compaction.includeReasoning"), null, "it drops out there too");
 		w.pass(10_000);
 		assert.deepEqual(await laptop.sync.round(), { ok: true, sent: 0, applied: 0 });
 		assert.deepEqual(await desk.sync.round(), { ok: true, sent: 0, applied: 0 });
@@ -776,8 +794,8 @@ describe("first exchanges that come in pages", () => {
 		// Held after its first page reached the server, before its second.
 		const one = w.desktop("dev_aaaaaaaaaaaaaaaa", { hold: async () => { if (++pages === 2) { held = true; await gate; } } });
 		const two = w.desktop("dev_bbbbbbbbbbbbbbbb");
-		for (const [key, a, b] of [["s|appearance.theme", "rose-pine", "nord"], ["s|dictation.language", "sv", "de"], ["s|graph.enabled", true, false]] as const) { one.set(key, a); two.set(key, b); }
-		w.server.set("s|appearance.theme", "dracula");
+		for (const [key, a, b] of [["s|agent.search.engine", "brave", "tavily"], ["s|dictation.language", "sv", "de"], ["s|graph.enabled", true, false]] as const) { one.set(key, a); two.set(key, b); }
+		w.server.set("s|agent.search.engine", "exa");
 		const first = one.sync.round();
 		while (!held) await new Promise((resolve) => setImmediate(resolve));
 		assert.equal((await two.sync.round()).ok, true);
@@ -785,9 +803,209 @@ describe("first exchanges that come in pages", () => {
 		assert.equal((await first).ok, true);
 		await two.sync.round();
 		for (const side of [w.server, one, two]) {
-			assert.equal(side.get("s|appearance.theme"), "rose-pine");
+			assert.equal(side.get("s|agent.search.engine"), "brave");
 			assert.equal(side.get("s|dictation.language"), "sv");
 			assert.equal(side.get("s|graph.enabled"), true);
 		}
+	});
+});
+
+describe("appearance is per device now (retired), with no protocol change", () => {
+	const A = "dev_aaaaaaaaaaaaaaaa", B = "dev_bbbbbbbbbbbbbbbb";
+	const THEME = "s|appearance.theme", SIZE = "s|appearance.proseFontSize", ACCENT = "s|appearance.colors.accent";
+	const json = (file: string) => JSON.parse(fs.readFileSync(file, "utf-8")) as { known?: Record<string, unknown>; pending?: Record<string, unknown>; items?: Record<string, unknown>; devices?: string[] };
+	const retired = (table: Record<string, unknown> | undefined) => Object.keys(table ?? {}).filter(maps.isRetiredSettingKey);
+	const stamp = (file: string) => { const st = fs.statSync(file); return `${st.ino}:${st.mtimeMs}:${st.size}`; };
+	const look = (side: { get(key: string): unknown }) => [side.get(THEME), side.get(SIZE), side.get(ACCENT)];
+
+	/** An old pair, synced and with an appearance change on each side not yet exchanged; then both update. */
+	async function updatedPair() {
+		const w = world({ oldServer: true });
+		const desk = w.desktop(A, { old: true });
+		desk.set(THEME, "rose-pine"); desk.set(SIZE, 18); desk.set(ACCENT, "#ff0000"); desk.set("s|dictation.language", "sv");
+		w.server.set(THEME, "nord");
+		await desk.sync.round();
+		assert.deepEqual(look(w.server), ["rose-pine", 18, "#ff0000"], "the old builds synced it");
+		w.pass(HOUR);
+		desk.set(THEME, "dracula");
+		desk.sync.detect();
+		w.server.set(SIZE, 22);
+		assert.notDeepEqual(retired(json(desk.stateFile).known), []);
+		assert.notDeepEqual(retired(json(desk.stateFile).pending), []);
+		assert.notDeepEqual(retired(json(w.serverStateFile).items), []);
+		w.upgradeServer();
+		desk.upgrade();
+		w.pass(HOUR);
+		// After the update each side changes its own, a reset to the default included.
+		desk.set(ACCENT, "#00ff00");
+		desk.set(SIZE, null);
+		w.server.set(THEME, "nord");
+		desk.set("s|dictation.language", "de");
+		w.server.set("s|graph.rendering", false);
+		assert.equal((await desk.sync.round()).ok, true);
+		w.pass(10_000);
+		assert.equal((await desk.sync.round()).ok, true);
+		return { w, desk };
+	}
+
+	it("both sides updated: neither side's appearance changes, the states forget it, the other settings still travel", async () => {
+		const { w, desk } = await updatedPair();
+		assert.deepEqual(look(desk), ["dracula", null, "#00ff00"]);
+		assert.deepEqual(look(w.server), ["nord", 22, "#ff0000"], "nothing reset, nothing taken");
+		assert.equal(w.server.get("s|dictation.language"), "de");
+		assert.equal(desk.get("s|graph.rendering"), false);
+		assert.deepEqual(retired(json(desk.stateFile).known), []);
+		assert.deepEqual(retired(json(desk.stateFile).pending), []);
+		assert.deepEqual(retired(json(w.serverStateFile).items), []);
+		assert.deepEqual(desk.sentKeys.slice(1).flat().filter(maps.isRetiredSettingKey), [], "the updated desktop sends none");
+	});
+
+	it("after the one-time purge an idle round writes no state file on either side", async () => {
+		const { w, desk } = await updatedPair();
+		const before = [stamp(desk.stateFile), stamp(w.serverStateFile)];
+		for (let i = 0; i < 3; i++) {
+			w.pass(10_000);
+			desk.sync.detect();
+			assert.deepEqual(await desk.sync.round(), { ok: true, sent: 0, applied: 0 });
+		}
+		assert.deepEqual([stamp(desk.stateFile), stamp(w.serverStateFile)], before);
+	});
+
+	it("the server's own look at its files (detect) purges once, and then writes nothing", async () => {
+		const w = world({ oldServer: true });
+		const desk = w.desktop(A, { old: true });
+		desk.set(THEME, "rose-pine");
+		await desk.sync.round();
+		w.upgradeServer();
+		const authority = createMapsAuthority({ files: w.server.files, state: stateFile(w.serverStateFile, isAuthorityMapsState), now: () => MONDAY + HOUR });
+		const seq = (json(w.serverStateFile) as { seq: number }).seq;
+		authority.detect();
+		assert.deepEqual(retired(json(w.serverStateFile).items), []);
+		assert.equal((json(w.serverStateFile) as { seq: number }).seq, seq, "forgetting a key is no change: the counter doesn't move");
+		const after = stamp(w.serverStateFile);
+		authority.detect();
+		assert.equal(stamp(w.serverStateFile), after);
+		assert.equal(w.server.get(THEME), "rose-pine");
+	});
+
+	it("a new server and an old desktop, ongoing: the desktop's appearance changes are answered \"same\", and nothing changes on either side", async () => {
+		const w = world({ oldServer: true });
+		const desk = w.desktop(A, { old: true });
+		desk.set(THEME, "rose-pine"); desk.set("s|dictation.language", "sv");
+		await desk.sync.round();
+		w.pass(HOUR);
+		w.upgradeServer();
+		w.server.set(THEME, "nord");
+		w.server.set(ACCENT, "#ff0000");
+		w.server.set("s|graph.rendering", false);
+		desk.set(THEME, "dracula");
+		desk.set(SIZE, 20);
+		assert.deepEqual(await desk.sync.round(), { ok: true, sent: 2, applied: 1 });
+		assert.deepEqual(json(desk.stateFile).pending, {}, "the old desktop agreed, and won't send them again");
+		assert.deepEqual(look(w.server), ["nord", null, "#ff0000"]);
+		assert.deepEqual(look(desk), ["dracula", 20, null]);
+		assert.equal(desk.get("s|graph.rendering"), false);
+		w.pass(HOUR);
+		desk.set("s|dictation.language", "de");
+		assert.deepEqual(await desk.sync.round(), { ok: true, sent: 1, applied: 0 });
+		assert.equal(w.server.get("s|dictation.language"), "de");
+		w.pass(10_000);
+		assert.deepEqual(await desk.sync.round(), { ok: true, sent: 0, applied: 0 });
+		assert.deepEqual(retired(json(w.serverStateFile).items), []);
+	});
+
+	it("a new server and an old desktop's first exchange, as the first desktop: no appearance is taken, reset or sent back", async () => {
+		const w = world();
+		w.server.hideRetired();
+		w.server.set(THEME, "nord"); w.server.set(ACCENT, "#ff0000"); w.server.set("s|graph.rendering", false);
+		// A table an old build left, with appearance in it and no desktop on record yet.
+		fs.mkdirSync(path.dirname(w.serverStateFile), { recursive: true });
+		fs.writeFileSync(w.serverStateFile, JSON.stringify({ version: 1, seq: 3, devices: [], items: {
+			[THEME]: { h: maps.itemHash("nord"), t: MONDAY, seq: 1 },
+			[ACCENT]: { h: maps.itemHash("#ff0000"), t: MONDAY, seq: 2 },
+			"s|graph.rendering": { h: maps.itemHash(false), t: MONDAY, seq: 3 },
+		} }));
+		const desk = w.desktop(A, { old: true });
+		desk.set(THEME, "rose-pine"); desk.set(SIZE, 18); desk.set("s|dictation.language", "sv");
+		w.pass(HOUR);
+		assert.equal((await desk.sync.round()).ok, true);
+		assert.deepEqual(look(w.server), ["nord", null, "#ff0000"]);
+		assert.deepEqual(look(desk), ["rose-pine", 18, null]);
+		assert.equal(w.server.get("s|dictation.language"), "sv", "the first desktop's settings still win");
+		assert.equal(w.server.get("s|graph.rendering"), null, "and one it hasn't set still goes back to its default");
+		assert.deepEqual(json(desk.stateFile).pending, {});
+		assert.deepEqual(retired(json(w.serverStateFile).items), []);
+		assert.deepEqual(json(w.serverStateFile).devices, [A]);
+		w.pass(10_000);
+		assert.deepEqual(await desk.sync.round(), { ok: true, sent: 0, applied: 0 });
+	});
+
+	it("a new server and an old desktop's first exchange, as a later desktop: its appearance isn't put back to the server's", async () => {
+		const w = world({ oldServer: true });
+		const first = w.desktop(A, { old: true });
+		first.set(THEME, "rose-pine"); first.set("s|dictation.language", "sv");
+		await first.sync.round();
+		w.pass(HOUR);
+		w.upgradeServer();
+		const laptop = w.desktop(B, { old: true });
+		laptop.set(THEME, "dracula"); laptop.set(SIZE, 20);
+		assert.equal((await laptop.sync.round()).ok, true);
+		assert.deepEqual(look(laptop), ["dracula", 20, null], "not the server's theme, and not reset to the default");
+		assert.equal(laptop.get("s|dictation.language"), "sv", "the server's other settings still stand");
+		assert.equal(w.server.get(THEME), "rose-pine");
+		assert.equal(w.server.get(SIZE), null);
+		assert.deepEqual(json(laptop.stateFile).pending, {});
+		w.pass(10_000);
+		assert.deepEqual(await laptop.sync.round(), { ok: true, sent: 0, applied: 0 });
+		assert.deepEqual(look(first), ["rose-pine", null, null]);
+	});
+
+	it("an old server and a new desktop, ongoing: the desktop sends no appearance, takes none, and the server's stays", async () => {
+		const w = world({ oldServer: true });
+		const desk = w.desktop(A, { old: true });
+		desk.set(THEME, "rose-pine"); desk.set(SIZE, 18); desk.set("s|dictation.language", "sv");
+		await desk.sync.round();
+		w.pass(HOUR);
+		desk.set(THEME, "dracula");
+		desk.sync.detect(); // noted by the old build, never sent
+		desk.upgrade();
+		const from = desk.sentKeys.length;
+		desk.set(ACCENT, "#00ff00");
+		desk.set(SIZE, null);
+		desk.set("s|graph.rendering", false);
+		w.server.set(THEME, "nord");
+		w.server.set("s|dictation.language", "de");
+		assert.equal((await desk.sync.round()).ok, true);
+		w.pass(10_000);
+		assert.equal((await desk.sync.round()).ok, true);
+		assert.deepEqual(desk.sentKeys.slice(from).flat().filter((key) => key.startsWith("s|appearance")), []);
+		assert.deepEqual(desk.sentKeys.slice(from).flat(), ["s|graph.rendering"]);
+		assert.deepEqual(look(w.server), ["nord", 18, null], "the old server's appearance is untouched");
+		assert.deepEqual(look(desk), ["dracula", null, "#00ff00"]);
+		assert.equal(w.server.get("s|graph.rendering"), false);
+		assert.equal(desk.get("s|dictation.language"), "de");
+		assert.deepEqual(retired(json(desk.stateFile).known), []);
+		assert.deepEqual(retired(json(desk.stateFile).pending), []);
+		w.pass(10_000);
+		assert.deepEqual(await desk.sync.round(), { ok: true, sent: 0, applied: 0 });
+	});
+
+	it("custom theme files still travel both ways", async () => {
+		const palette = (accent: string) => Object.fromEntries(THEME_COLOR_KEYS.map((key) => [key, key === "accent" ? accent : "#123456"]));
+		const w = world();
+		w.server.hideRetired();
+		const desk = w.desktop(A);
+		desk.hideRetired();
+		desk.set("t|dusk", { name: "Dusk", mode: "dark", colors: palette("#aa0000") });
+		desk.set(THEME, "dusk");
+		await desk.sync.round();
+		assert.deepEqual(w.server.get("t|dusk"), desk.get("t|dusk"));
+		assert.equal(w.server.get(THEME), null, "the theme a device uses stays its own");
+		w.pass(HOUR);
+		w.server.set("t|dawn", { name: "Dawn", mode: "light", colors: palette("#00aa00") });
+		w.server.set("t|dusk", { name: "Dusk", mode: "dark", colors: palette("#0000aa") });
+		assert.deepEqual(await desk.sync.round(), { ok: true, sent: 0, applied: 2 });
+		assert.deepEqual(desk.get("t|dawn"), w.server.get("t|dawn"));
+		assert.equal((desk.get("t|dusk") as { colors: { accent: string } }).colors.accent, "#0000aa");
 	});
 });

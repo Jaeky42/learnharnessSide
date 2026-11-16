@@ -5,7 +5,7 @@
  *
  * An item is a key and a JSON value (or nothing, when it was removed):
  *
- *   s|appearance.theme           one synced setting
+ *   s|dictation.language         one synced setting
  *   s|agent.tools|<tool id>      one tool switch (and s|agent.prompts|<segment>)
  *   p|<segment path>             one prompt override text
  *   t|<theme id>                 one custom theme file (themes/<id>.json)
@@ -23,6 +23,15 @@
  * (agent.models.sideQuestion) and the helpers' request limit
  * (agent.workerRequestConcurrency). A setting this list doesn't name is
  * never read or written by sync, whatever a request says.
+ *
+ * APPEARANCE IS PER DEVICE (owner's decision, after Flashcards sync): every
+ * setting on Settings → Appearance stopped syncing, with no protocol change
+ * (custom theme files, t|, still sync). Those keys are RETIRED: never read
+ * from a record, never written into one, and never stored or answered as a
+ * change. They are still ACCEPTED in a request, because an older build on
+ * the other side still sends them, and refusing a key fails the whole
+ * request, which would stall every setting. The exchange answers each one
+ * "same", so the older side agrees and stops sending it.
  */
 
 import { createHash } from "node:crypto";
@@ -61,23 +70,6 @@ export function itemHash(value: unknown): string {
 
 /** The single settings that sync. */
 export const SYNCED_SETTINGS: ReadonlyArray<readonly string[]> = [
-	// Upstream 0.6.0 replaced `mode` with `theme`, and the settings store no
-	// longer keeps it. The key stays on this list so a record that still names
-	// it (a state file from before, a settings file not yet rewritten) is
-	// taken and then drops out by itself; a key that isn't listed is refused
-	// with the whole request, which would stall the sync of every setting.
-	["appearance", "mode"],
-	["appearance", "theme"],
-	["appearance", "background"],
-	// The per-color overrides on top of the theme (upstream 0.6.0), each its
-	// own item. null and absent both mean "the theme's color".
-	...COLOR_OVERRIDE_KEYS.map((key) => ["appearance", "colors", key] as const),
-	["appearance", "proseFontSize"],
-	["appearance", "codeLigatures"],
-	["appearance", "sessionNameSerif"],
-	["appearance", "mdRendering", "headingWeight"],
-	["appearance", "mdRendering", "boldColor"],
-	["appearance", "mdRendering", "italicColor"],
 	["dictation", "language"],
 	["graph", "enabled"],
 	["graph", "rendering"],
@@ -86,6 +78,25 @@ export const SYNCED_SETTINGS: ReadonlyArray<readonly string[]> = [
 	["compaction", "includeReasoning"],
 	["agent", "search", "engine"],
 	["agent", "graphTools", "enabled"],
+];
+
+/**
+ * Settings that synced once and are per device now: everything on Settings →
+ * Appearance. Accepted from an older build, and otherwise ignored (see above).
+ */
+export const RETIRED_SETTINGS: ReadonlyArray<readonly string[]> = [
+	// Upstream 0.6.0 replaced `mode` with `theme`; a record from before may still name it.
+	["appearance", "mode"],
+	["appearance", "theme"],
+	["appearance", "background"],
+	// The per-color overrides on top of the theme (upstream 0.6.0), each its own item once.
+	...COLOR_OVERRIDE_KEYS.map((key) => ["appearance", "colors", key] as const),
+	["appearance", "proseFontSize"],
+	["appearance", "codeLigatures"],
+	["appearance", "sessionNameSerif"],
+	["appearance", "mdRendering", "headingWeight"],
+	["appearance", "mdRendering", "boldColor"],
+	["appearance", "mdRendering", "italicColor"],
 ];
 
 /** The maps inside settings whose entries each sync: tool switches and prompt switches. */
@@ -97,6 +108,12 @@ export const SYNCED_SETTING_MAPS: ReadonlyArray<readonly string[]> = [
 const settingKey = (path: readonly string[]): string => `s|${path.join(".")}`;
 const SETTING_KEYS = new Map(SYNCED_SETTINGS.map((path) => [settingKey(path), path]));
 const SETTING_MAP_PREFIXES = SYNCED_SETTING_MAPS.map((path) => ({ prefix: `${settingKey(path)}|`, path }));
+const RETIRED_KEYS = new Set(RETIRED_SETTINGS.map(settingKey));
+
+/** A setting that synced once and is per device now (an older build may still send it). */
+export function isRetiredSettingKey(key: string): boolean {
+	return RETIRED_KEYS.has(key);
+}
 
 type Json = Record<string, unknown>;
 const isObject = (value: unknown): value is Json => !!value && typeof value === "object" && !Array.isArray(value);
@@ -247,7 +264,7 @@ export function checkMapChange(raw: unknown): MapChange | null {
 	if (value !== null) {
 		if (canonical(value).length > MAX_VALUE_BYTES) return null;
 		const id = raw.key.slice(2);
-		const fine = kind === "s" ? settingPath(raw.key) !== null && (typeof value !== "object")
+		const fine = kind === "s" ? (settingPath(raw.key) !== null || isRetiredSettingKey(raw.key)) && (typeof value !== "object")
 			: kind === "p" ? typeof value === "string"
 			: kind === "t" ? isCustomThemeKey(raw.key) && canonical(sanitizeThemeFile(value)) === canonical(value)
 			: kind === "r" ? true
@@ -256,7 +273,7 @@ export function checkMapChange(raw: unknown): MapChange | null {
 			: kind === "n" ? isObject(value) && value.id === id
 			: isPosition(value);
 		if (!fine) return null;
-	} else if ((kind === "s" && settingPath(raw.key) === null) || (kind === "t" && !isCustomThemeKey(raw.key))) return null;
+	} else if ((kind === "s" && settingPath(raw.key) === null && !isRetiredSettingKey(raw.key)) || (kind === "t" && !isCustomThemeKey(raw.key))) return null;
 	// A time before 1970 (a PC whose clock is ahead, adding its offset to an item timed 0) is the oldest time there is, not a broken page.
 	return { key: raw.key, value, t: Math.max(0, raw.t) };
 }

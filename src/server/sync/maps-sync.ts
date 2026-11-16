@@ -40,9 +40,16 @@
  * (`more: true` in the answer). The desktop takes what arrived only once the
  * last page is in, in one step, so an interrupted exchange leaves nothing
  * half-agreed on its side. A small exchange is one request, as it always was.
+ *
+ * RETIRED KEYS (appearance, per device now: maps.ts): both sides once held
+ * them, so each purges them from its saved state first. Left there, a key
+ * the files no longer report would read as "removed here" and go to the
+ * other side as a deletion, resetting its appearance. They are never noted,
+ * sent, stored or applied; one that an older build still sends is answered
+ * "same", so it agrees and stops sending it.
  */
 
-import { ABSENT, checkMapChange, isVaultFolderName, itemHash, kindOf, MAX_VAULT_FOLDERS, type MapChange } from "../../core/sync/maps.ts";
+import { ABSENT, checkMapChange, isRetiredSettingKey, isVaultFolderName, itemHash, kindOf, MAX_VAULT_FOLDERS, type MapChange } from "../../core/sync/maps.ts";
 import type { StateFile } from "../../store/sync/state-file.ts";
 import type { AuthorityReply } from "./authority.ts";
 import type { SyncRequester } from "./desktop-sync.ts";
@@ -71,15 +78,17 @@ export interface ExchangeRules {
 	malformed: string;
 	/** Items whose time can't matter (an item that never changes): `detect` leaves them to the next exchange. */
 	untimed?: (key: string) => boolean;
+	/** Keys that synced once and no longer do: purged from the state, never taken or sent, answered "same". */
+	retired?: (key: string) => boolean;
 }
 
 /** The settings and the other small files (maps.ts). */
-export const MAP_RULES: ExchangeRules = { kindOf, checkChange: checkMapChange, resetUnsentSettings: true, malformed: "The settings changes didn't arrive whole." };
+export const MAP_RULES: ExchangeRules = { kindOf, checkChange: checkMapChange, resetUnsentSettings: true, malformed: "The settings changes didn't arrive whole.", retired: isRetiredSettingKey };
 
 /** An item that can be compared and written this round. */
 const usable = (rules: ExchangeRules, snapshot: MapSnapshot, key: string): boolean => {
 	const kind = rules.kindOf(key);
-	return !!kind && !snapshot.unreadable.has(kind) && !snapshot.unreadableKeys?.has(key);
+	return !!kind && !rules.retired?.(key) && !snapshot.unreadable.has(kind) && !snapshot.unreadableKeys?.has(key);
 };
 
 const valueOf = (snapshot: MapSnapshot, key: string): unknown => snapshot.items.get(key)?.value ?? null;
@@ -154,6 +163,18 @@ function copyOf(state: AuthorityMapsState): AuthorityMapsState {
 	return { ...state, items: { ...state.items }, devices: [...state.devices], ...(state.firsts ? { firsts: { ...state.firsts } } : {}) };
 }
 
+/** Does the saved table still hold retired keys? */
+function holdsRetired(state: AuthorityMapsState, retired: (key: string) => boolean): boolean {
+	for (const key in state.items) if (retired(key)) return true;
+	return Object.values(state.firsts ?? {}).some((first) => first.sent.some(retired));
+}
+
+/** Drop retired keys from a table (a copy). No counter moves: nothing changed, the keys just stop being tracked. */
+function purgeAuthority(state: AuthorityMapsState, retired: (key: string) => boolean): void {
+	for (const key of Object.keys(state.items)) if (retired(key)) delete state.items[key];
+	if (state.firsts) for (const [id, first] of Object.entries(state.firsts)) state.firsts[id] = { ...first, sent: first.sent.filter((key) => !retired(key)) };
+}
+
 export function createMapsAuthority(deps: {
 	files: MapFiles;
 	state: StateFile<AuthorityMapsState>;
@@ -216,8 +237,10 @@ export function createMapsAuthority(deps: {
 			if (!stored) return;
 			const snapshot = deps.files.read();
 			const keys = ownChanges(stored.items, snapshot, rules.untimed);
-			if (keys.length === 0) return;
+			const purge = !!rules.retired && holdsRetired(stored, rules.retired);
+			if (keys.length === 0 && !purge) return;
 			const state = copyOf(stored);
+			if (purge) purgeAuthority(state, rules.retired!);
 			noteOwnChanges(state, snapshot, deps.now(), keys);
 			deps.state.write(state);
 		},
@@ -227,10 +250,12 @@ export function createMapsAuthority(deps: {
 				return bad(rules.malformed);
 			}
 			const incoming: MapChange[] = [];
+			/** Retired keys an older desktop still sends: answered "same", nothing else. */
+			const retiredIn: MapChange[] = [];
 			for (const item of raw.changes) {
 				const checked = rules.checkChange(item);
 				if (!checked) return bad(rules.malformed);
-				incoming.push(checked);
+				(rules.retired?.(checked.key) ? retiredIn : incoming).push(checked);
 			}
 			if (Array.isArray(raw.vaultFolders)) {
 				const names = raw.vaultFolders.filter(isVaultFolderName).slice(0, MAX_VAULT_FOLDERS);
@@ -246,6 +271,8 @@ export function createMapsAuthority(deps: {
 			let dirty = !stored;
 			/** Copied on the first change, so a step that fails midway leaves the table as it was saved. */
 			const edit = (): AuthorityMapsState => { if (state === stored) state = copyOf(stored); dirty = true; return state; };
+			// Before anything looks at the table (written once; an idle exchange writes nothing after that).
+			if (rules.retired && holdsRetired(state, rules.retired)) purgeAuthority(edit(), rules.retired);
 			// Before anything this exchange may write.
 			if (deps.makeBackup && state.backup === undefined) edit().backup = deps.makeBackup();
 			if (typeof raw.timeZone === "string") deps.onTimeZone?.(deviceId, raw.timeZone);
@@ -338,6 +365,7 @@ export function createMapsAuthority(deps: {
 			const before = underway.get(deviceId) ?? new Map<string, string>();
 			for (const [key, h] of sent) before.set(key, h);
 			const items: Array<Record<string, unknown>> = [];
+			for (const change of retiredIn) items.push({ key: change.key, same: true, t: Math.min(Math.round(change.t), now) });
 			const answer = (key: string, known: { h: string; t: number }): number => {
 				// The desktop's own value, taken as it was: no need to send it back.
 				if (before.get(key) === known.h) { items.push({ key, same: true, t: known.t }); return key.length + 32; }
@@ -418,6 +446,16 @@ export interface MapsDesktop {
 type ReplyItem = { key: string; t: number; same?: boolean; value?: unknown };
 
 const copyOfDesktop = (state: DesktopMapsState): DesktopMapsState => ({ ...state, known: { ...state.known }, pending: { ...state.pending } });
+
+/** Drop retired keys from a desktop's state (a copy), so none turns into a deletion. True when one went. */
+function purgeDesktop(state: DesktopMapsState, retired: ((key: string) => boolean) | undefined): boolean {
+	if (!retired) return false;
+	let changed = false;
+	for (const table of [state.known, state.pending]) {
+		for (const key of Object.keys(table)) if (retired(key)) { delete table[key]; changed = true; }
+	}
+	return changed;
+}
 
 export function createMapsDesktop(deps: {
 	files: MapFiles;
@@ -504,6 +542,7 @@ export function createMapsDesktop(deps: {
 			const stored = current();
 			// Worked on a copy: what arrives is agreed on only once it is in the files.
 			const state: DesktopMapsState = stored ? copyOfDesktop(stored) : { version: 1, server: identity.server, deviceId: identity.deviceId, synced: false, cursor: 0, known: {}, pending: {}, folders: null, offset: 0 };
+			purgeDesktop(state, rules.retired);
 			if (deps.makeBackup && state.backup === undefined) {
 				state.backup = deps.makeBackup();
 				deps.state.write(state);
@@ -606,7 +645,8 @@ export function createMapsDesktop(deps: {
 			const stored = current();
 			if (!stored) return;
 			const state = copyOfDesktop(stored);
-			if (note(state, deps.files.read())) deps.state.write(state);
+			const purged = purgeDesktop(state, rules.retired);
+			if (note(state, deps.files.read()) || purged) deps.state.write(state);
 		},
 		round() {
 			if (running) return Promise.resolve({ ok: false, reason: "busy" } as MapsRound);
