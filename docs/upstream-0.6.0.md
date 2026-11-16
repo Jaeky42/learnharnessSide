@@ -214,6 +214,8 @@ Five things the plan had left open, or that came out differently than the plan s
   - **How:** the steer card hands the saved switch through as it is (`data.ui?.inverted`, undefined when never flipped; it used to become `false`), and `DemoOutputCard` and `VisualOutputCard` take `savedInverted` and fall back to `useAppearance().resolvedMode === "dark"`. A flip saves through the artifact-ui route as before. Each edit is marked `FORK (theme default)`.
   - **Checked:** on a production build with the sample teaching session, the Default theme (dark) and Catppuccin Latte (light): demo and figure inverted on dark, not on light; a demo flipped on with the light theme stayed inverted on dark and on light while the unflipped figure followed the theme.
   - **Tests:** `tests/artifact-theme-default.test.tsx` (both kinds on a dark and a light theme, a saved choice both ways, the steer card's hand-through, a live theme switch and a flip sticking through it); the two asserts in `tests/demos.test.tsx` that pinned "off by default" now read "on, on a dark theme".
+  - **State:** built on `claude/peaceful-ride-831pls` (code commit `232ff0e`, merged with `side-tutor` at `1d28187` as `2233b1c`) and **shipped**: with the owner's word ("yes", then "push"), the same commit went to `claude/pensive-goldberg-7dty2m` and to `side-tutor`, both plain fast-forwards from `1d28187`. No dry run; before it, typecheck, lint and the related tests on the merged tree, and an independent verifier (no defects). No protocol or format change, so the order of updating the server and the PC doesn't matter. Not yet confirmed by the owner on a device.
+  - **Not checked:** a real iPhone, iPad or the Windows app.
 
 ### The Drawing Pad, as tried on a computer (nothing of upstream's changed)
 
