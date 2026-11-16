@@ -497,7 +497,9 @@ describe("artifact chrome — scrollbar, invert toggles, downloads (release poli
 		assert.match(html, /scrolling="no"/, "no internal scrollbar — the wheel chains to the session");
 		assert.match(html, /toggle-invert-demo-brightness/, "the invert switch (house Toggle)");
 		assert.match(html, /data-testid="demo-download"/);
-		assert.ok(!html.includes("hue-rotate"), "inversion is OFF by default — a manual toggle only");
+		// FORK (theme default): never flipped → follows the theme; with no
+		// provider the context is the Default theme, which is dark.
+		assert.ok(html.includes("hue-rotate"), "inverted by default on a dark theme");
 		assert.match(html, /interactive demo/, "the kind label lives in the caption header");
 		assert.match(html, /Wave interference/, "the title rides beside the kind label");
 	});
@@ -508,7 +510,7 @@ describe("artifact chrome — scrollbar, invert toggles, downloads (release poli
 		assert.match(html, /toggle-invert-figure-brightness/, "the invert switch (house Toggle)");
 		assert.match(html, /data-testid="visual-download"/);
 		assert.ok(!html.includes('data-testid="visual-open"'), "fullscreen needs the session overlay context");
-		assert.ok(!html.includes("hue-rotate"), "inversion OFF by default");
+		assert.ok(html.includes("hue-rotate"), "inverted by default on a dark theme (the Default theme)");
 	});
 
 	it("figure card: NO card chrome, image first, caption row BELOW (owner round, 2026-10-07)", () => {

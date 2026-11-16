@@ -5,6 +5,7 @@ import { DownloadIcon } from "lucide-react";
 import { Toggle } from "@/components/settings/controls";
 import { InvertDiscIcon } from "@/components/artifacts/invert-disc";
 import { ChatActionsContext } from "@/components/chat";
+import { useAppearance } from "@/components/settings/appearance";
 import { downloadFile, slugFilename } from "@/components/artifacts/download";
 import { DispatchCard } from "@/components/artifacts/dispatch-card";
 import type { ArtifactPartProps, DemoResult } from "@/src/core";
@@ -89,16 +90,18 @@ export function DemoCard({ part }: ArtifactPartProps) {
 }
 
 /** The demo artifact — exported: the steer card renders the delivered
- *  result. `messageId` + `initialInverted` carry the PERSISTED invert
- *  switch (details.ui.inverted via the artifact-ui route, owner 2026-10-07). */
+ *  result. `messageId` + `savedInverted` carry the PERSISTED invert
+ *  switch (details.ui.inverted via the artifact-ui route, owner 2026-10-07).
+ *  FORK (theme default): `savedInverted` undefined = never flipped, so the
+ *  switch follows the theme (on for a dark theme). */
 export function DemoOutputCard({
 	output,
 	messageId,
-	initialInverted = false,
+	savedInverted,
 }: {
 	output: unknown;
 	messageId?: string;
-	initialInverted?: boolean;
+	savedInverted?: boolean;
 }) {
 	const result = output as DemoResult | undefined;
 	if (!result || typeof result.html !== "string" || typeof result.title !== "string") {
@@ -121,7 +124,7 @@ export function DemoOutputCard({
 		);
 	}
 	return (
-		<DemoFrame title={result.title} html={result.html} messageId={messageId} initialInverted={initialInverted} />
+		<DemoFrame title={result.title} html={result.html} messageId={messageId} savedInverted={savedInverted} />
 	);
 }
 
@@ -129,12 +132,12 @@ function DemoFrame({
 	title,
 	html,
 	messageId,
-	initialInverted = false,
+	savedInverted,
 }: {
 	title: string;
 	html: string;
 	messageId?: string;
-	initialInverted?: boolean;
+	savedInverted?: boolean;
 }) {
 	const actions = useContext(ChatActionsContext);
 	const iframeRef = useRef<HTMLIFrameElement | null>(null);
@@ -146,9 +149,13 @@ function DemoFrame({
 	// element, which carries the card's white backing, so one filter flips
 	// page + content together while hue-rotate(180deg) undoes invert's hue
 	// flip.
-	const [inverted, setInverted] = useState(initialInverted);
+	// FORK (theme default, owner): never flipped → follow the theme's mode,
+	// live; a flip is the learner's choice and sticks on every theme.
+	const { resolvedMode } = useAppearance();
+	const [chosen, setChosen] = useState<boolean | undefined>(savedInverted);
+	const inverted = chosen ?? resolvedMode === "dark";
 	const toggleInverted = (next: boolean) => {
-		setInverted(next);
+		setChosen(next);
 		if (!actions?.chatId || !messageId) return;
 		void fetch(`/api/chats/${actions.chatId}/artifact-ui`, {
 			method: "POST",

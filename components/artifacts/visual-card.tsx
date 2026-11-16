@@ -6,6 +6,7 @@ import { DownloadIcon, MaximizeIcon } from "lucide-react";
 import { InvertDiscIcon } from "@/components/artifacts/invert-disc";
 import { Toggle } from "@/components/settings/controls";
 import { useSessionMermaid } from "@/components/session-overlay";
+import { useAppearance } from "@/components/settings/appearance";
 import { downloadFile } from "@/components/artifacts/download";
 import { DispatchCard } from "@/components/artifacts/dispatch-card";
 import { SvgImage } from "@/components/artifacts/svg-image";
@@ -41,15 +42,17 @@ export function VisualCard({ part }: ArtifactPartProps) {
 	return <DispatchCard toolCallId={part.toolCallId} kind="visual" />;
 }
 
-/** The figure itself — exported: the steer card renders the delivered artifact. */
+/** The figure itself — exported: the steer card renders the delivered artifact.
+ *  FORK (theme default): `savedInverted` is the persisted switch, undefined
+ *  when the learner never flipped it. */
 export function VisualOutputCard({
 	output,
 	messageId,
-	initialInverted = false,
+	savedInverted,
 }: {
 	output: unknown;
 	messageId?: string;
-	initialInverted?: boolean;
+	savedInverted?: boolean;
 }) {
 	const result = output as VisualResult | undefined;
 	const snapshot = useImageSnapshot(result?.image?.snapshotId);
@@ -61,9 +64,14 @@ export function VisualOutputCard({
 	// the silent artifact-ui route on toggle; without a chat page (tests,
 	// previews) it stays local-only. The toggled state also feeds the
 	// fullscreen overlay (openFigure).
-	const [inverted, setInverted] = useState(initialInverted);
+	// FORK (theme default, owner): never flipped (`savedInverted` undefined)
+	// → follow the theme's mode, live; a flip is the learner's choice and
+	// sticks on every theme.
+	const { resolvedMode } = useAppearance();
+	const [chosen, setChosen] = useState<boolean | undefined>(savedInverted);
+	const inverted = chosen ?? resolvedMode === "dark";
 	const toggleInverted = (next: boolean) => {
-		setInverted(next);
+		setChosen(next);
 		if (!actions?.chatId || !messageId) return;
 		void fetch(`/api/chats/${actions.chatId}/artifact-ui`, {
 			method: "POST",

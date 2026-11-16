@@ -92,7 +92,7 @@ describe("generated SVG image boundary", () => {
 
 		it(`${mode}: retains inversion on the white backing`, () => {
 			const html = renderToStaticMarkup(mode === "inline"
-				? <VisualOutputCard output={{ svg: FIGURE }} initialInverted />
+				? <VisualOutputCard output={{ svg: FIGURE }} savedInverted />
 				: <MermaidOverlay svg={FIGURE} inverted onClose={() => {}} />);
 			const { document } = parseHTML(html);
 			const holder = document.querySelector(mode === "inline" ? '[data-testid="visual-svg"]' : "[data-lh-overlay-chart]")!;
@@ -164,7 +164,7 @@ it("the fullscreen button opens the same SVG image and inversion; download keeps
 		const [focus, setFocus] = useState<{ svg: string; inverted: boolean } | null>(null);
 		return (
 			<SessionMermaidContext.Provider value={{ openMermaid: () => {}, openFigure: (svg, inverted) => setFocus({ svg, inverted }) }}>
-				<VisualOutputCard output={{ svg: originalSvg }} initialInverted />
+				<VisualOutputCard output={{ svg: originalSvg }} savedInverted />
 				{focus && <MermaidOverlay svg={focus.svg} inverted={focus.inverted} onClose={() => setFocus(null)} />}
 			</SessionMermaidContext.Provider>
 		);
