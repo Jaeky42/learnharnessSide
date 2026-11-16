@@ -1245,8 +1245,9 @@ Kept as written while the work was on its own branch; where it says "until the m
 10. **A held session is read-only until taken over.** Reading it, the notes drawer and moving it between folders work. Sending a message, the side tutor, renaming, changing its model and deleting wait for Take over.
 11. **Timing:** a session is sent about 2 seconds after a change; the desktop tells the server when a reply starts and ends; it asks the server for news every 10 seconds; a full sync at app start; quiet retries while offline, slowing to once every few minutes. There is no "final sync on quit" (on Windows the local server is killed at once).
 12. **Settings split.**
-    - Synced, latest change wins per setting: appearance (mode, background, text size, serif session names, heading weight, bold and italic colours), dictation language, graph (extraction on/off, rendering on/off, chunk size, the graph view sliders), compaction threshold, agent (tool switches, search engine, prober graph tools), and prompt overrides (the texts and their switches).
+    - Synced, latest change wins per setting: dictation language, graph (extraction on/off, rendering on/off, chunk size, the graph view sliders), compaction threshold, agent (tool switches, search engine, prober graph tools), and prompt overrides (the texts and their switches).
     - Per device, never synced: model slots and per-role model overrides, the custom provider, the Claude Code switch, file-access folders, the reading font, automatic updates, keyboard shortcuts, keys and sign-ins.
+    - **Appearance is per device** (owner's change, after the phone plugins round; it synced until then): everything on Settings → Appearance. The theme, the colour overrides, the background, the reading font size, code ligatures, serif session names, heading weight, and the bold and italic colours. Imported theme files still sync. See "Appearance is per device" under slice 5.
     - The chains-view folders (`source-organization.json`) always sync.
     - At the first pairing, where the two sides differ, the desktop's value is kept.
     - A session's own model travels with the session; if it isn't set up on the other device, the learner picks one there.
@@ -1357,7 +1358,7 @@ Kept as written while the work was on its own branch; where it says "until the m
 **Slice 5: settings and the other small files**
 
 - **What travels, one item at a time** (`src/core/sync/maps.ts`; the key's first letter says what it is):
-  - `s|…` the synced settings from `settings.json`, each on its own: the approved list (`SYNCED_SETTINGS`), plus every tool switch and every prompt switch (`SYNCED_SETTING_MAPS`). **Nothing else in `settings.json` is ever read or written by sync**: a request that names any other setting is refused whole.
+  - `s|…` the synced settings from `settings.json`, each on its own: the approved list (`SYNCED_SETTINGS`), plus every tool switch and every prompt switch (`SYNCED_SETTING_MAPS`). **Nothing else in `settings.json` is ever read or written by sync**: a request that names any other setting is refused whole (except the retired appearance settings, which are accepted and ignored: "Appearance is per device" below).
   - `p|…` prompt override texts (`prompts/**`);
   - `r|…` the graph view's sliders, one field each (`graph/render-settings.json`);
   - `f|…` and `o|…` chains-view folders and where each source is filed (`graph/source-organization.json`);
@@ -1391,6 +1392,24 @@ Kept as written while the work was on its own branch; where it says "until the m
 - **Code:** `src/core/sync/maps.ts`, `src/server/sync/{map-views,maps-sync,maps-engine}.ts`, `src/store/sync/vault-folders.ts`, `app/api/sync/maps`, and three small additions to `src/server/obsidian-sync.ts`.
 - **Tests:** `tests/sync-maps.test.ts` (the rules; each side's files in memory, real state files, PCs with wrong clocks), `tests/sync-maps-wiring.test.ts` (the real stores and files), and one more case in `tests/obsidian-sync.test.ts` (the real `ob`: announced folders are left out before any of their files arrive).
 - **Real run:** two built copies: a first sync (the desktop's settings on both, the server's model and font untouched, 371 node places and the sliders equal), a setting changed on each side, and a chains-view folder made on the server showing on the desktop.
+
+**Appearance is per device** (owner's change, after the phone plugins round)
+
+- **State:** approved by the owner and being built on `claude/upstream-0.6.0`; not shipped. Shipping to the two branches needs the owner's word.
+- **The owner's three decisions:**
+  1. **Everything on Settings → Appearance is per device:** the theme, the nine colour overrides, the background, the reading font size, code ligatures, serif session names, heading weight, and the bold and italic colours (the reading font always was). The PC has its own look; the server has its own, which the phone and the tablet share.
+  2. **Imported theme files still sync** (`t|<theme id>`), so a theme imported on one side can be picked on the other. Removing one removes it on both, and a side that was using it falls back to the default theme.
+  3. **No protocol change:** the sync protocol stays 3. The server and the PC can be updated in either order, and sync doesn't pause.
+- **At the switch nothing changes on screen:** each side keeps the values in its own `settings.json`.
+- **Unchanged:** the login and setup pages and the home-screen app's colours follow the server's own theme, as before.
+- **How: retired settings** (`RETIRED_SETTINGS`, `isRetiredSettingKey` in `src/core/sync/maps.ts`; `retired` in `ExchangeRules`, `src/server/sync/maps-sync.ts`):
+  - a retired setting is still accepted on the wire, so an older build's request isn't refused whole, but it is never read from or written to `settings.json`;
+  - **the server** answers "same" to one an older PC sends (so that PC stops sending it), stores nothing about it, and never lists it among what changed;
+  - **a PC** never sends one and skips one in an older server's answer;
+  - **both forget what they had noted about them**, once (`maps.json`, `maps-desktop.json`). Without that, "the setting is no longer in my files" would read as "it was reset here" and reset the other side's appearance.
+  - `appearance.mode`, the key upstream dropped, is retired with the rest.
+- **Known gap, accepted by the owner:** an older server whose first desktop is an updated PC (a fresh pairing, or a server that lost its sync records, in the window where only the PC is updated) resets its own appearance to the defaults: the older server's "a setting the first desktop hasn't set goes back to its default". Updating the server first avoids it.
+- **Tests:** in `tests/sync-maps.test.ts`: an older side meeting an updated one in both directions (ongoing, and a first exchange as the first and as a later desktop), nothing reset on either, the forgetting, an idle round writing nothing afterwards, and a theme file still travelling; with the real files in `tests/sync-maps-wiring.test.ts`.
 
 **Slice 6: timing, pictures sent once, and the whole thing running by itself**
 
