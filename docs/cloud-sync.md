@@ -1395,7 +1395,7 @@ Kept as written while the work was on its own branch; where it says "until the m
 
 **Appearance is per device** (owner's change, after the phone plugins round)
 
-- **State:** approved by the owner and being built on `claude/upstream-0.6.0`; not shipped. Shipping to the two branches needs the owner's word.
+- **State:** built on `claude/upstream-0.6.0` (commit `af5d46b`); **not shipped**. Shipping to the two branches needs the owner's word. Checked: the sync tests (336 of 336), typecheck and lint, run again by an independent verifier; the diff read by a reviewer, whose word was to ship. Not run between two built copies, and not against a real older build: an older side is played in the tests by the same code with the retired rule switched off.
 - **The owner's three decisions:**
   1. **Everything on Settings → Appearance is per device:** the theme, the nine colour overrides, the background, the reading font size, code ligatures, serif session names, heading weight, and the bold and italic colours (the reading font always was). The PC has its own look; the server has its own, which the phone and the tablet share.
   2. **Imported theme files still sync** (`t|<theme id>`), so a theme imported on one side can be picked on the other. Removing one removes it on both, and a side that was using it falls back to the default theme.
@@ -1409,7 +1409,9 @@ Kept as written while the work was on its own branch; where it says "until the m
   - **both forget what they had noted about them**, once (`maps.json`, `maps-desktop.json`). Without that, "the setting is no longer in my files" would read as "it was reset here" and reset the other side's appearance.
   - `appearance.mode`, the key upstream dropped, is retired with the rest.
 - **Known gap, accepted by the owner:** an older server whose first desktop is an updated PC (a fresh pairing, or a server that lost its sync records, in the window where only the PC is updated) resets its own appearance to the defaults: the older server's "a setting the first desktop hasn't set goes back to its default". Updating the server first avoids it.
-- **Tests:** in `tests/sync-maps.test.ts`: an older side meeting an updated one in both directions (ongoing, and a first exchange as the first and as a later desktop), nothing reset on either, the forgetting, an idle round writing nothing afterwards, and a theme file still travelling; with the real files in `tests/sync-maps-wiring.test.ts`.
+- **A removed theme that the other side was using** (found by the reviewer, for the owner to review): the side that removes it sets its own theme back to the default (upstream's rule); the other side only loses the file. It shows the default theme, with the default card marked in the picker, but its settings record still names the removed theme, so it switches back by itself if a theme with that id is imported again on either side. Before this change the reset travelled too. Left as it is.
+- **Tests:** in `tests/sync-maps.test.ts`: an older side meeting an updated one (an updated server with an older PC: ongoing, and a first exchange as the first and as a later desktop; an older server with an updated PC: ongoing), nothing reset on either, the forgetting, an idle round writing nothing afterwards, and a theme file still travelling; with the real files in `tests/sync-maps-wiring.test.ts`.
+  - **Traced by the reviewer, not tested:** an older PC's first exchange in pages and its `send_all` against an updated server; an updated PC as a later desktop on an older server; the PC's forgetting done by its offline noting alone, before any round.
 
 **Slice 6: timing, pictures sent once, and the whole thing running by itself**
 
