@@ -1,7 +1,7 @@
 "use client";
 /**
  * THE DISCARD BOX (cloud sync Phase 6, owner's choice: a box over the app,
- * once, with OK). A session this PC had continued was taken over on another
+ * once, with OK). A session this PC had continued was continued on another
  * device, so what the PC hadn't sent was discarded (no copies). The box
  * names the session and how many messages went; several sessions at once
  * share one box, one line each.

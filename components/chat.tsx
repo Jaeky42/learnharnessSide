@@ -1858,8 +1858,8 @@ export function Chat({
 					)}
 					{renderedActionContext && <PluginTopBarActions context={renderedActionContext} captureContext={captureActionContext} blocked={undefined /* FORK (seamless sessions): never greyed */} />}
 				</TopBar>
-				{/* Cloud sync (Phase 6): "Held by …" and Take over, when another
-				    device holds this session. Nothing where sync isn't in use. */}
+				{/* Cloud sync: the floating box (a failed move, sync trouble on a PC).
+				    Floats over the lesson, takes no room. Nothing where sync isn't in use. */}
 				<SessionStrip chatId={chatId} title={titleText} />
 
 				<SessionFind scopeRef={sessionFindScopeRef} scrollContextRef={scrollContextRef} />
@@ -2150,11 +2150,8 @@ export function Chat({
 				    anchored to the dock block's top edge, so it rides every
 				    height morph (typing, a question growing the band, the
 				    fold) and NEVER overlaps the composer. */}
-				{/* Cloud sync (Phase 6): on a session another device holds there is
-				    no message box; it fades out, and back in after a take-over
-				    (app/cloud.css). The wrapper has no box of its own. */}
-				{/* FORK (seamless sessions): never hidden; the wrapper stays (app/cloud.css). */}
-				<div className="lh-held-dock">
+				{/* FORK (seamless sessions): the message box is never hidden. */}
+				<div>
 				<DockOverlay
 					viewReader={inputViewReader}
 					viewTargets={surfaceTarget ? { text: textTarget()!, answer: builtinTarget, thinking: thinkingTarget(), pluginQuestion: pluginQuestionTarget(), pluginProblem: pluginProblemTarget() } : undefined}

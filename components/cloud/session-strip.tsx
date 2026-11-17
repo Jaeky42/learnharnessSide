@@ -1,161 +1,86 @@
 "use client";
 /**
- * THE STRIP under a lesson's top bar (cloud sync Phase 6, docs/cloud-sync.md).
+ * THE FLOATING BOX at the top of a lesson (cloud sync, docs/cloud-sync.md).
  *
- * A session another device holds is read-only here: the strip says who
- * holds it and offers Take over (owner's choices: a strip under the top
- * bar, no message box; the strip changes in place while an online holder
- * hands over, with Cancel; a confirm box when turns could be lost).
+ * Sessions move between devices by themselves (seamless sessions, owner's
+ * decision: components/cloud/session-move.ts), so nothing here says who holds
+ * a session or offers to take it over. The box says only two things:
  *
- * Take over asks this copy's own server (POST /api/cloud), which knows the
- * rules; this component only shows the answer:
- *   moved / yours   the session is here now; the strip goes
- *   waiting         the holder hands over by itself: ask again every 2 s
- *   warning         the offline holder may have unsent turns: the box
+ *   - a move that failed: a write needed the session here and it couldn't be
+ *     moved (`useMoveFailed`). It wins over the other message.
+ *   - sync trouble on a PC (`useSyncTrouble`: offline after the 30-second
+ *     quiet rule, paused, or the pairing removed), in every lesson, because
+ *     every session can be continued here: what is added now is discarded if
+ *     another device continues the session first.
  *
- * THE OFFLINE HEADS-UP is the same strip in a session this PC can continue,
- * while the PC can't reach the server, sync is paused, or the server removed
- * the PC (owner's choice: the strip, for as long as it lasts; the message
- * box stays). What is added then is lost if another device takes the
- * session over first. Desktop only, and quiet for the first 30 seconds.
+ * It looks like the update box (components/update-banner.tsx), floats over
+ * the lesson 12 px under the top bar and pushes nothing: a zero-height
+ * wrapper holds its place and the box is positioned inside it. It sits above
+ * the lesson and below the Tutor (z-30), menus and dialogs.
  *
- * The strip is always in the page and opens or closes by a data attribute,
- * so it can fade and slide both ways (app/cloud.css). It renders nothing
- * where sync isn't in use.
+ * The box is always in the page and opens or closes by a data attribute, so
+ * it can fade both ways (app/cloud.css); the last words stay while it fades
+ * out. The ✕ on a sync message hides it until that trouble next starts (the
+ * kind of trouble and, offline, the current offline spell), in every lesson
+ * of this window and not across a reload. The ✕ on the failure clears the
+ * flag. Nothing renders where sync isn't in use.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { askingText, cannotTakeOverText, finishingText, HELD_TEXT, heldStripText, SYNC_TROUBLE_STRIP_TEXT, takeOverWarning, type SessionHolder } from "@/src/core";
-import { lastSyncedText } from "@/components/settings/obsidian-section";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { XIcon } from "lucide-react";
+import { SESSION_MOVE_FAILED_TEXT, SYNC_TROUBLE_BOX_TEXT, type SyncTrouble } from "@/src/core";
 import { useCloud, useSyncTrouble } from "./cloud-state";
-import { TakeOverDialog } from "./take-over-dialog";
+import { clearMoveFailed, useMoveFailed } from "./session-move";
 
-const ASK_AGAIN_MS = 2000;
-const buttonClass = "shrink-0 rounded-sm border border-border px-3 py-1 font-ui text-sm text-foreground transition-colors hover:bg-accent disabled:opacity-40 disabled:hover:bg-transparent";
+// ── The ✕ on a sync message: shared by every lesson of this window ──────────
 
-type Phase =
-	| { kind: "idle" }
-	/** The first answer hasn't come yet. */
-	| { kind: "asking" }
-	| { kind: "waiting"; reason: "reply" | "handing-over" }
-	| { kind: "warning"; holder: SessionHolder }
-	| { kind: "failed" };
+let dismissedKey: string | null = null;
+const listeners = new Set<() => void>();
+const subscribe = (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; };
+const setDismissed = (key: string | null) => {
+	if (dismissedKey === key) return;
+	dismissedKey = key;
+	for (const listener of [...listeners]) listener();
+};
+
+/** Which spell of trouble this is: paused and removed by their kind, offline
+ *  by the start of the current offline spell. */
+export function troubleKey(trouble: SyncTrouble, offlineSince: number | null | undefined): string {
+	return trouble === "offline" ? `offline:${typeof offlineSince === "number" ? offlineSince : "start"}` : trouble;
+}
+
+/** Tests only: forget a dismissal. */
+export function resetSessionBoxForTests(): void {
+	setDismissed(null);
+}
 
 interface Shown {
-	/** Changes when the words change in place, so they cross-fade. */
+	/** Changes when the words change in place. */
 	key: string;
 	text: string;
-	note: string | null;
-	busy: boolean;
-	button: "take-over" | "cancel" | null;
-	disabled: boolean;
+	/** What the ✕ does. */
+	dismiss: () => void;
 }
 
-const since = (holder: SessionHolder): string | null => (typeof holder.lastSeenAt === "number" ? lastSyncedText(holder.lastSeenAt) : null);
-
-async function ask(chatId: string, force: boolean): Promise<Record<string, unknown> | null> {
-	try {
-		const response = await fetch("/api/cloud", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ op: "take-over", chatId, force }) });
-		if (!response.ok) return null;
-		return (await response.json()) as Record<string, unknown>;
-	} catch {
-		return null;
-	}
-}
-
-export function SessionStrip({ chatId, title }: { chatId: string; title: string }) {
+export function SessionStrip({ chatId }: { chatId: string; /** Not shown any more (the box names no session). */ title?: string }) {
 	const cloud = useCloud();
-	const holder = cloud.held[chatId] ?? null;
 	const trouble = useSyncTrouble();
-	const [phase, setPhase] = useState<Phase>({ kind: "idle" });
-	const [forcing, setForcing] = useState(false);
-	/** Bumped to drop the answer of a request the learner has cancelled or left. */
-	const runRef = useRef(0);
-	const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-	const refresh = cloud.refresh;
+	const failed = useMoveFailed(chatId);
+	const dismissed = useSyncExternalStore(subscribe, () => dismissedKey, () => null);
+	const key = trouble ? troubleKey(trouble, cloud.sync?.offlineSince) : null;
 
-	const stop = useCallback(() => {
-		runRef.current += 1;
-		if (timerRef.current) clearTimeout(timerRef.current);
-		timerRef.current = null;
-	}, []);
-
-	// Another session, or this one is no longer held: start afresh.
-	useEffect(() => {
-		if (!holder) {
-			stop();
-			setPhase({ kind: "idle" });
-			setForcing(false);
-		}
-	}, [holder, stop]);
-	useEffect(() => {
-		stop();
-		setPhase({ kind: "idle" });
-		setForcing(false);
-		return stop;
-	}, [chatId, stop]);
-
-	const request = useCallback(async (force: boolean) => {
-		const run = ++runRef.current;
-		const answer = await ask(chatId, force);
-		if (run !== runRef.current) return;
-		const status = answer?.status;
-		if (status === "moved" || status === "yours") {
-			// It is here: the strip goes once the page has heard so. Should the
-			// page not hear, Take over is offered again.
-			setForcing(false);
-			setPhase({ kind: "asking" });
-			refresh();
-			timerRef.current = setTimeout(() => { if (run === runRef.current) setPhase({ kind: "idle" }); }, 3000);
-			return;
-		}
-		if (status === "waiting") {
-			setPhase({ kind: "waiting", reason: answer?.reason === "reply" ? "reply" : "handing-over" });
-			timerRef.current = setTimeout(() => { void request(false); }, ASK_AGAIN_MS);
-			return;
-		}
-		if (status === "warning" && answer?.heldBy && typeof answer.heldBy === "object") {
-			setForcing(false);
-			setPhase({ kind: "warning", holder: answer.heldBy as SessionHolder });
-			return;
-		}
-		setForcing(false);
-		setPhase({ kind: "failed" });
-	}, [chatId, refresh]);
-
-	const takeOver = () => {
-		stop();
-		setPhase({ kind: "asking" });
-		void request(false);
-	};
-	const cancel = () => {
-		stop();
-		setForcing(false);
-		setPhase({ kind: "idle" });
-	};
-	const takeOverAnyway = () => {
-		setForcing(true);
-		void request(true);
-	};
+	// The trouble is over: the next one shows again.
+	useEffect(() => { if (!trouble) setDismissed(null); }, [trouble]);
 
 	let shown: Shown | null = null;
-	if (holder) {
-		// A PC that can't reach its server can't ask for a session.
-		const blocked = cloud.role === "desktop" ? cannotTakeOverText(cloud.sync?.state) : null;
-		if (phase.kind === "waiting") {
-			shown = { key: `waiting-${phase.reason}`, text: phase.reason === "reply" ? finishingText(holder) : askingText(holder), note: null, busy: true, button: "cancel", disabled: false };
-		} else if (phase.kind === "failed") {
-			shown = { key: "failed", text: HELD_TEXT.failed, note: null, busy: false, button: "take-over", disabled: blocked !== null };
-		} else {
-			shown = { key: "held", text: heldStripText(holder, since(holder)), note: blocked, busy: false, button: "take-over", disabled: blocked !== null || phase.kind === "asking" || phase.kind === "warning" };
-		}
-	} else if (trouble) {
-		// A session this PC can continue, while it isn't syncing.
-		shown = { key: `sync-${trouble}`, text: SYNC_TROUBLE_STRIP_TEXT[trouble], note: null, busy: false, button: null, disabled: false };
+	if (failed) {
+		shown = { key: "failed", text: SESSION_MOVE_FAILED_TEXT, dismiss: () => clearMoveFailed(chatId) };
+	} else if (trouble && key !== dismissed) {
+		shown = { key: `sync-${trouble}`, text: SYNC_TROUBLE_BOX_TEXT[trouble], dismiss: () => setDismissed(key) };
 	}
 
 	// Open one frame after there is something to show, and keep the last
-	// words on screen while it closes, so it slides both ways.
+	// words on screen while it fades out.
 	const lastRef = useRef<Shown | null>(null);
 	if (shown) lastRef.current = shown;
 	const [open, setOpen] = useState(false);
@@ -163,31 +88,33 @@ export function SessionStrip({ chatId, title }: { chatId: string; title: string 
 	useEffect(() => { setOpen(has); }, [has]);
 	const view = shown ?? lastRef.current;
 	if (cloud.role === null && !view) return null;
-
-	const warning = phase.kind === "warning" && holder ? takeOverWarning(title, phase.holder, since(phase.holder)) : null;
+	const visible = open && has;
 
 	return (
-		<>
-			<div className="lh-strip" data-open={open && has ? "" : undefined} data-testid="session-strip" data-strip={has ? view?.key : undefined} inert={!(open && has)}>
-				<div>
-					{view && (
-						<div role="status" className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-border bg-card px-3 py-2 font-ui text-sm text-foreground">
-							<p key={view.key} className="lh-strip-words min-w-0 flex-1 basis-56">
-								{view.busy && <span aria-hidden className="mr-2 inline-block size-2.5 animate-spin rounded-full border-[1.5px] border-muted-foreground border-t-transparent align-[-1px]" />}
-								<span data-testid="session-strip-text">{view.text}</span>
-								{view.note && <span className="mt-0.5 block text-xs text-muted-foreground" data-testid="session-strip-note">{view.note}</span>}
-							</p>
-							{view.button === "take-over" && (
-								<button type="button" className={buttonClass} disabled={view.disabled} onClick={takeOver} data-testid="take-over">{HELD_TEXT.takeOver}</button>
-							)}
-							{view.button === "cancel" && (
-								<button type="button" className={buttonClass} onClick={cancel} data-testid="take-over-cancel">{HELD_TEXT.cancel}</button>
-							)}
-						</div>
-					)}
-				</div>
+		<div className="pointer-events-none relative z-20 h-0" data-testid="session-box-anchor">
+			<div
+				role="status"
+				className="lh-session-box absolute inset-x-0 top-3 mx-auto w-[min(36rem,calc(100%-2rem))]"
+				data-open={visible ? "" : undefined}
+				data-testid="session-box"
+				data-box={has ? view?.key : undefined}
+				inert={!visible}
+			>
+				{view && (
+					<div className="flex items-center gap-3 rounded-lg border border-border bg-popover px-4 py-3 shadow-lg">
+						<p className="min-w-0 flex-1 text-sm" data-testid="session-box-text">{view.text}</p>
+						<button
+							type="button"
+							aria-label="Dismiss"
+							data-testid="session-box-dismiss"
+							onClick={() => view.dismiss()}
+							className="shrink-0 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+						>
+							<XIcon className="size-4" aria-hidden="true" />
+						</button>
+					</div>
+				)}
 			</div>
-			{warning && <TakeOverDialog title={warning.title} body={warning.body} busy={forcing} onCancel={cancel} onConfirm={takeOverAnyway} />}
-		</>
+		</div>
 	);
 }

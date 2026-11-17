@@ -40,6 +40,7 @@
  */
 
 import { useEffect, useSyncExternalStore } from "react";
+import { SESSION_MOVE_FAILED_TEXT } from "@/src/core";
 
 export type MoveResult = "here" | "here-changed" | "failed";
 
@@ -206,9 +207,10 @@ export async function isHeldRefusal(response: Response): Promise<boolean> {
 	}
 }
 
-/** What a write gets when the session couldn't be moved here before it. */
+/** What a write gets when the session couldn't be moved here before it. Its
+ *  `error` is the approved sentence, which the delete dialog and the Tutor show. */
 function moveFailedResponse(): Response {
-	return new Response(JSON.stringify({ code: HELD_ELSEWHERE_CODE }), { status: 409, headers: { "content-type": "application/json" } });
+	return new Response(JSON.stringify({ code: HELD_ELSEWHERE_CODE, error: SESSION_MOVE_FAILED_TEXT }), { status: 409, headers: { "content-type": "application/json" } });
 }
 
 /**
@@ -257,6 +259,9 @@ export function useSessionMoving(chatId: string): boolean {
 	return useSyncExternalStore(subscribe, snapshot, () => false);
 }
 
+/** The window event the dictation shortcut raises (components/keyboard-shortcuts.tsx, dictation.tsx). */
+const DICTATION_SHORTCUT_EVENT = "lh:kbd-toggle-dictation";
+
 /** The lesson's text boxes and Dictate buttons: the blocks they live in. */
 export const MOVE_TYPING_SCOPE = '[data-phone="dock"], [data-phone="tutor-typing"]';
 /** A press that starts the move: the lesson's and the Tutor's Dictate, and a
@@ -298,7 +303,12 @@ export function installMoveTriggers(chatId: string, doc: Document = document): (
 	doc.addEventListener("input", onType, true);
 	doc.addEventListener("paste", onType, true);
 	doc.addEventListener("click", onPress, true);
+	// FORK (seamless sessions): dictation started by its keyboard shortcut
+	// (src/core/keyboard.ts, handled in dictation.tsx) is a press on Dictate too.
+	const onShortcut = () => prewarmSessionMove(chatId);
+	doc.defaultView?.addEventListener(DICTATION_SHORTCUT_EVENT, onShortcut);
 	return () => {
+		doc.defaultView?.removeEventListener(DICTATION_SHORTCUT_EVENT, onShortcut);
 		doc.removeEventListener("input", onType, true);
 		doc.removeEventListener("paste", onType, true);
 		doc.removeEventListener("click", onPress, true);

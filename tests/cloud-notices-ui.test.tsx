@@ -15,7 +15,7 @@ import { after, afterEach, beforeEach, describe, it } from "node:test";
 import type { Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import {
-	discardBox, discardedText, OFFLINE_QUIET_MS, SYNC_CHIP_TEXT, SYNC_TROUBLE_STRIP_TEXT, syncTrouble, syncTroubleDueIn, type SessionHolder,
+	discardBox, discardedText, OFFLINE_QUIET_MS, SYNC_CHIP_TEXT, SYNC_TROUBLE_BOX_TEXT, syncTrouble, syncTroubleDueIn, type SessionHolder,
 } from "../src/core/sync/screens.ts";
 import type { NotifySource } from "../components/server-events.tsx";
 
@@ -28,7 +28,7 @@ const { createRoot } = await import("react-dom/client");
 const { renderToStaticMarkup } = await import("react-dom/server");
 const { ServerEventsProvider } = await import("../components/server-events.tsx");
 const { CloudProvider } = await import("../components/cloud/cloud-state.tsx");
-const { SessionStrip } = await import("../components/cloud/session-strip.tsx");
+const { SessionStrip, resetSessionBoxForTests } = await import("../components/cloud/session-strip.tsx");
 const { SyncChip } = await import("../components/cloud/sync-chip.tsx");
 const { DiscardNotice } = await import("../components/cloud/discard-notice.tsx");
 const { InteractionLayersProvider } = await import("../components/interaction-layers.tsx");
@@ -129,15 +129,16 @@ const escape = async () => {
 };
 const byTest = (root: ParentNode, id: string) => root.querySelector(`[data-testid='${id}']`);
 const click = async (el: Element | null | undefined) => { assert.ok(el, "the control exists"); await act(async () => { (el as HTMLElement).click(); }); await settle(); };
-const strip = (host: Element) => byTest(host, "session-strip") as HTMLElement | null;
-const stripText = (host: Element) => byTest(host, "session-strip-text")?.textContent ?? null;
+const strip = (host: Element) => byTest(host, "session-box") as HTMLElement | null;
+const stripText = (host: Element) => byTest(host, "session-box-text")?.textContent ?? null;
 const isOpen = (host: Element) => strip(host)?.hasAttribute("data-open") === true;
+const dismissBox = (host: Element) => click(byTest(host, "session-box-dismiss"));
 
 const NOW = 1_800_000_000_000;
 const realNow = Date.now;
 let clock = NOW;
 beforeEach(() => { clock = NOW; Date.now = () => clock; cookie = "lh_cloud=1"; });
-afterEach(() => { Date.now = realNow; });
+afterEach(() => { Date.now = realNow; resetSessionBoxForTests(); });
 
 /** Move the clock, and run the long timers (the quiet rule's) that came due. */
 const pass = async (ms: number) => {
@@ -159,28 +160,30 @@ describe("the approved words", () => {
 		assert.deepEqual(SYNC_CHIP_TEXT, { offline: "Offline", paused: "Sync paused", "needs-pairing": "Not paired" });
 	});
 
-	it("the heads-up strip, for each reason", () => {
-		assert.equal(SYNC_TROUBLE_STRIP_TEXT.offline, "This PC can't reach the server. If this session is taken over on another device before it reconnects, what you add here now is discarded.");
-		assert.equal(SYNC_TROUBLE_STRIP_TEXT.paused, "Sync is paused. If this session is taken over on another device before sync is back, what you add here now is discarded.");
-		assert.equal(SYNC_TROUBLE_STRIP_TEXT["needs-pairing"], "This PC isn't paired any more. If this session is taken over on another device before you pair again, what you add here now is discarded.");
+	it("the floating box, for each reason", () => {
+		assert.deepEqual(SYNC_TROUBLE_BOX_TEXT, {
+			offline: "This PC can't reach the server. If this session is continued on another device before it reconnects, any new messages will be discarded.",
+			paused: "Sync is paused. If this session is continued on another device before sync is back, any new messages will be discarded.",
+			"needs-pairing": "This PC isn't paired any more. If this session is continued on another device before you pair again, any new messages will be discarded.",
+		});
 	});
 
 	it("the discard box for one session", () => {
 		assert.deepEqual(discardBox([{ title: "Circuits", turns: 3 }]), {
-			title: "“Circuits” was taken over",
-			before: "It was taken over on another device while this PC was offline.",
+			title: "“Circuits” was continued on another device",
+			before: "It was continued on another device while this PC was offline.",
 			lines: ["3 messages you sent here never reached the server and were discarded."],
 			after: "The session now shows the server's version.",
 		});
 		assert.equal(discardedText(1), "1 message you sent here never reached the server and was discarded.");
 		assert.equal(discardedText(0), "Changes made here that hadn't reached the server were discarded.");
-		assert.equal(discardBox([{ title: "  ", turns: 0 }])?.title, "“Untitled session” was taken over");
+		assert.equal(discardBox([{ title: "  ", turns: 0 }])?.title, "“Untitled session” was continued on another device");
 		assert.equal(discardBox([]), null);
 	});
 
 	it("the discard box for several sessions: one box, one line each", () => {
 		const box = discardBox([{ title: "Circuits", turns: 3 }, { title: "Motors", turns: 1 }, { title: "Waves", turns: 0 }]);
-		assert.equal(box?.title, "Sessions were taken over");
+		assert.equal(box?.title, "Sessions were continued on another device");
 		assert.deepEqual(box?.lines, [
 			"“Circuits”: 3 messages you sent here never reached the server and were discarded.",
 			"“Motors”: 1 message you sent here never reached the server and was discarded.",
@@ -281,15 +284,16 @@ describe("the sync chip", () => {
 	});
 });
 
-describe("the offline heads-up strip", () => {
-	it("in a session the PC can continue, while it can't reach the server: the words, and no button", async () => {
+describe("the floating box for sync trouble", () => {
+	it("in a lesson, while the PC can't reach the server: the approved sentence, a ✕, and no other button", async () => {
 		script(() => pc(sync("offline", { offlineSince: NOW - 45_000 })));
 		const host = await mount(<SessionStrip chatId="chat_1" title="Circuits" />);
 		assert.equal(isOpen(host), true);
-		assert.equal(strip(host)?.getAttribute("data-strip"), "sync-offline");
-		assert.equal(stripText(host), SYNC_TROUBLE_STRIP_TEXT.offline);
-		assert.equal(byTest(host, "take-over"), null);
-		assert.equal(byTest(host, "take-over-cancel"), null);
+		assert.equal(strip(host)?.getAttribute("data-box"), "sync-offline");
+		assert.equal(stripText(host), SYNC_TROUBLE_BOX_TEXT.offline);
+		assert.equal(stripText(host), "This PC can't reach the server. If this session is continued on another device before it reconnects, any new messages will be discarded.");
+		assert.deepEqual([...strip(host)!.querySelectorAll("button")].map((b) => b.getAttribute("aria-label")), ["Dismiss"]);
+		assert.equal(strip(host)?.getAttribute("role"), "status");
 	});
 
 	it("waits out the first 30 seconds, then opens; closes when the PC is back", async () => {
@@ -302,24 +306,62 @@ describe("the offline heads-up strip", () => {
 		state = sync("ok");
 		await host.live.fire("cloud-changed");
 		assert.equal(isOpen(host), false);
+		assert.equal(stripText(host), SYNC_TROUBLE_BOX_TEXT.offline, "the words stay while it fades out");
+		assert.equal(strip(host)?.hasAttribute("inert"), true, "and nothing in it can be reached");
 	});
 
 	it("paused, and removed by the server", async () => {
 		let state = sync("paused");
 		script(() => pc(state));
 		const host = await mount(<SessionStrip chatId="chat_1" title="Circuits" />);
-		assert.equal(stripText(host), SYNC_TROUBLE_STRIP_TEXT.paused);
+		assert.equal(stripText(host), "Sync is paused. If this session is continued on another device before sync is back, any new messages will be discarded.");
 		state = sync("needs-pairing");
 		await host.live.fire("cloud-changed");
-		assert.equal(stripText(host), SYNC_TROUBLE_STRIP_TEXT["needs-pairing"]);
-		assert.equal(strip(host)?.getAttribute("data-strip"), "sync-needs-pairing");
+		assert.equal(stripText(host), "This PC isn't paired any more. If this session is continued on another device before you pair again, any new messages will be discarded.");
+		assert.equal(strip(host)?.getAttribute("data-box"), "sync-needs-pairing");
 	});
 
-	it("a held session keeps its own strip, not the heads-up", async () => {
+	it("every lesson gets it, whether or not another device holds the session", async () => {
 		script(() => pc(sync("offline", { offlineSince: NOW - 45_000 }), { held: { chat_1: webApp } }));
+		const host = await mount(<><SessionStrip chatId="chat_1" title="Circuits" /><div data-other=""><SessionStrip chatId="chat_2" title="Motors" /></div></>);
+		assert.equal(stripText(host), SYNC_TROUBLE_BOX_TEXT.offline, "a session held elsewhere: no 'Held by', no Take over");
+		assert.equal(stripText(host.querySelector("[data-other]")!), SYNC_TROUBLE_BOX_TEXT.offline);
+		assert.equal(byTest(host, "take-over"), null);
+		assert.doesNotMatch(host.textContent ?? "", /Held by|Take over/);
+	});
+
+	it("the ✕ hides it until that trouble next starts, in every lesson, and the other kinds still show", async () => {
+		let state = sync("offline", { offlineSince: NOW - 45_000 });
+		script(() => pc(state));
+		const host = await mount(<><SessionStrip chatId="chat_1" title="Circuits" /><div data-other=""><SessionStrip chatId="chat_2" title="Motors" /></div></>);
+		const other = host.querySelector("[data-other]")!;
+		await dismissBox(host);
+		assert.equal(isOpen(host), false);
+		assert.equal(isOpen(other), false, "shared by the lessons of this window");
+		await host.live.fire("cloud-changed");
+		assert.equal(isOpen(host), false, "still the same spell, still hidden");
+		state = sync("paused");
+		await host.live.fire("cloud-changed");
+		assert.equal(stripText(host), SYNC_TROUBLE_BOX_TEXT.paused, "another kind of trouble shows");
+		assert.equal(isOpen(other), true);
+		await dismissBox(other);
+		assert.equal(isOpen(host), false);
+		state = sync("ok");
+		await host.live.fire("cloud-changed");
+		state = sync("paused");
+		await host.live.fire("cloud-changed");
+		assert.equal(isOpen(host), true, "paused again after being in step: it shows again");
+	});
+
+	it("a new offline spell shows again after the ✕", async () => {
+		let state = sync("offline", { offlineSince: NOW - 45_000 });
+		script(() => pc(state));
 		const host = await mount(<SessionStrip chatId="chat_1" title="Circuits" />);
-		assert.equal(stripText(host), "Held by the web app");
-		assert.equal(strip(host)?.getAttribute("data-strip"), "held");
+		await dismissBox(host);
+		assert.equal(isOpen(host), false);
+		state = sync("offline", { offlineSince: NOW - 40_000 });
+		await host.live.fire("cloud-changed");
+		assert.equal(isOpen(host), true, "a new spell, with a new start");
 	});
 
 	it("never on the server's site, and never after the learner's own Unpair", async () => {
@@ -330,6 +372,14 @@ describe("the offline heads-up strip", () => {
 		answer = pc(sync("unpaired"));
 		await host.live.fire("cloud-changed");
 		assert.equal(isOpen(host), false);
+	});
+
+	it("an app that was never paired renders nothing at all and asks nothing", async () => {
+		cookie = "";
+		const { gets } = script(() => pc(sync("offline", { offlineSince: NOW - 45_000 })));
+		const host = await mount(<SessionStrip chatId="chat_1" title="Circuits" />);
+		assert.equal(strip(host), null);
+		assert.deepEqual(gets, []);
 	});
 });
 
@@ -348,8 +398,8 @@ describe("the discard box", () => {
 		let notices = [one];
 		const { posts } = script(() => pc(sync("ok"), { notices }), (body) => { notices = []; return { notices: [], echoed: body.op }; });
 		await mount(<DiscardNotice />);
-		assert.equal(byTest(document, "discard-title")?.textContent, "“Circuits” was taken over");
-		assert.equal(byTest(document, "discard-body")?.textContent, "It was taken over on another device while this PC was offline. 3 messages you sent here never reached the server and were discarded. The session now shows the server's version.");
+		assert.equal(byTest(document, "discard-title")?.textContent, "“Circuits” was continued on another device");
+		assert.equal(byTest(document, "discard-body")?.textContent, "It was continued on another device while this PC was offline. 3 messages you sent here never reached the server and were discarded. The session now shows the server's version.");
 		assert.equal(byTest(document, "discard-ok")?.textContent, "OK");
 		await click(byTest(document, "discard-ok"));
 		assert.deepEqual(posts, [{ op: "dismiss-notice", chatId: "chat_1", at: one.at }]);
@@ -368,7 +418,7 @@ describe("the discard box", () => {
 	it("several sessions: one box, one line each, and OK clears them all", async () => {
 		const { posts } = script(() => pc(sync("ok"), { notices: [one, two] }));
 		await mount(<DiscardNotice />);
-		assert.equal(byTest(document, "discard-title")?.textContent, "Sessions were taken over");
+		assert.equal(byTest(document, "discard-title")?.textContent, "Sessions were continued on another device");
 		assert.deepEqual([...document.querySelectorAll("[data-testid='discard-line']")].map((li) => li.textContent), [
 			"“Circuits”: 3 messages you sent here never reached the server and were discarded.",
 			"“Motors”: 1 message you sent here never reached the server and was discarded.",
@@ -385,7 +435,7 @@ describe("the discard box", () => {
 		assert.equal(box(), null);
 		notices = [one];
 		await host.live.fire("cloud-changed");
-		assert.equal(byTest(document, "discard-title")?.textContent, "“Circuits” was taken over");
+		assert.equal(byTest(document, "discard-title")?.textContent, "“Circuits” was continued on another device");
 	});
 
 	it("only OK closes it: Esc and a click outside do nothing, and the Esc goes no further", async () => {
@@ -393,7 +443,7 @@ describe("the discard box", () => {
 		await mount(<DiscardNotice />);
 		const layer = document.querySelector("[role='dialog'][data-interaction-layer]");
 		assert.ok(layer?.contains(box()), "on the host's dialog layer");
-		assert.equal(layer?.getAttribute("aria-label"), "“Circuits” was taken over");
+		assert.equal(layer?.getAttribute("aria-label"), "“Circuits” was continued on another device");
 		assert.equal(document.activeElement, byTest(document, "discard-ok"), "OK has the focus, as before");
 		const event = await escape();
 		assert.equal(event.defaultPrevented, true, "a refusing box still takes the Esc");
@@ -414,7 +464,7 @@ describe("the discard box", () => {
 		const live = channel();
 		await act(async () => root.render(<ServerEventsProvider connect={live.connect}><CloudProvider><DiscardNotice /></CloudProvider></ServerEventsProvider>));
 		await settle();
-		assert.equal(byTest(document, "discard-title")?.textContent, "“Circuits” was taken over");
+		assert.equal(byTest(document, "discard-title")?.textContent, "“Circuits” was continued on another device");
 		await escape();
 		assert.ok(box());
 	});

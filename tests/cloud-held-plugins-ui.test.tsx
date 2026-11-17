@@ -25,10 +25,9 @@ import { TopBar } from "../components/top-bar.tsx";
 import type { PluginActionContext } from "../src/core/plugins.ts";
 import type { PluginSurfaceTarget } from "../src/core/plugin-ui.ts";
 import { createPluginSessionActionContext } from "../src/core/plugin-view-context.ts";
-import { HELD_TEXT } from "../src/core/sync/screens.ts";
 import { mountPluginChrome } from "./helpers/plugin-chrome.tsx";
 
-const BLOCKED = HELD_TEXT.blocked;
+const BLOCKED = "Take this session over first";
 const surfaceTarget = Object.freeze({}) as PluginSurfaceTarget;
 const session = createPluginSessionActionContext({ placement: "top-bar", surface: "session", sessionId: "session-1", kind: "teaching", surfaceTarget }, () => ({
 	sessionId: "session-1", kind: "teaching", title: "Session", messages: [], transcript: [], status: "ready", reconciliation: "ready", busy: false, compacting: false, phase: "probe", contextTokens: null, queuedSteers: [], composer: { text: "" }, input: { type: "text", sessionId: "session-1", sessionKind: "teaching", surfaceTarget, channels: ["content"] },

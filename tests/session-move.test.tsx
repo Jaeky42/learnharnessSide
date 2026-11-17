@@ -32,6 +32,7 @@ Object.defineProperty(dom.document, "visibilityState", { configurable: true, get
 Object.assign(globalThis, { window: dom.window, document: dom.document, CustomEvent: dom.window.CustomEvent });
 
 const move = await import("../components/cloud/session-move.ts");
+const { SESSION_MOVE_FAILED_TEXT } = await import("../src/core/sync/screens.ts");
 const { SessionModel } = await import("../components/session-core.ts");
 
 const originalFetch = globalThis.fetch;
@@ -317,6 +318,23 @@ describe("the triggers", () => {
 		}
 	});
 
+	it("dictation started by its keyboard shortcut starts the move too (the shortcut's window event)", async () => {
+		const server = serve([{ status: "moved" }]);
+		cloud(new Set(["chat_1"]));
+		lesson();
+		const uninstall = move.installMoveTriggers("chat_1");
+		dom.window.dispatchEvent(new dom.window.Event("lh:kbd-toggle-dictation"));
+		await tick();
+		assert.equal(server.moves().length, 1);
+		uninstall();
+		move.resetSessionMoveForTests();
+		const after = serve([{ status: "moved" }]);
+		cloud(new Set(["chat_1"]));
+		dom.window.dispatchEvent(new dom.window.Event("lh:kbd-toggle-dictation"));
+		await tick();
+		assert.equal(after.moves().length, 0, "uninstalled: nothing");
+	});
+
 	it("installed but nothing held: typing and Dictate ask nothing", async () => {
 		const server = serve([{ status: "moved" }]);
 		cloud(new Set());
@@ -376,6 +394,10 @@ describe("fetchHere (Rename, Delete, the model, the artifact switch, extraction,
 		const res = await move.fetchHere("chat_1", "/x", { method: "POST" });
 		assert.equal(res.status, 409);
 		assert.equal(await move.isHeldRefusal(res), true);
+		// The callers (the delete dialog, the Tutor) show the body's `error`.
+		const body = await res.json() as { code?: string; error?: string };
+		assert.equal(body.error, "This session couldn't be continued here. Try again.");
+		assert.equal(body.error, SESSION_MOVE_FAILED_TEXT);
 		assert.deepEqual(server.calls.map((c) => c.url), ["/api/cloud"]);
 		assert.equal(move.isMoveFailed("chat_1"), true);
 	});

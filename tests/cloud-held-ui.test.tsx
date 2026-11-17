@@ -1,9 +1,10 @@
 /**
- * Cloud sync Phase 6, slice 2 (docs/cloud-sync.md): a session another
- * device holds. The page's shared sync state, the "Held by …" line in the
- * session list, the strip under the top bar, Take over with its waiting
- * lines and Cancel, and the warning box. fetch is scripted; no server. The
- * wording is the owner-approved wording.
+ * Cloud sync (docs/cloud-sync.md), seamless sessions: a session another
+ * device holds looks like any other. The page's shared sync state, the
+ * session list's plain lines, and the floating box at the top of a lesson
+ * (a failed move, sync trouble), which names no holder and offers no
+ * Take over. fetch is scripted; no server. The wording is the
+ * owner-approved wording.
  */
 
 import React, { act } from "react";
@@ -11,13 +12,12 @@ import React, { act } from "react";
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { after, afterEach, beforeEach, describe, it } from "node:test";
 import type { Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
-import {
-	askingText, cannotTakeOverText, finishingText, HELD_TEXT, heldByText, heldStripText, holderName, takeOverWarning, type SessionHolder,
-} from "../src/core/sync/screens.ts";
+import * as screens from "../src/core/sync/screens.ts";
+import { SESSION_MOVE_FAILED_TEXT, SYNC_TROUBLE_BOX_TEXT, type SessionHolder } from "../src/core/sync/screens.ts";
 import type { NotifySource } from "../components/server-events.tsx";
 
 const dom = parseHTML("<html><body></body></html>");
@@ -29,7 +29,8 @@ const { createRoot } = await import("react-dom/client");
 const { renderToStaticMarkup } = await import("react-dom/server");
 const { ServerEventsProvider } = await import("../components/server-events.tsx");
 const { CloudProvider, useCloud } = await import("../components/cloud/cloud-state.tsx");
-const { SessionStrip } = await import("../components/cloud/session-strip.tsx");
+const { SessionStrip, resetSessionBoxForTests } = await import("../components/cloud/session-strip.tsx");
+const move = await import("../components/cloud/session-move.ts");
 const { InteractionLayersProvider } = await import("../components/interaction-layers.tsx");
 const { installModalDom } = await import("./modal-dom.ts");
 // The boxes sit on the host's dialog layer (HostDialog), which uses a few
@@ -66,6 +67,8 @@ afterEach(async () => {
 	}
 	Object.assign(globalThis, realTimers);
 	globalThis.fetch = originalFetch;
+	resetSessionBoxForTests();
+	move.resetSessionMoveForTests();
 	cookie = "";
 	for (const el of [...document.body.children]) el.remove();
 });
@@ -124,8 +127,8 @@ const escape = async () => {
 };
 const byTest = (root: ParentNode, id: string) => root.querySelector(`[data-testid='${id}']`);
 const click = async (el: Element | null | undefined) => { assert.ok(el, "the control exists"); await act(async () => { (el as HTMLElement).click(); }); await settle(); };
-const strip = (host: Element) => byTest(host, "session-strip") as HTMLElement | null;
-const stripText = (host: Element) => byTest(host, "session-strip-text")?.textContent ?? null;
+const strip = (host: Element) => byTest(host, "session-box") as HTMLElement | null;
+const stripText = (host: Element) => byTest(host, "session-box-text")?.textContent ?? null;
 const isOpen = (host: Element) => strip(host)?.hasAttribute("data-open") === true;
 const fireTimeout = async (ms: number) => {
 	const due = timeouts.filter((t) => t.ms === ms);
@@ -145,49 +148,6 @@ function Probe() {
 }
 const probe = (host: Element) => JSON.parse(byTest(host, "probe")?.textContent ?? "{}") as { role: string | null; held: string[]; sync: string | null };
 
-describe("the approved words for a held session", () => {
-	it("names the holder: a PC by its name, the server as the web app", () => {
-		assert.equal(holderName(desk()), "Desktop");
-		assert.equal(holderName(webApp), "the web app");
-		assert.equal(heldByText(desk()), "Held by Desktop");
-		assert.equal(heldByText(webApp), "Held by the web app");
-		assert.equal(heldByText({ id: "dev_cccccccccccccccc", name: null }), "Held by another device", "a PC whose name isn't known");
-	});
-
-	it("the strip: the server's site says online or offline since when; a desktop app knows only the name", () => {
-		assert.equal(heldStripText(desk({ online: true }), null), "Held by Desktop · online");
-		assert.equal(heldStripText(desk(), "today, 14:02"), "Held by Desktop · offline since today, 14:02");
-		assert.equal(heldStripText(desk({ lastSeenAt: null }), null), "Held by Desktop · offline");
-		assert.equal(heldStripText({ id: "cloud", name: null }, null), "Held by the web app");
-		assert.equal(heldStripText({ id: "dev_bbbbbbbbbbbbbbbb", name: "Laptop" }, null), "Held by Laptop");
-	});
-
-	it("the waiting lines, for a PC and for the web app", () => {
-		assert.equal(askingText(desk()), "Asking Desktop to hand it over…");
-		assert.equal(finishingText(desk()), "Desktop is finishing a reply. This session moves here when it's done.");
-		assert.equal(askingText(webApp), "Asking the web app to hand it over…");
-		assert.equal(finishingText(webApp), "The web app is finishing a reply. This session moves here when it's done.");
-	});
-
-	it("the warning box, the buttons and the tooltip", () => {
-		assert.deepEqual(takeOverWarning("Circuits", desk(), "today, 14:02"), {
-			title: "Take over “Circuits”?",
-			body: "Desktop has been offline since today, 14:02, and may have turns that never reached the server. If you take over, those turns are discarded when Desktop is back online.",
-		});
-		assert.equal(takeOverWarning("Circuits", desk(), null).body, "Desktop is offline and may have turns that never reached the server. If you take over, those turns are discarded when Desktop is back online.");
-		assert.deepEqual(HELD_TEXT, { takeOver: "Take over", cancel: "Cancel", failed: "Couldn't take it over. Try again.", blocked: "Take this session over first", takeOverAnyway: "Take over anyway" });
-	});
-
-	it("why a PC can't take over right now", () => {
-		assert.equal(cannotTakeOverText("offline"), "This PC can't reach the server, so it can't be taken over right now.");
-		assert.equal(cannotTakeOverText("paused"), "Sync is paused, so it can't be taken over right now.");
-		assert.equal(cannotTakeOverText("needs-pairing"), "This PC is no longer paired, so it can't be taken over right now.");
-		assert.equal(cannotTakeOverText("ok"), null);
-		assert.equal(cannotTakeOverText("starting"), null);
-		assert.equal(cannotTakeOverText(undefined), null);
-	});
-});
-
 describe("what the page knows about sync", () => {
 	it("an app that isn't paired asks nothing and sets no timer", async () => {
 		const { gets } = script(() => ({ role: "desktop", held: {} }));
@@ -198,7 +158,7 @@ describe("what the page knows about sync", () => {
 		assert.deepEqual(gets, [], "no marker: not one request about sync");
 		assert.deepEqual(intervals, []);
 		assert.deepEqual(probe(host), { role: null, held: [], sync: null });
-		assert.equal(strip(host), null, "and no strip in the lesson at all");
+		assert.equal(strip(host), null, "and no box in the lesson at all");
 	});
 
 	it("where sync is in use it asks at the start, when the live channel says so, and every 10 seconds", async () => {
@@ -261,184 +221,133 @@ describe("the session list (seamless sessions)", () => {
 	it("the lesson greys nothing and never hides the message box", () => {
 		const chat = readFileSync(new URL("../components/chat.tsx", import.meta.url), "utf8");
 		assert.doesNotMatch(chat, /heldElsewhere|useSessionHeld|HELD_TEXT/);
-		assert.match(chat, /<div className="lh-held-dock">/, "the dock's wrapper has no data-held or inert");
+		assert.doesNotMatch(chat, /lh-held-dock|data-held/, "the dock's wrapper has no class, data-held or inert");
 	});
 });
 
-describe("the strip under the top bar", () => {
-	it("on the server's site: who holds it, online or offline since when, and Take over", async () => {
+describe("the floating box (a failed move, sync trouble)", () => {
+	/** A session that is held elsewhere whose move is refused: the flag goes up. */
+	async function failMove(chatId = "chat_1") {
+		await act(async () => { assert.equal(await move.ensureSessionHere(chatId), "failed"); });
+		await settle();
+	}
+
+	it("a move that failed: the approved sentence, and the ✕ clears the flag", async () => {
 		cookie = "lh_cloud=1";
-		let holder = desk({ online: true });
-		script(() => ({ role: "server", held: { chat_1: holder }, desktops: [] }));
-		const live = channel();
-		const host = await mount(<SessionStrip chatId="chat_1" title="Circuits" />, live);
+		script(() => ({ role: "desktop", held: { chat_1: webApp }, sync: okSync }), () => ({ status: "refused" }));
+		const host = await mount(<SessionStrip chatId="chat_1" title="Circuits" />);
+		assert.equal(isOpen(host), false, "a session another device holds shows nothing by itself");
+		await failMove();
 		assert.equal(isOpen(host), true);
-		assert.equal(stripText(host), "Held by Desktop · online");
-		assert.equal(byTest(host, "take-over")?.textContent, "Take over");
-		assert.equal(byTest(host, "take-over")?.hasAttribute("disabled"), false);
-		assert.equal(byTest(host, "session-strip-note"), null);
-		holder = desk();
-		await live.fire("chats-changed");
-		assert.match(stripText(host) ?? "", /^Held by Desktop · offline since .+/);
+		assert.equal(stripText(host), "This session couldn't be continued here. Try again.");
+		assert.equal(stripText(host), SESSION_MOVE_FAILED_TEXT);
+		assert.equal(strip(host)?.getAttribute("data-box"), "failed");
+		assert.equal(move.isMoveFailed("chat_1"), true);
+		assert.deepEqual([...strip(host)!.querySelectorAll("button")].map((b) => b.getAttribute("aria-label")), ["Dismiss"], "no Take over, no Cancel");
+		await click(byTest(host, "session-box-dismiss"));
+		assert.equal(move.isMoveFailed("chat_1"), false, "the flag is down");
+		assert.equal(isOpen(host), false);
+		assert.equal(stripText(host), SESSION_MOVE_FAILED_TEXT, "the words stay while it fades out");
 	});
 
-	it("on a desktop app: only the holder's name", async () => {
+	it("it is per session: another lesson shows nothing for it", async () => {
 		cookie = "lh_cloud=1";
-		script(() => ({ role: "desktop", held: { chat_1: webApp, chat_2: { id: "dev_bbbbbbbbbbbbbbbb", name: "Laptop" } }, sync: okSync }));
+		script(() => ({ role: "desktop", held: { chat_1: webApp }, sync: okSync }), () => ({ status: "refused" }));
 		const host = await mount(<><SessionStrip chatId="chat_1" title="Circuits" /><div data-other=""><SessionStrip chatId="chat_2" title="Motors" /></div></>);
-		assert.equal(stripText(host), "Held by the web app");
-		assert.equal(stripText(host.querySelector("[data-other]")!), "Held by Laptop");
+		await failMove();
+		assert.equal(isOpen(host.querySelector("[data-other]")!), false);
+		assert.equal(isOpen(host), true);
 	});
 
-	it("a session this copy can continue has no strip showing", async () => {
+	it("a move that arrives lowers the flag, and the box goes", async () => {
+		cookie = "lh_cloud=1";
+		let answer: unknown = { status: "refused" };
+		script(() => ({ role: "desktop", held: { chat_1: webApp }, sync: okSync }), () => answer);
+		const host = await mount(<SessionStrip chatId="chat_1" title="Circuits" />);
+		await failMove();
+		assert.equal(isOpen(host), true);
+		answer = { status: "moved" };
+		await act(async () => { assert.notEqual(await move.ensureSessionHere("chat_1"), "failed"); });
+		await settle();
+		assert.equal(isOpen(host), false);
+	});
+
+	it("the failure wins over sync trouble, and the trouble comes back after it", async () => {
+		cookie = "lh_cloud=1";
+		script(() => ({ role: "desktop", held: { chat_1: webApp }, sync: { state: "paused", message: null, lastContactAt: NOW } }), () => ({ status: "refused" }));
+		const host = await mount(<SessionStrip chatId="chat_1" title="Circuits" />);
+		assert.equal(stripText(host), SYNC_TROUBLE_BOX_TEXT.paused);
+		await failMove();
+		assert.equal(stripText(host), SESSION_MOVE_FAILED_TEXT, "both apply: the failure shows");
+		await click(byTest(host, "session-box-dismiss"));
+		assert.equal(stripText(host), SYNC_TROUBLE_BOX_TEXT.paused, "the trouble was never dismissed, so it shows next");
+		assert.equal(isOpen(host), true);
+	});
+
+	it("a dismissed trouble stays hidden while a failure shows and after it", async () => {
+		cookie = "lh_cloud=1";
+		script(() => ({ role: "desktop", held: { chat_1: webApp }, sync: { state: "paused", message: null, lastContactAt: NOW } }), () => ({ status: "refused" }));
+		const host = await mount(<SessionStrip chatId="chat_1" title="Circuits" />);
+		await click(byTest(host, "session-box-dismiss"));
+		assert.equal(isOpen(host), false);
+		await failMove();
+		assert.equal(stripText(host), SESSION_MOVE_FAILED_TEXT);
+		await click(byTest(host, "session-box-dismiss"));
+		assert.equal(isOpen(host), false, "the trouble was dismissed before and is the same spell");
+	});
+
+	it("nothing is held, nothing fails, nothing is off: no box", async () => {
 		cookie = "lh_cloud=1";
 		script(() => ({ role: "desktop", held: { chat_other: webApp }, sync: okSync }));
 		const host = await mount(<SessionStrip chatId="chat_1" title="Circuits" />);
 		assert.equal(isOpen(host), false);
 		assert.equal(stripText(host), null);
-		assert.equal(byTest(host, "take-over"), null);
 		assert.equal(strip(host)?.hasAttribute("inert"), true, "nothing in it can be reached");
-	});
-
-	it("opens and closes by an attribute, so it can fade and slide both ways, and keeps its words while it closes", async () => {
-		cookie = "lh_cloud=1";
-		let held: Record<string, SessionHolder> = {};
-		script(() => ({ role: "desktop", held, sync: okSync }));
-		const live = channel();
-		const host = await mount(<SessionStrip chatId="chat_1" title="Circuits" />, live);
-		assert.equal(isOpen(host), false);
-		held = { chat_1: webApp };
-		await live.fire("chats-changed");
-		assert.equal(isOpen(host), true);
-		assert.equal(strip(host)?.className, "lh-strip", "the motion is app/cloud.css's");
-		held = {};
-		await live.fire("chats-changed");
-		assert.equal(isOpen(host), false);
-		assert.equal(stripText(host), "Held by the web app", "still there to slide away");
-	});
-
-	it("a PC that can't reach its server: Take over is off, and the strip says why", async () => {
-		cookie = "lh_cloud=1";
-		const { posts } = script(() => ({ role: "desktop", held: { chat_1: webApp }, sync: { state: "offline", message: null, lastContactAt: NOW - 60_000 } }));
-		const host = await mount(<SessionStrip chatId="chat_1" title="Circuits" />);
-		assert.equal(stripText(host), "Held by the web app");
-		assert.equal(byTest(host, "session-strip-note")?.textContent, "This PC can't reach the server, so it can't be taken over right now.");
-		assert.equal(byTest(host, "take-over")?.hasAttribute("disabled"), true);
-		await click(byTest(host, "take-over"));
-		assert.deepEqual(posts, []);
-	});
-});
-
-describe("Take over", () => {
-	it("an idle holder: one request, and the strip goes when the session is here", async () => {
-		cookie = "lh_cloud=1";
-		let held: Record<string, SessionHolder> = { chat_1: webApp };
-		const { posts } = script(() => ({ role: "desktop", held, sync: okSync }), () => { held = {}; return { status: "moved" }; });
-		const host = await mount(<SessionStrip chatId="chat_1" title="Circuits" />);
-		await click(byTest(host, "take-over"));
-		assert.deepEqual(posts, [{ op: "take-over", chatId: "chat_1", force: false }]);
-		assert.equal(isOpen(host), false, "the page asked again and the session is no longer held");
-		assert.equal(byTest(document, "take-over-dialog"), null);
-	});
-
-	it("an online holder: the strip changes in place and the app asks again every 2 seconds", async () => {
-		cookie = "lh_cloud=1";
-		let held: Record<string, SessionHolder> = { chat_1: desk({ online: true }) };
-		const answers: unknown[] = [{ status: "waiting", reason: "handing-over" }, { status: "waiting", reason: "reply" }, { status: "moved" }];
-		const { posts } = script(() => ({ role: "server", held }), () => { const next = answers.shift(); if ((next as { status: string }).status === "moved") held = {}; return next; });
-		const host = await mount(<SessionStrip chatId="chat_1" title="Circuits" />);
-		await click(byTest(host, "take-over"));
-		assert.equal(stripText(host), "Asking Desktop to hand it over…");
 		assert.equal(byTest(host, "take-over"), null);
-		assert.equal(byTest(host, "take-over-cancel")?.textContent, "Cancel");
-		assert.equal(strip(host)?.getAttribute("data-strip"), "waiting-handing-over");
-		assert.deepEqual(timeouts.map((t) => t.ms), [2000]);
-		await fireTimeout(2000);
-		assert.equal(stripText(host), "Desktop is finishing a reply. This session moves here when it's done.");
-		assert.equal(strip(host)?.getAttribute("data-strip"), "waiting-reply", "new words, so they cross-fade");
-		await fireTimeout(2000);
-		assert.equal(posts.length, 3);
-		assert.ok(posts.every((p) => p.force === false), "nothing is ever forced while waiting");
-		assert.equal(isOpen(host), false);
 	});
 
-	it("Cancel stops asking and leaves the session with its holder", async () => {
+	it("looks like the update box and floats: a zero-height wrapper, 12 px under the top bar, below the Tutor", () => {
+		const source = readFileSync(new URL("../components/cloud/session-strip.tsx", import.meta.url), "utf8");
+		const banner = readFileSync(new URL("../components/update-banner.tsx", import.meta.url), "utf8");
+		const card = "rounded-lg border border-border bg-popover px-4 py-3 shadow-lg";
+		assert.ok(banner.includes(card), "the update box's look");
+		assert.ok(source.includes(card));
+		assert.match(source, /className="pointer-events-none relative z-20 h-0"/, "takes no room, takes no pointer");
+		assert.match(source, /absolute inset-x-0 top-3 mx-auto w-\[min\(36rem,calc\(100%-2rem\)\)\]/, "12 px down, centred, at most 36rem and 16 px from each side");
+		assert.match(source, /className="min-w-0 flex-1 text-sm"/);
+		// Mine adds only `shrink-0`, so the ✕ keeps its size beside long words.
+		const closeButton = (text: string) => /className="(?:shrink-0 )?(rounded-md p-1\.5 [^"]*)"/.exec(text)?.[1];
+		assert.ok(closeButton(banner));
+		assert.equal(closeButton(source), closeButton(banner), "the same ✕ button classes as the update box");
+		assert.match(source, /<XIcon className="size-4" aria-hidden="true" \/>/);
+		const tutor = readFileSync(new URL("../components/side-tutor.tsx", import.meta.url), "utf8");
+		assert.match(tutor, /"fixed z-30"|fixed z-30/, "the Tutor is z-30, above the box's z-20");
+	});
+
+	it("the box sits inside the wrapper, which has no height", async () => {
 		cookie = "lh_cloud=1";
-		const { posts } = script(() => ({ role: "server", held: { chat_1: desk({ online: true }) } }), () => ({ status: "waiting", reason: "handing-over" }));
+		script(() => ({ role: "desktop", held: {}, sync: { state: "paused", message: null, lastContactAt: NOW } }));
 		const host = await mount(<SessionStrip chatId="chat_1" title="Circuits" />);
-		await click(byTest(host, "take-over"));
-		await click(byTest(host, "take-over-cancel"));
-		assert.equal(stripText(host), "Held by Desktop · online");
-		assert.ok(byTest(host, "take-over"));
-		assert.deepEqual(timeouts.filter((t) => t.ms === 2000), [], "no further request is due");
-		assert.equal(posts.length, 1);
+		const anchor = byTest(host, "session-box-anchor")!;
+		assert.ok(anchor.contains(strip(host)));
+		assert.match(anchor.className, /\bh-0\b/);
+		assert.match(anchor.className, /pointer-events-none/);
 	});
 
-	it("the web app as the holder, writing a reply", async () => {
-		cookie = "lh_cloud=1";
-		script(() => ({ role: "desktop", held: { chat_1: webApp }, sync: okSync }), () => ({ status: "waiting", reason: "reply" }));
-		const host = await mount(<SessionStrip chatId="chat_1" title="Circuits" />);
-		await click(byTest(host, "take-over"));
-		assert.equal(stripText(host), "The web app is finishing a reply. This session moves here when it's done.");
+	it("fades over 200 ms with the message box's easing, and at once with reduced motion", () => {
+		const css = readFileSync(new URL("../app/cloud.css", import.meta.url), "utf8");
+		assert.match(css, /\.lh-session-box\s*\{[^}]*opacity 200ms cubic-bezier\(0\.2, 0\.8, 0\.2, 1\)/s);
+		assert.match(css, /\.lh-session-box\[data-open\]\s*\{[^}]*opacity: 1/s);
+		assert.match(css, /prefers-reduced-motion: reduce\)\s*\{\s*\.lh-session-box\s*\{\s*transition: none/s);
+		assert.doesNotMatch(css, /lh-strip|lh-held-dock/, "the old strip and dock rules are gone");
 	});
 
-	it("an offline holder that may have unsent turns: the warning box, then Take over anyway", async () => {
-		cookie = "lh_cloud=1";
-		let held: Record<string, SessionHolder> = { chat_1: desk() };
-		const { posts } = script(() => ({ role: "server", held }), (body) => {
-			if (body.force === true) { held = {}; return { status: "moved" }; }
-			return { status: "warning", heldBy: { ...desk(), word: "unsent" } };
-		});
-		const host = await mount(<SessionStrip chatId="chat_1" title="Circuits" />);
-		await click(byTest(host, "take-over"));
-		const box = byTest(document, "take-over-dialog")!;
-		assert.ok(box, "a box over the lesson");
-		assert.equal(byTest(box, "take-over-title")?.textContent, "Take over “Circuits”?");
-		assert.match(byTest(box, "take-over-body")?.textContent ?? "", /^Desktop has been offline since .+, and may have turns that never reached the server\. If you take over, those turns are discarded when Desktop is back online\.$/);
-		assert.deepEqual([...box.querySelectorAll("button")].map((b) => b.textContent), ["Cancel", "Take over anyway"]);
-		assert.equal(stripText(host), "Held by Desktop · offline since " + (stripText(host) ?? "").split("since ")[1], "the strip stays as it was behind the box");
-		await click(byTest(box, "take-over-anyway"));
-		assert.deepEqual(posts, [{ op: "take-over", chatId: "chat_1", force: false }, { op: "take-over", chatId: "chat_1", force: true }]);
-		assert.equal(byTest(document, "take-over-dialog"), null);
-		assert.equal(isOpen(host), false);
-	});
-
-	it("Cancel in the box takes nothing", async () => {
-		cookie = "lh_cloud=1";
-		const { posts } = script(() => ({ role: "server", held: { chat_1: desk() } }), () => ({ status: "warning", heldBy: desk() }));
-		const host = await mount(<SessionStrip chatId="chat_1" title="Circuits" />);
-		await click(byTest(host, "take-over"));
-		await click([...byTest(document, "take-over-dialog")!.querySelectorAll("button")].find((b) => b.textContent === "Cancel"));
-		assert.equal(byTest(document, "take-over-dialog"), null);
-		assert.equal(posts.length, 1);
-		assert.equal(byTest(host, "take-over")?.hasAttribute("disabled"), false);
-	});
-
-	it("the box is on the host's dialog layer: Esc and a click outside cancel it, and take nothing", async () => {
-		cookie = "lh_cloud=1";
-		const { posts } = script(() => ({ role: "server", held: { chat_1: desk() } }), () => ({ status: "warning", heldBy: desk() }));
-		const host = await mount(<SessionStrip chatId="chat_1" title="Circuits" />);
-		await click(byTest(host, "take-over"));
-		const layer = document.querySelector("[role='dialog'][data-interaction-layer]");
-		assert.ok(layer?.contains(byTest(document, "take-over-dialog")), "inside the host's dialog");
-		assert.equal(layer?.getAttribute("aria-label"), "Take over “Circuits”?");
-		const event = await escape();
-		assert.equal(event.defaultPrevented, true, "the box took the Esc");
-		assert.equal(byTest(document, "take-over-dialog"), null);
-		await click(byTest(host, "take-over"));
-		await press(byTest(document, "take-over-backdrop")!);
-		assert.equal(byTest(document, "take-over-dialog"), null);
-		assert.equal(posts.filter((p) => p.force === true).length, 0);
-	});
-
-	it("a request that fails says so, and Take over is offered again", async () => {
-		cookie = "lh_cloud=1";
-		for (const answer of [null, { status: "offline" }, { status: "refused", error: "x" }, { status: "not-paired" }]) {
-			script(() => ({ role: "desktop", held: { chat_1: webApp }, sync: okSync }), () => answer);
-			const host = await mount(<SessionStrip chatId="chat_1" title="Circuits" />);
-			await click(byTest(host, "take-over"));
-			assert.equal(stripText(host), "Couldn't take it over. Try again.");
-			assert.equal(byTest(host, "take-over")?.hasAttribute("disabled"), false);
+	it("nothing of the take-over screens is left", () => {
+		const source = readFileSync(new URL("../components/cloud/session-strip.tsx", import.meta.url), "utf8");
+		assert.doesNotMatch(source, /take-over|Take over|TakeOver|holder|Held by/i);
+		assert.equal(existsSync(new URL("../components/cloud/take-over-dialog.tsx", import.meta.url)), false);
+		for (const name of ["HELD_TEXT", "heldByText", "heldStripText", "holderName", "askingText", "finishingText", "cannotTakeOverText", "takeOverWarning", "SYNC_TROUBLE_STRIP_TEXT", "WEB_APP_NAME"]) {
+			assert.equal(name in screens, false, `${name} is removed`);
 		}
 	});
 });

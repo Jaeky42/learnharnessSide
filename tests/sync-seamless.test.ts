@@ -99,6 +99,10 @@ function world() {
 		let link: Link = "online";
 		/** The next request matching this is lost after the server handled it (the answer never arrives). */
 		let loseAnswer: ((pathname: string, method: string) => boolean) | null = null;
+		/** Runs on the server's side just before it handles a request (another device acting in between). */
+		let before: ((pathname: string, method: string) => void) | null = null;
+		/** While set, every request waits for it (a slow connection). */
+		let gate: Promise<void> | null = null;
 		const discarded: string[] = [];
 		const announced: string[] = [];
 		const sent: string[] = [];
@@ -114,6 +118,8 @@ function world() {
 				const take = /^\/api\/sync\/sessions\/(.+)\/take$/.exec(pathname)?.[1];
 				const id = /^\/api\/sync\/sessions\/([^/]+)$/.exec(pathname)?.[1];
 				const method = init.method ?? (body === undefined ? "GET" : "POST");
+				if (gate) await gate;
+				before?.(pathname, method);
 				sent.push(`${method} ${pathname}${take ? ` force=${body?.force === true}` : ""}`);
 				const result = take ? authority.takeOver(deviceId, take, body?.force === true)
 					: !id ? authority.exchange(deviceId, body)
@@ -134,6 +140,8 @@ function world() {
 			setLink: (value: Link) => { link = value; },
 			setOnline: (value: boolean) => { link = value ? "online" : "offline"; },
 			loseAnswerOf: (match: (pathname: string, method: string) => boolean) => { loseAnswer = match; },
+			beforeEach: (run: ((pathname: string, method: string) => void) | null) => { before = run; },
+			hold: () => { let open!: () => void; gate = new Promise<void>((resolve) => { open = resolve; }); return () => { gate = null; open(); }; },
 		};
 	}
 	return { root, serverDir, authority, desktop, serverWork, pass: (ms: number) => { clock += ms; }, now: () => clock };
@@ -461,5 +469,224 @@ describe("rule 4: take-back", () => {
 		assert.deepEqual(second.ok && second.sent, ["chat_circuits"]);
 		assert.deepEqual(turnsOf(w.serverDir, "chat_circuits"), ["one", "offline one"]);
 		assert.equal(laptop.sync.holds("chat_circuits"), false);
+	});
+});
+
+// ─── The review's cases: a take that didn't settle, races, lost answers ─────
+
+const LAPTOP = "dev_bbbbbbbbbbbbbbbb";
+const isTake = (pathname: string, method: string) => method === "POST" && pathname.endsWith("/take");
+
+describe("a take that answered \"waiting\": the holder's later turns are never overwritten", () => {
+	it("freed by Unpair (\"mine\"): the laptop adds a turn and then hands over; it survives, the PC gets the notice", async () => {
+		const { w, desk } = await synced();
+		const laptop = w.desktop(LAPTOP, "Laptop");
+		await laptop.sync.tick();
+		// The PC unpairs; the laptop takes "Circuits" and stays online.
+		w.authority.releaseDevice(desk.deviceId);
+		desk.sync.release();
+		assert.equal((await laptop.sync.takeOver("chat_circuits", true)).status, "moved");
+		addTurn(desk.dataDir, "chat_circuits", "on the PC while unpaired");
+		desk.sync.rejoin();
+		w.pass(SECOND);
+		await laptop.sync.tick();
+		const first = await desk.sync.tick();
+		assert.deepEqual(first.ok && [first.sent, first.lost], [[], []], "the laptop is online: asked, waiting");
+		assert.equal(sessionsOf(desk.dataDir).chat_circuits!.freed, "mine");
+		// The laptop's learner adds a turn; its round sends it and hands over in the same round.
+		addTurn(laptop.dataDir, "chat_circuits", "on the laptop");
+		w.pass(SECOND);
+		const handed = await laptop.sync.tick();
+		assert.deepEqual(handed.ok && [handed.sent, handed.handed], [["chat_circuits"], ["chat_circuits"]]);
+		assert.equal(w.authority.holderOf("chat_circuits")?.id, desk.deviceId);
+		w.pass(SECOND);
+		const second = await desk.sync.tick();
+		assert.deepEqual(second.ok && [second.sent, second.lost], [[], ["chat_circuits"]]);
+		assert.deepEqual(turnsOf(w.serverDir, "chat_circuits"), ["one", "on the laptop"], "the laptop's turn survives");
+		assert.deepEqual(turnsOf(desk.dataDir, "chat_circuits"), ["one", "on the laptop"]);
+		assert.deepEqual(desk.sync.notices(), [{ chatId: "chat_circuits", title: "Circuits", turns: 1, at: w.now() }]);
+		assert.equal(desk.sync.holds("chat_circuits"), true, "the session is the PC's, with the server's version");
+		// From there it goes on normally.
+		addTurn(desk.dataDir, "chat_circuits", "next");
+		const third = await desk.sync.tick();
+		assert.deepEqual(third.ok && third.sent, ["chat_circuits"]);
+		assert.deepEqual(turnsOf(w.serverDir, "chat_circuits"), ["one", "on the laptop", "next"]);
+	});
+
+	it("carried on offline (\"held\"): the same", async () => {
+		const { w, desk } = await synced();
+		const laptop = w.desktop(LAPTOP, "Laptop");
+		await laptop.sync.tick();
+		desk.setOnline(false);
+		await desk.sync.takeOver("chat_motors", true);
+		addTurn(desk.dataDir, "chat_motors", "offline on the PC");
+		assert.equal((await laptop.sync.takeOver("chat_motors", true)).status, "moved");
+		desk.setOnline(true);
+		const first = await desk.sync.tick();
+		assert.deepEqual(first.ok && [first.sent, first.lost], [[], []]);
+		addTurn(laptop.dataDir, "chat_motors", "on the laptop");
+		w.pass(SECOND);
+		const handed = await laptop.sync.tick();
+		assert.deepEqual(handed.ok && handed.handed, ["chat_motors"]);
+		const second = await desk.sync.tick();
+		assert.deepEqual(second.ok && second.lost, ["chat_motors"]);
+		assert.deepEqual(turnsOf(w.serverDir, "chat_motors"), ["phone", "on the laptop"]);
+		assert.equal(desk.sync.notices()[0]!.turns, 1);
+		assert.equal(desk.sync.holds("chat_motors"), true);
+	});
+
+	it("a take-back the laptop answered \"waiting\": the same", async () => {
+		const { w, desk } = await synced();
+		const laptop = w.desktop(LAPTOP, "Laptop");
+		await laptop.sync.tick();
+		desk.setOnline(false);
+		addTurn(desk.dataDir, "chat_circuits", "offline on the PC");
+		w.pass(60 * SECOND);
+		await laptop.sync.tick();
+		assert.equal((await laptop.sync.takeOver("chat_circuits", true)).status, "moved");
+		desk.setOnline(true);
+		const first = await desk.sync.tick();
+		assert.deepEqual(first.ok && [first.sent, first.lost], [[], []]);
+		assert.equal(desk.sync.holds("chat_circuits"), true);
+		addTurn(laptop.dataDir, "chat_circuits", "on the laptop");
+		w.pass(SECOND);
+		await laptop.sync.tick();
+		const second = await desk.sync.tick();
+		assert.deepEqual(second.ok && second.lost, ["chat_circuits"]);
+		assert.deepEqual(turnsOf(w.serverDir, "chat_circuits"), ["one", "on the laptop"]);
+		assert.deepEqual(turnsOf(desk.dataDir, "chat_circuits"), ["one", "on the laptop"]);
+		assert.equal(desk.sync.notices()[0]!.turns, 1);
+	});
+
+	it("the laptop hands over with nothing added (its version rises, its content doesn't): the PC's turns are kept", async () => {
+		const { w, desk } = await synced();
+		const laptop = w.desktop(LAPTOP, "Laptop");
+		await laptop.sync.tick();
+		desk.setOnline(false);
+		addTurn(desk.dataDir, "chat_circuits", "offline on the PC");
+		w.pass(60 * SECOND);
+		await laptop.sync.tick();
+		await laptop.sync.takeOver("chat_circuits", true);
+		desk.setOnline(true);
+		await desk.sync.tick();
+		const asked = sessionsOf(desk.dataDir).chat_circuits as { asked?: number };
+		assert.equal(typeof asked.asked, "number");
+		await laptop.sync.tick();
+		const server = JSON.parse(fs.readFileSync(path.join(w.serverDir, "sync", "authority.json"), "utf-8")) as { sessions: Record<string, { version: number }> };
+		assert.ok(server.sessions.chat_circuits!.version > asked.asked!, "the hand-over's send raised the version");
+		const second = await desk.sync.tick();
+		assert.deepEqual(second.ok && [second.sent, second.lost], [["chat_circuits"], []]);
+		assert.deepEqual(turnsOf(w.serverDir, "chat_circuits"), ["one", "offline on the PC"]);
+		assert.deepEqual(desk.sync.notices(), []);
+	});
+});
+
+describe("the check and the take are not one step", () => {
+	it("the phone writes between the PC's look and its take: its turn survives, the PC gets the notice", async () => {
+		const { w, desk } = await synced();
+		desk.setOnline(false);
+		addTurn(desk.dataDir, "chat_circuits", "offline on the PC");
+		w.pass(60 * SECOND);
+		assert.equal(w.authority.takeOver(CLOUD_HOLDER, "chat_circuits", true).body.status, "moved");
+		desk.setOnline(true);
+		desk.beforeEach((pathname, method) => {
+			if (!isTake(pathname, method)) return;
+			desk.beforeEach(null);
+			addTurn(w.serverDir, "chat_circuits", "on the phone, just then");
+		});
+		const first = await desk.sync.tick();
+		assert.deepEqual(first.ok && [first.sent, first.lost], [[], []], "not kept on a version it didn't look at");
+		assert.equal(w.authority.holderOf("chat_circuits")?.id, desk.deviceId, "the cloud moved it at once");
+		const second = await desk.sync.tick();
+		assert.deepEqual(second.ok && [second.sent, second.lost], [[], ["chat_circuits"]]);
+		assert.deepEqual(turnsOf(w.serverDir, "chat_circuits"), ["one", "on the phone, just then"]);
+		assert.deepEqual(turnsOf(desk.dataDir, "chat_circuits"), ["one", "on the phone, just then"]);
+		assert.equal(desk.sync.notices()[0]!.turns, 1);
+	});
+
+	it("a \"waiting\" answer on the send's lease_lost path keeps the turns, and the next round takes it", async () => {
+		const { w, desk } = await synced();
+		addTurn(desk.dataDir, "chat_circuits", "typed here");
+		const exchange = w.authority.exchange.bind(w.authority);
+		w.authority.exchange = (deviceId, body) => {
+			const result = exchange(deviceId, body);
+			w.authority.exchange = exchange;
+			w.pass(60 * SECOND);
+			w.authority.takeOver(CLOUD_HOLDER, "chat_circuits", true);
+			w.serverWork.replying.add("chat_circuits"); // the phone is writing a reply
+			return { ...result, body: { ...result.body, changes: [] } };
+		};
+		const first = await desk.sync.tick();
+		assert.deepEqual(first.ok && [first.sent, first.lost], [[], []]);
+		assert.ok(desk.sent.includes("POST /api/sync/sessions/chat_circuits/take force=true"));
+		assert.equal(desk.sync.holds("chat_circuits"), true);
+		assert.deepEqual(turnsOf(desk.dataDir, "chat_circuits"), ["one", "typed here"]);
+		assert.deepEqual(desk.work.stopped, []);
+		w.serverWork.replying.delete("chat_circuits");
+		w.pass(SECOND);
+		const second = await desk.sync.tick();
+		assert.deepEqual(second.ok && second.sent, ["chat_circuits"]);
+		assert.deepEqual(turnsOf(w.serverDir, "chat_circuits"), ["one", "typed here"]);
+		assert.deepEqual(desk.sync.notices(), []);
+	});
+});
+
+describe("a take-over and a round never run at the same time", () => {
+	it("a take-over asked during a round waits for it, and the reverse", async () => {
+		const { desk } = await synced();
+		const open = desk.hold();
+		const round = desk.sync.tick();
+		const take = desk.sync.takeOver("chat_motors", true);
+		await new Promise((resolve) => setTimeout(resolve, 10));
+		open();
+		await Promise.all([round, take]);
+		const takeAt = desk.sent.findIndex((line) => line.includes("/take"));
+		assert.ok(takeAt > 0, "the take came after");
+		assert.ok(desk.sent.slice(0, takeAt).some((line) => line === "POST /api/sync/sessions"), "the round's question went first");
+		// The other order.
+		desk.sent.length = 0;
+		const open2 = desk.hold();
+		const take2 = desk.sync.takeOver("chat_motors", true);
+		const round2 = desk.sync.tick();
+		await new Promise((resolve) => setTimeout(resolve, 10));
+		open2();
+		await Promise.all([take2, round2]);
+		assert.equal(desk.sent[0]!.includes("/take"), true, "the take-over first, then the round");
+	});
+});
+
+describe("a lost answer to this PC's own send", () => {
+	it("the server holds what the PC sent; a take-over that adds nothing; the PC's later turns are kept", async () => {
+		const { w, desk } = await synced();
+		addTurn(desk.dataDir, "chat_circuits", "sent, answer lost");
+		desk.loseAnswerOf((pathname, method) => method === "PUT" && pathname === "/api/sync/sessions/chat_circuits");
+		assert.deepEqual(await desk.sync.tick(), { ok: false, reason: "offline" });
+		assert.deepEqual(turnsOf(w.serverDir, "chat_circuits"), ["one", "sent, answer lost"], "it did arrive");
+		desk.setOnline(false);
+		addTurn(desk.dataDir, "chat_circuits", "after it");
+		w.pass(60 * SECOND);
+		assert.equal(w.authority.takeOver(CLOUD_HOLDER, "chat_circuits", true).body.status, "moved");
+		desk.setOnline(true);
+		const round = await desk.sync.tick();
+		assert.deepEqual(round.ok && [round.sent, round.lost], [["chat_circuits"], []]);
+		assert.deepEqual(turnsOf(w.serverDir, "chat_circuits"), ["one", "sent, answer lost", "after it"]);
+		assert.deepEqual(desk.sync.notices(), []);
+	});
+});
+
+describe("the notice counts what is on disk when the discard happens", () => {
+	it("a turn written while the server's copy was being fetched is counted", async () => {
+		const { w, desk } = await carriedOn();
+		addTurn(desk.dataDir, "chat_motors", "pc one");
+		addTurn(w.serverDir, "chat_motors", "phone again");
+		desk.setOnline(true);
+		desk.beforeEach((pathname, method) => {
+			if (method !== "GET" || pathname !== "/api/sync/sessions/chat_motors") return;
+			desk.beforeEach(null);
+			addTurn(desk.dataDir, "chat_motors", "pc two, typed meanwhile");
+		});
+		const round = await desk.sync.tick();
+		assert.deepEqual(round.ok && round.lost, ["chat_motors"]);
+		assert.equal(desk.sync.notices()[0]!.turns, 2);
 	});
 });
