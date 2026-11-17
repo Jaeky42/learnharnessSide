@@ -32,14 +32,27 @@ function literalRanges(text: string): Array<{ start: number; end: number }> {
 }
 
 /** FORK (money is not math; owner's decision, it replaces "instructions
- * only"): a single-dollar pair is money, not a formula, when its opening
- * dollar is directly followed by a digit and its closing dollar has
- * whitespace before it or a digit after it ("$73,000 with $70,000"). A
- * formula that starts with a number closes tightly ("$2x + 3 = 7$") and is
- * left alone, as is every pair that doesn't open on a digit.
- * `after` is the character that follows the closing dollar. */
+ * only"): is this single-dollar pair two money amounts and not a formula?
+ * `body` is the text between the dollars, `after` what follows the closing
+ * one (two characters are enough).
+ *
+ * It must open on a digit ("$73,000 with $70,000"), and its closing dollar
+ * must look like the start of something, never the end of a formula:
+ *  - after whitespace or an opening bracket ("$5 fee and $x$",
+ *    "$100 ($x$ each)") it must be followed by something a formula or an
+ *    amount can start with. Whitespace or closing punctuation after it means a
+ *    formula typed with a space before its closing dollar ("$1 + 2 $ and"),
+ *    which stays math. The end of the text counts as a start, so money still
+ *    being written never flashes as a formula;
+ *  - straight after a separator ("$5-$10", "$5/$6") it must be followed by a
+ *    digit.
+ * A formula that closes on a letter, a digit or a closing bracket is never
+ * money, whatever follows ("$2x + 3 = 7$", "$3$4"), nor is any pair that
+ * doesn't open on a digit. */
 export function isMoneyPair(body: string, after: string): boolean {
-	return /^\d/.test(body) && (/\s$/.test(body) || /^\d/.test(after));
+	if (!/^\d/.test(body)) return false;
+	if (/[\s([]$/.test(body)) return after === "" || /^(?:\.\d|[^\s.,;:!?)\]}'"])/.test(after);
+	return /^\d/.test(after) && !/[\p{L}\p{N})\]}%\\]$/u.test(body);
 }
 
 /** Mirrors the app's native dollar-run and legacy-delimiter conventions,
@@ -87,7 +100,7 @@ export function readContentSpans(text: string, money?: number[]): ContentSpan[] 
 					if (text[j] === "$" && !escaped(text, j)) {
 						const n = runLength(text, j, "$");
 						if (n === size) {
-							if (size === 1 && isMoneyPair(text.slice(i + 1, j), text[j + 1] ?? "")) { money?.push(i); break; }
+							if (size === 1 && isMoneyPair(text.slice(i + 1, j), text.slice(j + 1, j + 3))) { money?.push(i); break; }
 							at = j; close = open; after = j + n; break;
 						}
 						j += n;

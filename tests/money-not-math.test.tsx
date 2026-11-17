@@ -5,10 +5,10 @@
  * gain" was drawn as one italic formula with both dollar signs gone, because
  * two bare "$" in a paragraph are a formula's start and end. The renderer now
  * tells the two apart (`isMoneyPair` in src/core/content-reader.ts): a pair
- * whose opening dollar is directly followed by a digit, and whose closing
- * dollar has whitespace before it or a digit after it, is money. Only the
- * opening dollar is given up (escaped for display); the one that would have
- * closed it is read afresh, so it can still open a real formula.
+ * that opens on a digit, and whose closing dollar looks like the start of an
+ * amount or a formula and not the end of one, is money. Only the opening
+ * dollar is given up (escaped for display); the one that would have closed
+ * it is read afresh, so it can still open a real formula.
  *
  * The owner's condition: math must still be displayed properly. So this file
  * is two halves: money stays text, and every shape of real math is untouched.
@@ -34,16 +34,28 @@ const shown = (html: string) => html
 const formulas = (html: string) => (html.match(/<span class="katex">/g) ?? []).length;
 
 describe("the rule", () => {
-	it("a digit after the opening dollar, and a space before or a digit after the closing one", () => {
-		assert.equal(isMoneyPair("73,000 with ", "7"), true);
-		assert.equal(isMoneyPair("100 is the price. Let ", "x"), true, "a space before the closing dollar");
-		assert.equal(isMoneyPair("5/", "6"), true, "a digit after the closing dollar");
+	it("opens on a digit, and the closing dollar starts the next amount or formula", () => {
+		assert.equal(isMoneyPair("73,000 with ", "70"), true);
+		assert.equal(isMoneyPair("100 is the price. Let ", "x$"), true, "a formula follows");
+		assert.equal(isMoneyPair("5 fee and ", "\\f"), true, "a formula that starts with a command follows");
+		assert.equal(isMoneyPair("5 and ", ".5"), true, "an amount under a dollar follows");
+		assert.equal(isMoneyPair("100 (", "x$"), true, "after an opening bracket");
+		assert.equal(isMoneyPair("5/", "6"), true, "straight after a separator, a digit follows");
+		assert.equal(isMoneyPair("5-", "10"), true);
+		assert.equal(isMoneyPair("100,", "20"), true);
 	});
-	it("a formula that starts with a number closes tightly and is not money", () => {
-		for (const body of ["2x + 3 = 7", "5", "40\\%", "3y", "36,000 \\times 40\\% = \\$14,400", "10^{-3}"]) {
-			assert.equal(isMoneyPair(body, " "), false, body);
-			assert.equal(isMoneyPair(body, "."), false, body);
-			assert.equal(isMoneyPair(body, ""), false, body);
+	it("while it is being written, the end of the text counts as a start", () => {
+		assert.equal(isMoneyPair("73,000 with ", ""), true);
+	});
+	it("a formula that starts with a number is not money, whatever follows it", () => {
+		for (const body of ["2x + 3 = 7", "5", "3", "2x", "40\\%", "3y", "36,000 \\times 40\\% = \\$14,400", "10^{-3}", "2(x+1)", "[0,1]"]) {
+			for (const after of [" ", ".", "", "4", "5x", "a", ")"]) assert.equal(isMoneyPair(body, after), false, `${body} then ${JSON.stringify(after)}`);
+		}
+	});
+	it("a formula typed with a space before its closing dollar stays math", () => {
+		for (const after of [" a", ".", ", ", ") ", "\n", "; ", "! ", "? "]) {
+			assert.equal(isMoneyPair("1 + 2 ", after), false, JSON.stringify(after));
+			assert.equal(isMoneyPair("2x ", after), false, JSON.stringify(after));
 		}
 	});
 	it("a pair that doesn't open on a digit is never money", () => {
@@ -166,6 +178,39 @@ describe("math is still displayed properly", () => {
 		assert.match(shown(html), /Year 3\s*\$11,000\s*\[math\]\s*Year 4\s*\$0\s*\[math\]\s*Year 5\s*\$7\s*\[math\]/);
 	});
 
+	// Found by the independent check of the first build: each of these was
+	// right before the money rule and lost under its first form.
+	it("a formula directly followed by a digit is still a formula", () => {
+		for (const [source, count] of [["$3$4", 1], ["Formula $2x$5 weird", 1], ["Digit $2x$3 and $4y$5", 2]] as const) {
+			assert.equal(transformMathDelimiters(source), source);
+			assert.equal(formulas(render(source)), count, source);
+		}
+	});
+
+	it("a formula typed with a space before its closing dollar is still a formula, and so is the next one", () => {
+		for (const [source, count] of [
+			["Sum of $1 + 2 $ and $3$ here.", 2],
+			["Equation $1 + 1 = 2 $ end", 1],
+			["So $2x $, as said.", 1],
+			["a $1 $ b", 1],
+			["Now $3 \\times 4 $ end", 1],
+		] as const) {
+			assert.equal(transformMathDelimiters(source), source, source);
+			const html = render(source);
+			assert.ok(!html.includes("katex-error"));
+			assert.equal(formulas(html), count, source);
+		}
+		assert.equal(shown(render("Sum of $1 + 2 $ and $3$ here.")), "Sum of [math] and [math] here.");
+	});
+
+	it("price ranges and amounts with no space between them are money", () => {
+		for (const source of ["Between $5-$10 a month.", "Either $5/$6 or $7.", "Fees: $100,$200 and $300."]) {
+			const html = render(source);
+			assert.equal(formulas(html), 0, source);
+			assert.equal(shown(html), source);
+		}
+	});
+
 	it("old \\(…\\) and \\[…\\] math beside money still converts", () => {
 		const html = render("It costs $5 or $6, and \\(x^2\\) is \\(y\\).");
 		assert.equal(shown(html), "It costs $5 or $6, and [math] is [math].");
@@ -216,8 +261,16 @@ describe("the transform's own properties", () => {
 		assert.deepEqual(spans.filter((s) => s.kind === "math").map((s) => s.raw), ["$x$"]);
 	});
 
-	it("the known limit: a pair that closes right after a bracket is still read as math", () => {
-		// Recorded, not wanted. If this starts failing the limit is gone: update the docs.
-		assert.ok(formulas(render("Pay $100 ($x$ each).")) > 0);
+	it("an amount, then a formula in brackets", () => {
+		const html = render("Pay $100 ($x$ each).");
+		assert.equal(shown(html), "Pay $100 ([math] each).");
+	});
+
+	it("the known limit: a formula with a space before its closing dollar, at the very end of the text", () => {
+		// Recorded, not wanted: the end of the text has to count as "money still
+		// being written", or every money sentence would flash as a formula while
+		// a reply streams. If this starts failing the limit is gone: update the docs.
+		assert.equal(formulas(render("So the sum is $1 + 2 $")), 0);
+		assert.equal(formulas(render("So the sum is $1 + 2 $.")), 1, "anything after it and it is math again");
 	});
 });
