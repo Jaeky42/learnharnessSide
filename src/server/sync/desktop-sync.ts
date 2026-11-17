@@ -56,6 +56,22 @@ export interface DesktopSession {
 	 * for one of its own sessions back and the holder is still handing over.
 	 */
 	freed?: "mine" | "held";
+	/**
+	 * With `freed`: this PC asked for the session back after seeing the
+	 * server's copy at this version still equal to its own base, and the
+	 * answer didn't settle it (the holder was handing over, or the server's
+	 * version had moved on by the time it was taken). A later copy that the
+	 * server gives this PC with a higher version and other content was
+	 * written by someone else meanwhile, and is never overwritten.
+	 */
+	asked?: number;
+	/**
+	 * The digests of the last versions this PC sent while it held the session
+	 * and no answer settled (the answer may have been lost after the server
+	 * stored it). A server copy equal to one of them is this PC's own work,
+	 * as good as `digest` for deciding whether anyone else added to it.
+	 */
+	sent?: string[];
 }
 
 /** Told to the learner after a discard (owner's rule: no copies, but never silently). */
