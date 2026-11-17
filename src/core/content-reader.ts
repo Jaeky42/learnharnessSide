@@ -38,21 +38,23 @@ function literalRanges(text: string): Array<{ start: number; end: number }> {
  *
  * It must open on a digit ("$73,000 with $70,000"), and its closing dollar
  * must look like the start of something, never the end of a formula:
- *  - after whitespace or an opening bracket ("$5 fee and $x$",
- *    "$100 ($x$ each)") it must be followed by something a formula or an
- *    amount can start with. Whitespace or closing punctuation after it means a
- *    formula typed with a space before its closing dollar ("$1 + 2 $ and"),
- *    which stays math. The end of the text counts as a start, so money still
+ *  - after whitespace, an opening bracket or an opening quote ("$5 fee and
+ *    $x$", "$100 ($x$ each)") it must be followed by something a formula or an
+ *    amount can start with. Whitespace, closing punctuation or a table's pipe
+ *    after it means a formula typed with a space before its closing dollar
+ *    ("$1 + 2 $ and"), which stays math. The end of the text counts as a start, so money still
  *    being written never flashes as a formula;
- *  - straight after a separator ("$5-$10", "$5/$6") it must be followed by a
- *    digit.
- * A formula that closes on a letter, a digit or a closing bracket is never
- * money, whatever follows ("$2x + 3 = 7$", "$3$4"), nor is any pair that
- * doesn't open on a digit. */
+ *  - straight after one of the separators amounts are joined with
+ *    ("$5-$10", "$5/$6", "$100,$200", a bold's asterisks) it must be
+ *    followed by a digit.
+ * A formula that closes on anything else (a letter, a digit, a closing
+ * bracket, "!", "=", "%") is never money, whatever follows
+ * ("$2x + 3 = 7$", "$3$4", "$5!$6"), nor is any pair that doesn't open on
+ * a digit. */
 export function isMoneyPair(body: string, after: string): boolean {
 	if (!/^\d/.test(body)) return false;
-	if (/[\s([]$/.test(body)) return after === "" || /^(?:\.\d|[^\s.,;:!?)\]}'"])/.test(after);
-	return /^\d/.test(after) && !/[\p{L}\p{N})\]}%\\]$/u.test(body);
+	if (/[\s(["“‘]$/.test(body)) return after === "" || /^(?:\.\d|[^\s.,;:!?)\]}'"|])/.test(after);
+	return /^\d/.test(after) && /[-–—/,;&~*_]$/.test(body);
 }
 
 /** Mirrors the app's native dollar-run and legacy-delimiter conventions,

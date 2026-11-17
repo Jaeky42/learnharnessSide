@@ -48,7 +48,7 @@ describe("the rule", () => {
 		assert.equal(isMoneyPair("73,000 with ", ""), true);
 	});
 	it("a formula that starts with a number is not money, whatever follows it", () => {
-		for (const body of ["2x + 3 = 7", "5", "3", "2x", "40\\%", "3y", "36,000 \\times 40\\% = \\$14,400", "10^{-3}", "2(x+1)", "[0,1]"]) {
+		for (const body of ["2x + 3 = 7", "5", "3", "2x", "40\\%", "3y", "36,000 \\times 40\\% = \\$14,400", "10^{-3}", "2(x+1)", "[0,1]", "5!", "2+2=", "1:", "3<"]) {
 			for (const after of [" ", ".", "", "4", "5x", "a", ")"]) assert.equal(isMoneyPair(body, after), false, `${body} then ${JSON.stringify(after)}`);
 		}
 	});
@@ -181,7 +181,7 @@ describe("math is still displayed properly", () => {
 	// Found by the independent check of the first build: each of these was
 	// right before the money rule and lost under its first form.
 	it("a formula directly followed by a digit is still a formula", () => {
-		for (const [source, count] of [["$3$4", 1], ["Formula $2x$5 weird", 1], ["Digit $2x$3 and $4y$5", 2]] as const) {
+		for (const [source, count] of [["$3$4", 1], ["Formula $2x$5 weird", 1], ["Digit $2x$3 and $4y$5", 2], ["$5!$ and $5!$6", 2], ["$2+2=$4", 1], ["$10\\%$5", 1]] as const) {
 			assert.equal(transformMathDelimiters(source), source);
 			assert.equal(formulas(render(source)), count, source);
 		}
@@ -203,8 +203,16 @@ describe("math is still displayed properly", () => {
 		assert.equal(shown(render("Sum of $1 + 2 $ and $3$ here.")), "Sum of [math] and [math] here.");
 	});
 
+	// Found by the second independent check.
+	it("the same in a table cell, with the closing dollar against the pipe", () => {
+		const source = "| a | b |\n|---|---|\n| $1 + 2 $| $3 |";
+		assert.equal(transformMathDelimiters(source), source);
+		assert.equal(formulas(render(source)), 1);
+		assert.equal(isMoneyPair("1 + 2 ", "| "), false);
+	});
+
 	it("price ranges and amounts with no space between them are money", () => {
-		for (const source of ["Between $5-$10 a month.", "Either $5/$6 or $7.", "Fees: $100,$200 and $300."]) {
+		for (const source of ["Between $5-$10 a month.", "Either $5/$6 or $7.", "Fees: $100,$200 and $300.", "Earn $5 (or $6) today.", "Fee $5 and $.50 more."]) {
 			const html = render(source);
 			assert.equal(formulas(html), 0, source);
 			assert.equal(shown(html), source);
