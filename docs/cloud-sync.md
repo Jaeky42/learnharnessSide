@@ -39,6 +39,7 @@ A teaching transcript can't be merged, because two teachers built on the same tu
 - Only the device holding a session's **lease** may continue it. The VPS is the lease authority.
 - **A lease never runs out on its own.** Other devices show "Held by Desktop (offline since …)" with a **Take over** button.
 - **Take over warns first** when there is evidence that the holder has turns that haven't synced (see "Phase 5 decisions").
+- **Since seamless sessions (built, not shipped):** the lease stays, but nothing shows it. A session moves to the device you start typing on, with no button and no warning, and a PC cut off from the server carries on. See "Seamless sessions" under "Handoff"; it replaces the two bullets above.
 - **No copies** (owner's change during Phase 5 planning; it replaces the earlier "Title (desktop copy)" rule). A device that lost a session to a take-over discards its unsent turns for that session when it reconnects and shows the server's version. The loss isn't silent: the desktop shows a heads-up while it works offline, and a notice after a discard.
 - An offline desktop can only continue sessions it held before it went offline.
 - A session's notes home folder (`notes/sessions/<chatId>.json`) follows its lease. Its Tutor conversations are inside the chat record since the upstream 0.6.0 merge (`sideChats`), so they travel with it; the separate `side-tutor/<chatId>.json` file is gone.
@@ -1240,11 +1241,11 @@ Kept as written while the work was on its own branch; where it says "until the m
 3. **Trying the desktop side: two server copies only.** No desktop test build and no run from source. One copy plays the desktop and one plays the server, in automated tests and browser runs. The owner tries nothing on the PC before the merge, so **sync must stay off in the app until it is paired**, and an unpaired app must behave exactly as today.
 4. **First sync: combine both libraries.** Pairing deletes nothing. Desktop sessions go up and cloud sessions come down, each still held by the side it came from. The graphs are joined; a concept learned on both sides before pairing shows twice (the known limit).
 5. **A backup once per side**, right before that side's first sync: a dated folder under `backups/` beside the data folder (sessions, graph, side-tutor threads, jobs, settings; no credentials, not the vault). Restored by hand with a guide.
-6. **Take over warns only on evidence.** The server keeps, per session, when the holder last checked in and its last word. Warn when that was "busy" or "unsent", or the holder went silent in the middle of a reply. If it was "all sent", no warning, even if the holder has been offline since. An online holder is asked to hand over and no warning is needed.
+6. **Take over warns only on evidence** (retired by "Seamless sessions": the page always asks with `force`, and nothing warns; the server's rule itself is unchanged). The server keeps, per session, when the holder last checked in and its last word. Warn when that was "busy" or "unsent", or the holder went silent in the middle of a reply. If it was "all sent", no warning, even if the holder has been offline since. An online holder is asked to hand over and no warning is needed.
 7. **No copies** (see "Sessions" at the top).
 8. **The gap that leaves** (a desktop that said "all sent", went offline and was then used offline): while it can't reach the server, the desktop shows a heads-up in a session being continued; after a discard it shows a notice naming the session and the number of turns. Both screens are Phase 6; Phase 5 supplies the facts.
 9. **A busy online holder at take-over:** the reply being written finishes and is sent. Background helpers (research, demo, visual, PDF) stop there and start again from the beginning on the new holder. Extraction stops and the new holder redoes it later.
-10. **A held session is read-only until taken over.** Reading it, the notes drawer and moving it between folders work. Sending a message, the side tutor, renaming, changing its model and deleting wait for Take over.
+10. **A held session is read-only until taken over** (retired by "Seamless sessions": every action moves the session here first; the server still refuses a write from a device that doesn't hold it). Reading it, the notes drawer and moving it between folders work. Sending a message, the side tutor, renaming, changing its model and deleting wait for Take over.
 11. **Timing:** a session is sent about 2 seconds after a change; the desktop tells the server when a reply starts and ends; it asks the server for news every 10 seconds; a full sync at app start; quiet retries while offline, slowing to once every few minutes. There is no "final sync on quit" (on Windows the local server is killed at once).
 12. **Settings split.**
     - Synced, latest change wins per setting: dictation language, graph (extraction on/off, rendering on/off, chunk size, the graph view sliders), compaction threshold, agent (tool switches, search engine, prober graph tools), and prompt overrides (the texts and their switches).
@@ -1497,7 +1498,7 @@ Kept as written while the work was on its own branch; where it says "until the m
 5. **On the server's site:** its own **Cloud** row, between Obsidian and Account. Account is unchanged.
 6. **The sync chip** (slice 3): at the foot of the session list, above Settings, **only when something is off**. An outline ring; ring and words in amber. It reads `OFFLINE`, `SYNC PAUSED` or `NOT PAIRED`. A click opens Settings → Cloud. Never on a PC that was never paired, never after the learner's own Unpair, never on the server's site or a phone.
 7. **Names:** the form suggests **Desktop** for a PC. The server is called **the web app** ("Held by the web app").
-8. **A held session** (slice 2): a strip under the top bar with the holder and **Take over**; no message box. The session list's second line reads "Held by Desktop" in place of the time.
+8. **A held session** (slice 2; decisions 8, 9, 10 and 13 are retired by "Seamless sessions" below): a strip under the top bar with the holder and **Take over**; no message box. The session list's second line reads "Held by Desktop" in place of the time.
 9. **While an online holder hands over** (slice 2): the strip changes in place, with **Cancel**.
 10. **The take-over warning** (slice 2): a confirm box with one wording; buttons Cancel and **Take over anyway** (red).
 11. **The offline heads-up** (slice 3): the same strip under the top bar, for as long as it lasts; the message box stays.
@@ -1637,6 +1638,93 @@ One run between two built copies with the loop on, through the real screens, nob
 
 - Nothing for Phase 6: the owner's real PC is paired with the real server and they reported that everything works.
 - Phase 7 (not started; the owner starts it).
+
+### Seamless sessions: no "Held by", no Take over (built, not shipped)
+
+- **State:** built on `claude/upstream-0.6.0`, on top of the released `side-tutor` (`d4c05e6`). **Not shipped:** it is in neither release branch. What was checked is under "What was checked" below.
+- **Why:** the owner asked what removing "Held by …" would mean, "so that they can seamlessly be continued on another device", and chose to keep the lease underneath and hide it. The lease is still what keeps a session from splitting in two; nothing on screen shows it any more.
+- **It replaces** these recorded decisions: "A lease never runs out … with a Take over button" and "Take over warns first" (under "Sessions: leases instead of merging"), Phase 5 decisions 6 (the warning) and 10 (read-only until taken over), and Phase 6 decisions 8, 9, 10 and 13 (the held strip, the waiting strip, the warning box, the greyed controls) with their approved words. Where the text above describes those, this section is newer.
+- **The sync protocol stays 3 and no synced format changed**, so the server and a PC can be updated in either order. An older PC with a newer server, or the other way round, behaves as each build did.
+
+#### The owner's decisions
+
+1. **The session moves to the device you are on by itself**, at the first typed character in one of the lesson's text boxes, or at a press on Dictate. Chosen over "on your first action" and "on opening the lesson"; the owner's words: "takes over when you either start typing or when you click the dictate button".
+2. **Any other action that changes the session moves it when pressed** (an answer option, the confidence bar, Next problem, Rename, Delete, a model change, Cite and Ask), and goes through once the session has arrived. Nothing is greyed.
+3. **Completely seamless:** "no visual difference between two sessions when either is active". No strip, no "Held by" line in the session list, no greyed controls, and **no warning box**. The owner was told the consequence: one typed character on the phone can take a session from a PC that is offline, and what that PC never sent is discarded when it reconnects (softened by the take-back rule below).
+4. **A PC cut off from its server carries on anyway** with a session another device holds (chosen over "the action fails with a message" and over keeping the strip for that case). It is settled at reconnect.
+5. **The heads-up is a floating box**, "kinda like" the update box, in the same place: the top of the lesson. Every text that would have been in the strip goes there; the discard notice stays a box in the middle of the screen.
+6. **Wording:** "continued" in place of "taken over" in the heads-up and the discard notice, and "any new messages will be discarded" in place of "what you add here now is discarded".
+
+#### The rules approved with the plan
+
+- **Send before the session has arrived:** the text stays in the box with the usual working look and is sent by itself on arrival.
+- **Unless the arriving session has turns this page had not shown:** then nothing is sent, the lesson shows the new turns and the text stays in the box. This holds for everything that adds to the transcript (a message, an answer, Next problem, steering, a dismissal). Rename, Delete, a model change, the artifact switch and the Tutor's Ask go through after arrival.
+- **Take-back:** a PC that lost a session while it had unsent turns gets it back, with its turns, when the other device added nothing. Before, those turns were always discarded.
+- **When both sides added to a session, the server's version wins**, and the PC shows the discard notice.
+- **The sync chip and the offline heads-up stay.** The heads-up now shows in every lesson, since every session can be continued.
+- **Helpers still restart from the beginning when a session moves** (Phase 5, decision 9).
+- **The server still refuses a write from a device that doesn't hold the session** (409 `session_held_elsewhere`), as the net under the page. No screen shows it.
+
+#### The approved words
+
+In `src/core/sync/screens.ts`. Change them only with the owner's approval.
+
+- **The heads-up** (`SYNC_TROUBLE_BOX_TEXT`): "This PC can't reach the server. If this session is continued on another device before it reconnects, any new messages will be discarded." Paused: "Sync is paused. If this session is continued on another device before sync is back, any new messages will be discarded." Removed by the server: "This PC isn't paired any more. If this session is continued on another device before you pair again, any new messages will be discarded." (The owner gave the new ending for the first sentence; the two others follow it.)
+- **A move that failed** (`SESSION_MOVE_FAILED_TEXT`): "This session couldn't be continued here. Try again."
+- **The discard notice:** title `“Circuits” was continued on another device` / "It was continued on another device while this PC was offline. …" (the rest as before). Several sessions: "Sessions were continued on another device" / "They were continued on another device while this PC was offline."
+- **Gone:** "Held by …", "Take over", "Take over anyway", "Take this session over first", the two waiting lines, the warning box's text, "Couldn't take it over. Try again." and the three "can't be taken over right now" lines.
+
+#### What was built: the page
+
+- **`components/cloud/session-move.ts`** (fork-owned) is the one place that moves a session:
+  - `ensureSessionHere(chatId)` answers `"here"` at once, with no request, when sync isn't in use or the session isn't in the cloud state's `held`. Otherwise it posts `{op:"take-over", chatId, force:true}` to `/api/cloud`. `yours`, `moved` and `continued-offline` mean it is here; `waiting` is asked again every 2 seconds for as long as the lesson is open, with no limit; anything else is a failure. Callers of one session share one move.
+  - On arrival it refreshes the cloud state and has the open lesson read its record again; the answer is `"here-changed"` when that read brought message ids the page hadn't shown, or didn't land.
+  - **The triggers** (`useSessionMoveTriggers`): listeners on the document, in the capture phase, for `input` and `paste` in a text box or the confidence bar inside the dock or the Tutor's typing row, and for a click on the lesson's or the Tutor's Dictate, an answer option, Cite, Ask and a plugin button. The dictation shortcut starts it too. Focus alone starts nothing; the notes editor, the session-list search and Settings start nothing. A move started this way that fails is silent.
+  - `fetchHere` wraps a simple write (rename in the top bar and the session list, delete, the session's model and thinking, the artifact switch, manual extraction, the Tutor's Ask and Retry): move first, then the request. When the move fails it answers a made-up 409 that carries the failure sentence, which is what the delete box and the Tutor then show.
+- **`components/session-core.ts`** (upstream's, about 120 lines, each edit marked `FORK (seamless sessions)`): an optional `moveGate` on `SessionModel` runs before `send`, `steer` and the three dismissals, ahead of any optimistic change, so the text stays in the box until the session is here. `here-changed` or `failed` drops the action and keeps the text. An automatic continuation never moves a session.
+- **The net:** a 409 whose code is `session_held_elsewhere` (the page's `held` can be up to 10 seconds old) refreshes the cloud state, moves the session and retries the write once. Before, any 409 from a send was taken for "a reply is being written" and retried for 30 seconds.
+- **Removed from the page:** the "Held by" line and the greyed Rename and Delete in `components/sidebar.tsx`; the hidden message box, the title's lock and F2's in `components/chat.tsx`; the Tutor's `held` prop (the greyed bubble, the window closing); `components/cloud/take-over-dialog.tsx`. Upstream's `blocked` props on the plugin buttons and the highlight toolbar are kept and passed nothing.
+- **The floating box** (`components/cloud/session-strip.tsx`, the file and export keep their names; `app/cloud.css`):
+  - the update box's look (`components/update-banner.tsx`: rounded, a border, a shadow, the popover background) and its ✕;
+  - at the top of the lesson, 12 px under the top bar, centred, at most 36rem wide and never wider than the lesson less 16 px each side. A zero-height wrapper holds it, so the lesson doesn't move when it appears. It is under the Tutor's window and bubble (`z-20` against `z-30`);
+  - it fades in and out over 200 ms with a 6 px slide, at once with reduced motion;
+  - **✕ on the heads-up** hides it in every lesson of that window until that trouble next starts (keyed on the kind, and for offline on `sync.offlineSince`); nothing is stored, so a reload shows it again. **✕ on the failure line** clears it;
+  - the failure line shows before the heads-up when both apply.
+
+#### What was built: the engine (`src/server/sync/desktop-sync.ts`)
+
+- **Carrying on** (`carryOn`): when the page asks for a session and the server can't be asked (the request ends as `offline`, `paused` or `not-paired`), or the server moved the session here but its files couldn't be fetched, that one session is marked provisionally this PC's (`freed: "held"`, `mine: true`, the mechanism "Unpair this PC" already used for every session) and the answer is `{status: "continued-offline"}`. Nothing is marked when the server answered and refused.
+- **Settling** (`settleFreed`, step 0 of every round, for each entry with `freed`):
+  - not changed here since: it is whose it was;
+  - only this PC changed it (the server's copy is still this PC's base): the PC asks for it with `force: true` and sends its version. A holder that is writing a reply is asked again each round;
+  - both sides changed it: the server's version, a discard notice, local work stopped, its unsent graph entries dropped;
+  - gone from the server: gone here.
+- **Never overwriting what this PC didn't see:**
+  - a take that didn't settle remembers the server's version at that moment (`asked`). If the server later names this PC with a higher version and a copy that is neither this PC's own nor equal to the local one, the server's version wins (found by the review: a second desktop could add a turn and hand over while this PC waited);
+  - a take is kept only when its version equals the version just read; otherwise the next round decides;
+  - the fetch-failed case above is decided the same way.
+- **Take-back** (`giveUp`, `askBack`): a PC that finds another device holding a session it held reads the server's copy first. If the PC has unsent changes and that copy is still the PC's own, it asks for the session back and keeps its turns; local work is stopped only on a discard. The lost-lease answers to a send go the same way.
+- **"This PC's own copy"** is its last agreed digest or one of the last four bundles it sent (`sent`), so a send whose answer was lost isn't taken for somebody else's change.
+- **A take-over and a round run one at a time** (`oneAtATime`); they share one state object.
+- `asked` and `sent` are new optional fields in `<data>/sync/desktop.json`, each PC's own file, never synced.
+- **`force` at settling also applies to sessions freed by "Unpair this PC"** (it was `false`: "nothing is forced"). With no warning anywhere, a take that waited on one would never settle. A ruling made while building, for the owner to review.
+
+#### Rulings made while building (for the owner to review)
+
+- **`force` for Unpair-freed sessions** (above).
+- **The ✕'s hidden label for screen readers is "Dismiss".**
+- **A move that fails for a session that isn't open** (Rename from the session list) shows nothing; the rename doesn't happen. Delete shows the failure sentence in its box.
+- **A session deleted on a PC while another device held it** still comes back at reconnect, as before. Counting a deletion as an unsent change (so that it deletes everywhere when the other device added nothing) was left out: it wasn't asked for.
+- **The pairing form's hint still reads** `Your other devices show it: “Held by Desktop”.` (`heldByExample`). No device shows that any more; the sentence needs the owner's new wording.
+
+#### Known limits
+
+- **Taking a session from an online PC still takes up to about 10 seconds** (the PC hears of it at its next check), and waits for a reply or a Tutor answer being written there. Typing first usually hides it. A faster hand-over is a separate engine change, not built.
+- **The take-back applies only when the other device really added nothing.** After a forced take, the server changes the session by itself when a helper job was still marked running or a result was waiting to be delivered (the stale-job sweep, while a lesson page is open), when the record ended on the learner's message (the page continues the turn), or when a plugin question was pending. Extraction runs only at the end of a turn.
+- **A take-over on a PC waits for a round under way**, which can be slow while pictures upload.
+- **A discard notice can say that 0 messages were discarded** (a send whose answer was lost, nothing typed since, then the other device added a turn). Nothing is lost.
+- **The ✕'s "until the trouble next starts"** is noticed by a mounted box: a pause that ends and starts again while no lesson is open stays hidden.
+- **Two devices that are both typing** pass the session back and forth; each hand-over carries the other's turns, and the "turns this page had not shown" rule holds the send back.
 
 ### Flashcards sync (built and shipped)
 

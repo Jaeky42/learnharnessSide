@@ -87,6 +87,8 @@ See `docs/side-tutor.md`. In short: the fork's engine (store, route, agent, prom
 
 ### Held sessions and upstream's new controls
 
+**Since seamless sessions (built, not shipped):** nothing is greyed any more. The `blocked` props stay on upstream's components and are passed nothing; Cite, Ask and the plugin buttons move the session to this device when pressed. The server's refusals below are unchanged. See "Seamless sessions" in `docs/cloud-sync.md`.
+
 - **Greyed, with the fork's tooltip** "Take this session over first" (`HELD_TEXT.blocked`): the plugin buttons in the lesson's top bar and their overflow menu (`blocked` on `PluginTopBarActions`, `components/plugin-chrome.tsx`), and Cite and Ask in the highlight toolbar (`blocked` on `SelectionToolbar`, `components/selection-toolbar.tsx`). They keep their name and icon and do nothing.
 - **Refused by the server** (409 `session_held_elsewhere`): answering or dismissing a plugin question, submitting a plugin problem, steering, and a side question. A plugin worker whose session moved away writes nothing and delivers nothing.
 - **Not covered:** a plugin's keyboard shortcut still runs its action on a held lesson (the server refuses whatever would change the session).
@@ -392,6 +394,11 @@ Protocol 2 means both sides must be updated, or sync pauses (nothing is discarde
   - **Added by the research wrap-up** ("A research job that ends without a brief gets one wrap-up request" under "Asked for with the results"; each edit marked `FORK (research wrap-up)`):
     - `src/agent/subagents/pi-run.ts`: the optional `wrapUp` on `runSubagent` (one more request when the run ended on a tool call or with no text; tool calls refused during it);
     - `src/agent/subagents/researcher.ts`: `maxTurns` 16 (upstream: 12), `RESEARCH_WRAP_UP_MESSAGE`, and `wrapUp` passed to `runSubagent`.
+  - **Added by seamless sessions** ("Seamless sessions" under "Handoff" in `docs/cloud-sync.md`; each edit marked `FORK (seamless sessions)`; built, not shipped):
+    - `components/session-core.ts`: the optional `moveGate` before `send`, `steer` and the three dismissals; a 409 with `session_held_elsewhere` is told apart from "a reply is being written", moves the session and retries once (about 120 lines);
+    - `components/chat.tsx`: the move gate and the arrival handler wired in, `useSessionMoveTriggers`, the held gating removed (the dock's wrapper, the title's lock, F2, the Tutor's `held`, the `blocked` props passed nothing), rename through `fetchHere` (about 40 lines);
+    - `components/sidebar.tsx`: no "Held by" line, Rename and Delete enabled, rename through `fetchHere`;
+    - `components/use-side-thread.ts`, `model-picker.tsx`, `delete-session-dialog.tsx`, `extraction-coverage.tsx`, `artifacts/demo-card.tsx`, `artifacts/visual-card.tsx`: their one write goes through `fetchHere` (2 to 4 lines each).
   - **Added by the money bullet** ("Money amounts no longer turn into a formula" under "Asked for with the results"):
     - `src/agent/prompts/shared/40-formatting.md`: one bullet, "Money: …", after the Math bullet. A prompt fragment can carry no marker comment (its whole text reaches the model); `tests/prompt-money.test.tsx` fails if a merge drops it.
   - **Added by money is not math** ("Money is not math: the renderer's own rule" under "Asked for with the results"; each edit marked `FORK (money is not math)`):
