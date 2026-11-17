@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { serializeCitation, sideSegmentId, type LhMessage, type TextSelector, type SideChatMessage, type SideChatThread } from "@/src/core";
 import { useServerEvent, useServerResync } from "./server-events";
+import { fetchHere } from "@/components/cloud/session-move"; // FORK (seamless sessions)
 
 export type SideThreadAnchor = { kind: "range"; range: Range } | { kind: "element"; element: HTMLElement } | { kind: "composer" };
 export interface SidePassage { text: string; sourceMessageId: string; selector?: Omit<TextSelector, "text"> }
@@ -215,7 +216,8 @@ export function useSideThread(chatId: string, messages: readonly LhMessage[], ge
 		try {
 			const existing = threadsRef.current.some((thread) => thread.id === current.threadId);
 			const working = current.segmentId === sideSegmentId(messagesRef.current) ? workingRef.current?.() : undefined;
-			const response = await fetch(`/api/chats/${chatId}/side-chats`, {
+			// FORK (seamless sessions): a session another device holds moves here first.
+			const response = await fetchHere(chatId, `/api/chats/${chatId}/side-chats`, {
 				method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal,
 				body: JSON.stringify({ ...(existing ? { threadId: current.threadId } : { anchor: {
 					messageId: current.segmentId, partId: `${current.segmentId}-t0`, blockIndex: 0, blockText: "This teaching segment and its question.",

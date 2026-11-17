@@ -12,6 +12,7 @@ import React, { act } from "react";
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
 
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { afterEach, describe, it } from "node:test";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
@@ -160,16 +161,16 @@ async function mountTutor(dictation?: FakeDictation, lesson: LhMessage[] = LESSO
 	const { SideTutor } = await import("../components/side-tutor.tsx");
 	const { useSideThread } = await import("../components/use-side-thread.ts");
 	const { ServerEventsProvider } = await import("../components/server-events.tsx");
-	function Lesson({ dictation, held, openRequest, above }: { dictation?: FakeDictation; held?: boolean; openRequest?: number; above?: number }) {
+	function Lesson({ dictation, openRequest, above }: { dictation?: FakeDictation; openRequest?: number; above?: number }) {
 		side = useSideThread("chat_1", lesson);
-		return <SideTutor chatId="chat_1" messages={lesson} side={side} dictation={dictation} held={held} openRequest={openRequest} above={above} />;
+		return <SideTutor chatId="chat_1" messages={lesson} side={side} dictation={dictation} openRequest={openRequest} above={above} />;
 	}
 	const host = document.createElement("div");
 	document.body.appendChild(host);
 	const root = createRoot(host);
 	roots.push({ root, host });
 	const settle = () => act(async () => new Promise((r) => setTimeout(r, 20)));
-	const render = async (d?: FakeDictation, more: { held?: boolean; openRequest?: number; above?: number } = {}) => {
+	const render = async (d?: FakeDictation, more: { openRequest?: number; above?: number } = {}) => {
 		await act(async () => root.render(<ServerEventsProvider connect={() => ({ close() {}, onOpen() {}, onEvent() {} })}><Lesson dictation={d} {...more} /></ServerEventsProvider>));
 		await settle();
 	};
@@ -179,7 +180,7 @@ async function mountTutor(dictation?: FakeDictation, lesson: LhMessage[] = LESSO
 	const phone = (dom.window as unknown as { matchMedia?: (q: string) => { matches: boolean } }).matchMedia?.("(max-width: 639.98px)").matches ?? false;
 	if (opened && !phone) {
 		const toggle = document.querySelector("[data-testid='side-tutor-toggle']") as HTMLElement | null;
-		if (toggle && !toggle.hasAttribute("data-held")) {
+		if (toggle) {
 			await act(async () => toggle.click());
 			await settle();
 		}
@@ -634,23 +635,27 @@ describe("minimized", () => {
 	});
 });
 
-describe("on a session another device holds (cloud sync)", () => {
-	it("the window closes to a greyed bubble that can't be pressed, and comes back after a take-over", async () => {
-		const host = await mountTutor();
-		assert.ok(host.querySelector("[data-testid='side-tutor']"), "open, as the learner left it");
-		await host.rerender(undefined, { held: true });
-		assert.equal(document.querySelector("[data-testid='side-tutor']"), null, "no window while it is held elsewhere");
+describe("whichever device holds the session (seamless sessions)", () => {
+	it("the bubble is never greyed and always opens the window; the tutor has no held state", async () => {
+		const host = await mountTutor(undefined, LESSON, { opened: false });
 		const bubble = document.querySelector("[data-testid='side-tutor-toggle']") as HTMLElement;
 		assert.ok(bubble);
-		assert.equal(bubble.getAttribute("data-held"), "");
-		assert.equal(bubble.getAttribute("aria-disabled"), "true");
-		assert.equal(bubble.getAttribute("title"), "Take this session over first");
-		assert.match(bubble.getAttribute("class") ?? "", /opacity-40/);
+		assert.equal(bubble.hasAttribute("data-held"), false);
+		assert.equal(bubble.hasAttribute("aria-disabled"), false);
+		assert.equal(bubble.hasAttribute("title"), false);
+		assert.doesNotMatch(bubble.getAttribute("class") ?? "", /opacity-40/);
 		await act(async () => bubble.click());
-		assert.equal(document.querySelector("[data-testid='side-tutor']"), null, "a press does nothing");
-		// Taken over: the tutor is as the learner left it.
-		await host.rerender(undefined);
-		assert.ok(document.querySelector("[data-testid='side-tutor']"));
+		await host.settle();
+		assert.ok(document.querySelector("[data-testid='side-tutor']"), "a press opens the window");
+		const source = readFileSync(new URL("../components/side-tutor.tsx", import.meta.url), "utf8");
+		assert.doesNotMatch(source, /\bheld\??:|HELD_TEXT|data-held/, "no held prop, tooltip or mark is left");
+		const chat = readFileSync(new URL("../components/chat.tsx", import.meta.url), "utf8");
+		assert.doesNotMatch(chat, /<SideTutor[^>]*\bheld=/, "the lesson passes nothing held");
+	});
+
+	it("the Tutor's Dictate starts moving the session here (marked for the lesson's press trigger)", async () => {
+		const source = readFileSync(new URL("../components/side-tutor-dictation.tsx", import.meta.url), "utf8");
+		assert.match(source, /data-lh-move-press=""/);
 	});
 });
 
@@ -675,7 +680,7 @@ describe("while a plugin's surface covers the lesson (the Drawing Pad)", () => {
 		assert.ok(bubble);
 		const style = styleOf(bubble);
 		assert.equal(z(bubble), "105");
-		assert.match(style, /bottom:\s*20px/, "20 px up, as on a held session");
+		assert.match(style, /bottom:\s*20px/, "20 px up");
 		assert.match(style, /right:\s*\d+px/);
 		assert.match(bubble.getAttribute("class") ?? "", /(?:^|\s)fixed(?:\s|$)/, "not inside the dock");
 		assert.equal(bubble.hasAttribute("data-held"), false, "it can be pressed");
@@ -986,26 +991,6 @@ describe("the phone's sheet swipes down to minimize (owner's ask)", () => {
 			assert.ok(bubbleOf());
 			assert.equal(runs.length, 0);
 		}, { reduced: true });
-	});
-
-	it("a session that becomes held closes at once, even while it slides", async () => {
-		await onPhone(async (runs) => {
-			const host = await mountTutor();
-			await openSheet();
-			await host.rerender(undefined, { held: true });
-			assert.equal(sheetOf(), null, "no slide");
-			assert.equal(runs.length, 0);
-			await host.rerender(undefined);
-			assert.ok(sheetOf(), "taken over: as the learner left it");
-			await act(async () => (sheetOf()!.querySelector("[aria-label='Minimize the side tutor']") as HTMLElement).click());
-			assert.ok(sheetOf(), "sliding");
-			await host.rerender(undefined, { held: true });
-			assert.equal(sheetOf(), null);
-			// Taken over: it was being minimized, so it is the bubble.
-			await host.rerender(undefined);
-			assert.equal(sheetOf(), null);
-			assert.ok(bubbleOf());
-		});
 	});
 
 	it("on a computer none of it is there: a touch on the top bar moves nothing", async () => {

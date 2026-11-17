@@ -130,6 +130,36 @@ export interface SessionModelDeps {
 	/** Injectable retry timing (tests). */
 	pollMs?: number;
 	waitMaxMs?: number;
+	/** FORK (seamless sessions): moves a session another device holds here
+	 *  before a write (components/cloud/session-move.ts). Absent: as upstream. */
+	moveGate?: SessionMoveGate;
+}
+
+/** FORK (seamless sessions): the session hook's gate (session-move.ts's
+ *  sessionMoveGate). `needed` is synchronous, so a session that is here takes
+ *  exactly the old path; `ensure` waits for the move; `recover` is the safety
+ *  net after a write refused with `session_held_elsewhere`. */
+export interface SessionMoveGate {
+	needed: () => boolean;
+	ensure: () => Promise<"here" | "here-changed" | "failed">;
+	recover: () => Promise<"here" | "here-changed" | "failed">;
+}
+
+/** FORK (seamless sessions), internal: how far a write has come with the
+ *  move. `gated`: it waited for the move already; `retried`: the safety net
+ *  has been used. Each happens at most once per write. */
+export interface MoveStep { gated?: boolean; retried?: boolean }
+
+/** FORK (seamless sessions): the server's refusal of a write to a session
+ *  another device holds (read from a copy, so the body stays readable). */
+export async function heldElsewhereRefusal(response: Response): Promise<boolean> {
+	if (response.status !== 409) return false;
+	try {
+		const body = (await response.clone().json()) as { code?: unknown } | null;
+		return body?.code === "session_held_elsewhere";
+	} catch {
+		return false;
+	}
 }
 
 /** A local optimistic id (never a server stamp — absorption and the
@@ -323,6 +353,8 @@ export class SessionModel {
 	private readonly pollMs: number;
 	private readonly waitMaxMs: number;
 	private onReattachSettled?: () => void;
+	/** FORK (seamless sessions): see SessionMoveGate. */
+	moveGate?: SessionMoveGate;
 	/** The hook's re-render trigger (set by the adapter). */
 	onChange?: () => void;
 
@@ -401,6 +433,7 @@ export class SessionModel {
 		this.fetch = opts.fetch ?? ((...args) => globalThis.fetch(...args));
 		this.pollMs = opts.pollMs ?? TURN_POLL_MS;
 		this.waitMaxMs = opts.waitMaxMs ?? TURN_WAIT_MAX_MS;
+		this.moveGate = opts.moveGate; // FORK (seamless sessions)
 		this.onChange = opts.onChange;
 		this.onReattachSettled = opts.onReattachSettled;
 		if (typeof opts.initialStamp === "string") this.rememberStamp(opts.initialStamp);
@@ -456,6 +489,16 @@ export class SessionModel {
 		const usage = JSON.parse(text) as SessionUsageSnapshot;
 		if (epoch !== this.canonicalEpoch || ticket < this.canonicalAcknowledged || options.signal?.aborted || options.isCurrent?.() === false) return undefined;
 		return usage;
+	}
+
+	/** FORK (seamless sessions): wait for the session to be here (`recover`:
+	 *  after a refusal, whatever the page believed). True only when it is here
+	 *  and arrived with nothing this page hadn't shown: a write that adds to
+	 *  the transcript may then go. */
+	private async moveHere(recover = false): Promise<boolean> {
+		const gate = this.moveGate;
+		if (!gate) return false;
+		return (await (recover ? gate.recover() : gate.ensure())) === "here";
 	}
 
 	/** Injectable settle hook (the adapter wires its ref). */
@@ -648,13 +691,25 @@ export class SessionModel {
 		return draft;
 	}
 
-	async dismissPluginQuestion(occurrence: PluginQuestionOccurrence, questionId?: string): Promise<void> {
+	async dismissPluginQuestion(occurrence: PluginQuestionOccurrence, questionId?: string, move: MoveStep = {}): Promise<void> {
 		if (!this.readyRef) return;
 		const current = pluginQuestionCallsOf(this.base).find(call => (call.status === "answerable" || call.status === "unreadable") && samePluginQuestionOccurrence(call.occurrence, occurrence));
 		if (!current || (current.snapshot ? current.snapshot.questionId !== questionId : current.annotation.status !== "unreadable" || (questionId !== undefined && (current.annotation.binding?.questionId ?? current.annotation.identity?.questionId) !== questionId))) return;
+		// FORK (seamless sessions): the session moves here first; it arrived with
+		// turns this page hadn't shown, or couldn't move: nothing is dismissed.
+		if (!move.gated && this.moveGate?.needed()) {
+			if (await this.moveHere()) await this.dismissPluginQuestion(occurrence, questionId, { ...move, gated: true });
+			return;
+		}
 		this.setStatus("submitted");
 		try {
 			const response = await this.fetch(`/api/chats/${encodeURIComponent(this.chatId)}/dismiss`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ input: { type: "dismiss-plugin-question", occurrence, ...(questionId ? { questionId } : {}) } }) });
+			// FORK (seamless sessions): the safety net, once.
+			if (!move.retried && this.moveGate && await heldElsewhereRefusal(response)) {
+				this.setStatus("ready");
+				if (await this.moveHere(true)) await this.dismissPluginQuestion(occurrence, questionId, { gated: true, retried: true });
+				return;
+			}
 			if (!response.ok) throw new Error("The dismissal failed.");
 			await response.text();
 			this.invalidateCanonicalReads();
@@ -685,6 +740,9 @@ export class SessionModel {
 		if (input.type === "plugin-question-answer" || input.type === "plugin-problem-submission") return response;
 		let waited = 0;
 		while (response.status === 409) {
+			// FORK (seamless sessions): held by another device, not a running turn:
+			// the caller moves the session (send()), with no waiting here.
+			if (this.moveGate && await heldElsewhereRefusal(response)) return response;
 			await response.body?.cancel().catch(() => {});
 			if (signal?.aborted || waited >= this.waitMaxMs) return response;
 			await delay(this.pollMs, signal);
@@ -971,7 +1029,7 @@ export class SessionModel {
 	 * POST + consume. Ready-gated: one turn per client at a time (the
 	 * server's 409 + identity retry covers the wake-race window).
 	 */
-	async send(input: ChatInput, onAccepted?: () => void, questionKey?: string, onDeliverySettled?: () => void): Promise<boolean> {
+	async send(input: ChatInput, onAccepted?: () => void, questionKey?: string, onDeliverySettled?: () => void, move: MoveStep = {}): Promise<boolean> {
 		let deliverySettled = false;
 		const settleDelivery = () => { if (!deliverySettled) { deliverySettled = true; onDeliverySettled?.(); } };
 		const refused = () => { settleDelivery(); return false; };
@@ -998,6 +1056,16 @@ export class SessionModel {
 		const imageBearing = input.type === "text" || input.type === "thinking" ? !!input.images?.length
 			: input.type === "answer" ? Object.values(input.answer.images ?? {}).some(images => images?.length)
 				: (input.type === "plugin-question-answer" || input.type === "plugin-problem-submission") && Object.values(input.images ?? {}).some(images => images?.length);
+		// FORK (seamless sessions): another device holds the session. It moves
+		// here first; nothing is shown in the transcript meanwhile, so the text
+		// stays in its box with the submission's busy look until delivery
+		// settles. It arrived with turns this page hadn't shown, or couldn't
+		// move: the send is dropped and the text stays. An automatic
+		// continuation never moves a session.
+		if (!move.gated && this.moveGate?.needed()) {
+			if (input.type === "continue" || !(await this.moveHere())) return refused();
+			return this.send(input, onAccepted, questionKey, settleDelivery, { ...move, gated: true });
+		}
 		this.retireImagePreview(this.imagePreview?.owner ?? null);
 		this.releaseImagePost(this.imagePostOwner);
 		this.consumeAbort?.abort();
@@ -1081,6 +1149,24 @@ export class SessionModel {
 				// The response follows optional processing and save. A detached or
 				// superseded request must never clear its successor's label.
 				if (this.evaluationOwner === controller) this.mutate(() => { this.evaluationOwner = null; });
+			}
+			// FORK (seamless sessions): the safety net. The page believed the
+			// session was here; the server says another device holds it. Undo the
+			// optimistic step (the text is still in its box until delivery
+			// settles), move the session here, and send once more.
+			if (res.status === 409 && !move.retried && this.moveGate && await heldElsewhereRefusal(res)) {
+				await res.body?.cancel().catch(() => {});
+				if (imageBearing) this.retireImagePreview(controller);
+				const ids = new Set(optimistic.map(m => m.id));
+				this.mutate(() => {
+					this.tail = this.tail.filter(m => !ids.has(m.id));
+					for (const id of ids) this.unconfirmedAnswers.delete(id);
+				});
+				if (this.consumeAbort !== controller) return refused();
+				this.consumeAbort = null;
+				this.setStatus("ready");
+				if (input.type === "continue" || !(await this.moveHere(true))) return refused();
+				return await this.send(input, onAccepted, questionKey, settleDelivery, { gated: true, retried: true });
 			}
 			if (res.status === 409) {
 				settleDelivery();
@@ -1171,11 +1257,16 @@ export class SessionModel {
 	 *  settled mid-send (the race): fall back to the plain text send —
 	 *  the entry is dropped and send() pushes its own optimistic card.
 	 */
-	async steer(text: string, images?: import("../src/core/plugin-submissions.ts").PluginSubmissionContent["images"], onAccepted?: () => void, onDeliverySettled?: () => void): Promise<boolean> {
+	async steer(text: string, images?: import("../src/core/plugin-submissions.ts").PluginSubmissionContent["images"], onAccepted?: () => void, onDeliverySettled?: () => void, move: MoveStep = {}): Promise<boolean> {
 		let deliverySettled = false;
 		const settleDelivery = () => { if (!deliverySettled) { deliverySettled = true; onDeliverySettled?.(); } };
 		const t = text.trim();
 		if (!t && !images?.length) { settleDelivery(); return false; }
+		// FORK (seamless sessions): as send(): the session moves here first.
+		if (!move.gated && this.moveGate?.needed()) {
+			if (!(await this.moveHere())) { settleDelivery(); return false; }
+			return this.steer(text, images, onAccepted, settleDelivery, { ...move, gated: true });
+		}
 		this.invalidateCanonicalReads();
 		const id = `steer_${localId()}`;
 		this.steerQueueValue = [...this.steerQueueValue, { id, text: t }];
@@ -1191,6 +1282,12 @@ export class SessionModel {
 				body: JSON.stringify({ input: { type: "steer", id, text: t, ...(images?.length ? { images } : {}) } }),
 			});
 			if (res.ok) { this.invalidateCanonicalReads(); onAccepted?.(); settleDelivery(); await res.text().catch(() => {}); return true; } // parked or delivered — the stream lands the card
+			// FORK (seamless sessions): the safety net, once.
+			if (!move.retried && this.moveGate && await heldElsewhereRefusal(res)) {
+				dropSteer();
+				if (!(await this.moveHere(true))) { settleDelivery(); return false; }
+				return await this.steer(text, images, onAccepted, settleDelivery, { gated: true, retried: true });
+			}
 			if (res.status === 409) {
 				dropSteer();
 				return await this.send({ type: "text", text: t, ...(images?.length ? { images: images.map(image => ({ ...image })) } : {}) }, onAccepted, undefined, settleDelivery); // reuse the prepared payload
@@ -1218,14 +1315,20 @@ export class SessionModel {
 	 * user's choice; the next plain send is the wake. On failure the
 	 * durable record wins: the error surfaces, the record-changed sync
 	 * (or any later refetch) replaces the optimistic append with truth. */
-	async dismissQuestion(toolCallId: string, answer: QuestionAnswerData, questionKey?: string): Promise<void> {
+	async dismissQuestion(toolCallId: string, answer: QuestionAnswerData, questionKey?: string, move: MoveStep = {}): Promise<void> {
 		if (!this.readyRef || pluginQuestionCallsOf(this.base).some(call => call.status === "answerable" || call.status === "unreadable")) return;
 		const subject = pendingQuestionOf(this.nativeHistory());
 		if (questionKey !== undefined && (subject?.key !== questionKey || subject.toolCallId !== toolCallId)) return;
+		// FORK (seamless sessions): the session moves here first.
+		if (!move.gated && this.moveGate?.needed()) {
+			if (await this.moveHere()) await this.dismissQuestion(toolCallId, answer, questionKey, { ...move, gated: true });
+			return;
+		}
 		const tool = pendingCallTool(this.nativeHistory(), toolCallId) ?? "quiz";
 		this.invalidateCanonicalReads();
+		const optimistic = { ...newAnswerResult(toolCallId, tool, answer), id: localId() };
 		this.mutate(() => {
-			this.tail = [...this.tail, { ...newAnswerResult(toolCallId, tool, answer), id: localId() }];
+			this.tail = [...this.tail, optimistic];
 		});
 		try {
 			const res = await this.fetch(`/api/chats/${this.chatId}/dismiss`, {
@@ -1233,6 +1336,12 @@ export class SessionModel {
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({ input: { type: "dismiss", toolCallId, answer } }),
 			});
+			// FORK (seamless sessions): the safety net, once.
+			if (!move.retried && this.moveGate && await heldElsewhereRefusal(res)) {
+				this.mutate(() => { this.tail = this.tail.filter(m => m.id !== optimistic.id); });
+				if (await this.moveHere(true)) await this.dismissQuestion(toolCallId, answer, questionKey, { gated: true, retried: true });
+				return;
+			}
 			if (!res.ok) throw new Error(`The dismissal failed (${res.status}).`);
 			this.invalidateCanonicalReads();
 		} catch (err) {
@@ -1244,11 +1353,17 @@ export class SessionModel {
 	 *  ask-style dismissal — the UI-only marker lands optimistically, then
 	 *  the SILENT route persists it (no turn, no wake). The composer
 	 *  returns; the conclude synthesis rides the user's next input. */
-	async dismissProblem(problemCallId: string): Promise<void> {
+	async dismissProblem(problemCallId: string, move: MoveStep = {}): Promise<void> {
 		if (!this.readyRef) return;
+		// FORK (seamless sessions): the session moves here first.
+		if (!move.gated && this.moveGate?.needed()) {
+			if (await this.moveHere()) await this.dismissProblem(problemCallId, { ...move, gated: true });
+			return;
+		}
 		this.invalidateCanonicalReads();
+		const optimistic = { ...newProblemDismissedMarker(problemCallId), id: localId() };
 		this.mutate(() => {
-			this.tail = [...this.tail, { ...newProblemDismissedMarker(problemCallId), id: localId() }];
+			this.tail = [...this.tail, optimistic];
 		});
 		try {
 			const res = await this.fetch(`/api/chats/${this.chatId}/dismiss`, {
@@ -1256,6 +1371,12 @@ export class SessionModel {
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({ input: { type: "dismiss-problem", problemCallId } }),
 			});
+			// FORK (seamless sessions): the safety net, once.
+			if (!move.retried && this.moveGate && await heldElsewhereRefusal(res)) {
+				this.mutate(() => { this.tail = this.tail.filter(m => m.id !== optimistic.id); });
+				if (await this.moveHere(true)) await this.dismissProblem(problemCallId, { gated: true, retried: true });
+				return;
+			}
 			if (!res.ok) throw new Error(`The dismissal failed (${res.status}).`);
 			this.invalidateCanonicalReads();
 		} catch (err) {

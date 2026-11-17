@@ -70,9 +70,9 @@ import { PlanBlock, PlanPopup, latestTree } from "@/components/plan-block";
 import { PlanMarginalia, planExists } from "@/components/plan-window";
 import { SideTutor } from "@/components/side-tutor";
 import { SessionStrip } from "@/components/cloud/session-strip";
-import { useSessionHeld } from "@/components/cloud/cloud-state";
 import { isSyncInUse } from "@/components/cloud/sync-marker";
-import { HELD_TEXT } from "@/src/core";
+// FORK (seamless sessions): a session another device holds moves here by itself.
+import { fetchHere, onSessionArrival, prewarmSessionMove, useSessionMoveTriggers } from "@/components/cloud/session-move";
 import { NotesDrawer, useNotesDrawerOpen } from "@/components/notes/notes-drawer";
 import { MermaidOverlay, SessionMermaidContext, type SessionImage } from "@/components/session-overlay";
 import { AbortTurnDialog, type AbortMode } from "@/components/abort-turn-dialog";
@@ -388,10 +388,9 @@ export function Chat({
 	// its 2.5s poll is only a backstop.
 	const [titleText, setTitleText] = useState(title);
 	const [renaming, setRenaming] = useState(false);
-	// Cloud sync (Phase 6): another device holds this session, so it is
-	// read-only here until it is taken over. Always false where sync isn't in use.
-	// Fork (performance): the boolean alone, so a sync poll doesn't re-render the lesson.
-	const heldElsewhere = useSessionHeld(chatId);
+	// FORK (seamless sessions): typing in the lesson's boxes and Dictate start
+	// moving a session another device holds; leaving the lesson stops asking.
+	useSessionMoveTriggers(chatId);
 	const [titleDraft, setTitleDraft] = useState("");
 	const titleInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -401,7 +400,7 @@ export function Chat({
 			const t = next.trim();
 			if (t === "" || t === titleText) return; // empty commit = discard
 			try {
-				const res = await fetch(`/api/chats/${chatId}`, {
+				const res = await fetchHere(chatId, `/api/chats/${chatId}`, { // FORK (seamless sessions)
 					method: "PUT",
 					headers: { "Content-Type": "application/json" },
 					body: JSON.stringify({ title: t }),
@@ -434,15 +433,13 @@ export function Chat({
 	// F2 opens the title rename (the chat header owns the editing state).
 	useEffect(() => {
 		const onRename = () => {
-			// A session another device holds can't be renamed here (cloud sync Phase 6).
-			if (heldElsewhere) return;
 			if (!isInteractionScopeEligible(sessionFindScopeRef.current, controller)) return;
 			setTitleDraft(titleText);
 			setRenaming(true);
 		};
 		window.addEventListener("lh:kbd-rename-session", onRename);
 		return () => window.removeEventListener("lh:kbd-rename-session", onRename);
-	}, [titleText, heldElsewhere, controller]);
+	}, [titleText, controller]);
 
 	// The OTHER rename surface (wave 6: the sidebar's inline rename): its
 	// commit dispatches the same lh:chat-renamed event this header's rename
@@ -1040,7 +1037,12 @@ export function Chat({
 	const closeSideThreadRef = useRef(() => {});
 	// Advancing the lesson does not close or disable an old conversation.
 	const sideActions = useMemo(() => createSideQuestionActions({ open: openSideThread }), [openSideThread]);
-	const selectionActions = useMemo(() => [citeAction, ...sideActions], [citeAction, sideActions]);
+	// FORK (seamless sessions): Cite and Ask start moving a session another device holds.
+	const selectionActions = useMemo(() => [citeAction, ...sideActions].map(action => ({ ...action, onSelect: (capture: Parameters<typeof action.onSelect>[0]) => {
+		const handled = action.onSelect(capture);
+		if (handled) prewarmSessionMove(chatId);
+		return handled;
+	} })), [citeAction, sideActions, chatId]);
 	const router = useRouter();
 	const transcriptElementRef = useRef<HTMLElement | null>(null);
 	transcriptElementRef.current = transcriptElement;
@@ -1165,6 +1167,22 @@ export function Chat({
 		// sync must never automatically replace a reply that failed to save.
 		continueIfOwed(record.messages);
 	}, [readRecord, continueIfOwed, adoptUsage]);
+
+	// FORK (seamless sessions): when this session arrives from another device,
+	// the page shows it as it arrived (read as syncFromServer reads it) and
+	// says whether it now shows turns it had not shown: a send waiting for the
+	// move is then dropped and its text stays in the box
+	// (components/cloud/session-move.ts). A read that didn't land counts as
+	// changed, so nothing is sent on a guess.
+	useEffect(() => onSessionArrival(chatId, async () => {
+		const shown = canonicalNow();
+		const known = new Set(shown.map((message) => message.id));
+		const record = await readRecord({ rememberStamp: true });
+		if (record) adoptUsage(record.turns, record.pricing);
+		const now = canonicalNow();
+		if (!record && now === shown) return true;
+		return now.some((message) => !known.has(message.id));
+	}), [chatId, canonicalNow, readRecord, adoptUsage]);
 
 	// The settled terminal's other half (stream-reattach wave): the
 	// transport resolved turn-settled — no turn running, the record is
@@ -1660,6 +1678,7 @@ export function Chat({
 	const renderedActionContext = actionContext();
 	const captureActionContext = () => {
 		if (!submissionMounted.current || !surfaceTarget || !findSurfaceBoundary(surfaceTarget)) return;
+		prewarmSessionMove(chatId); // FORK (seamless sessions): a plugin button starts the move
 		const captured = actionContext();
 		if (captured) void captured.view; // Detach once at invocation, not after plugin awaits.
 		return captured;
@@ -1698,7 +1717,7 @@ export function Chat({
 			    the fork's window over upstream's side conversations. It gets the
 			    page's shared recorder, not the main-input view: its Dictate button
 			    records to its own destination (toggleFor). */}
-			<SideTutor chatId={chatId} messages={nativeMessages} side={sideThread} dictation={recording} held={heldElsewhere} openRequest={tutorOpenRequest} above={typeof surfaceRank === "number" ? surfaceRank : undefined} />
+			<SideTutor chatId={chatId} messages={nativeMessages} side={sideThread} dictation={recording} openRequest={tutorOpenRequest} above={typeof surfaceRank === "number" ? surfaceRank : undefined} />
 			<div className="flex min-w-0 flex-1 flex-col">
 				{/* The top bar is its own block (owner, top-fade round 4): in flow
 				    above the scroller on the plain page background — no gradient. Its
@@ -1756,23 +1775,19 @@ export function Chat({
 					) : (
 					<>
 						<Hint
-							// F2 renames (registry) — surfaced on the hover. A session
-							// another device holds can't be renamed here (cloud sync Phase 6).
-							label={heldElsewhere ? HELD_TEXT.blocked : "Rename session"}
-							action={heldElsewhere ? undefined : "rename-session"}
+							// F2 renames (registry) — surfaced on the hover.
+							label="Rename session"
+							action="rename-session"
 							side="bottom"
 						>
 <button
 							type="button"
-							aria-disabled={heldElsewhere || undefined}
-							data-held={heldElsewhere ? "" : undefined}
 														onClick={() => {
-								if (heldElsewhere) return;
 								setTitleDraft(titleText);
 								setRenaming(true);
 							}}
 							data-plugin-chrome-title
-							className={`lh-no-drag -mx-1.5 min-w-4 shrink truncate rounded-md px-1.5 text-left font-title text-3xl tracking-tight transition-colors ${heldElsewhere ? "cursor-default" : "cursor-text hover:bg-accent"}`}
+							className="lh-no-drag -mx-1.5 min-w-4 shrink truncate rounded-md px-1.5 text-left font-title text-3xl tracking-tight transition-colors cursor-text hover:bg-accent"
 						>
 							{titleText}
 							</button>
@@ -1841,7 +1856,7 @@ export function Chat({
 					) : (
 						<PhaseChip phase={phases.at(-1) ?? "probe"} />
 					)}
-					{renderedActionContext && <PluginTopBarActions context={renderedActionContext} captureContext={captureActionContext} blocked={heldElsewhere ? HELD_TEXT.blocked : undefined} />}
+					{renderedActionContext && <PluginTopBarActions context={renderedActionContext} captureContext={captureActionContext} blocked={undefined /* FORK (seamless sessions): never greyed */} />}
 				</TopBar>
 				{/* Cloud sync (Phase 6): "Held by …" and Take over, when another
 				    device holds this session. Nothing where sync isn't in use. */}
@@ -2138,7 +2153,8 @@ export function Chat({
 				{/* Cloud sync (Phase 6): on a session another device holds there is
 				    no message box; it fades out, and back in after a take-over
 				    (app/cloud.css). The wrapper has no box of its own. */}
-				<div className="lh-held-dock" data-held={heldElsewhere ? "" : undefined} inert={heldElsewhere}>
+				{/* FORK (seamless sessions): never hidden; the wrapper stays (app/cloud.css). */}
+				<div className="lh-held-dock">
 				<DockOverlay
 					viewReader={inputViewReader}
 					viewTargets={surfaceTarget ? { text: textTarget()!, answer: builtinTarget, thinking: thinkingTarget(), pluginQuestion: pluginQuestionTarget(), pluginProblem: pluginProblemTarget() } : undefined}
@@ -2274,7 +2290,7 @@ export function Chat({
 					/>
 				)}
 				{planOpen && <PlanPopup messages={messages} onClose={() => setPlanOpen(false)} />}
-				<SelectionToolbar viewport={transcriptElement} actions={selectionActions} blocked={heldElsewhere ? HELD_TEXT.blocked : undefined} />
+				<SelectionToolbar viewport={transcriptElement} actions={selectionActions} blocked={undefined /* FORK (seamless sessions): never greyed */} />
 				{citationEdit && (
 					<CitationCommentPopover
 						key={`${citationEdit.start}:${citationEdit.link}`}

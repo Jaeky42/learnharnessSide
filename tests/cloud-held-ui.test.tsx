@@ -11,6 +11,7 @@ import React, { act } from "react";
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
 
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { after, afterEach, beforeEach, describe, it } from "node:test";
 import type { Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
@@ -237,17 +238,30 @@ describe("what the page knows about sync", () => {
 	});
 });
 
-describe("the session list", () => {
-	it("a held session's second line reads Held by … in place of the time", async () => {
+describe("the session list (seamless sessions)", () => {
+	it("a session reads the same whichever device holds it: no Held by line", async () => {
 		const { SessionRow } = await import("../components/sidebar.tsx");
 		const chat = { id: "chat_1", title: "Circuits", updatedAt: new Date(NOW - 7_200_000).toISOString(), busy: false, pendingQuestion: true } as never;
 		const plain = renderToStaticMarkup(<SessionRow chat={chat} active={false} onOpen={() => {}} />);
 		assert.match(plain, /Waiting for input/);
-		assert.doesNotMatch(plain, /Held by/);
-		const held = renderToStaticMarkup(<SessionRow chat={chat} active={false} onOpen={() => {}} heldBy="Held by Desktop" />);
-		assert.match(held, />Held by Desktop</);
-		assert.doesNotMatch(held, /Waiting for input|ago/);
-		assert.match(held, />Circuits</);
+		assert.match(plain, />Circuits</);
+		assert.doesNotMatch(plain, /Held by|data-held/);
+		const source = readFileSync(new URL("../components/sidebar.tsx", import.meta.url), "utf8");
+		assert.doesNotMatch(source, /heldBy|heldByText|cloud\.held|HELD_TEXT/, "the list never reads who holds a session");
+	});
+
+	it("Rename and Delete are never greyed: Rename goes through fetchHere, Delete's dialog too", () => {
+		const source = readFileSync(new URL("../components/sidebar.tsx", import.meta.url), "utf8");
+		assert.doesNotMatch(source, /ctxHeld|disabled=\{ctx/, "no greyed menu items");
+		assert.match(source, /await fetchHere\(id, `\/api\/chats\/\$\{id\}`/);
+		const dialog = readFileSync(new URL("../components/delete-session-dialog.tsx", import.meta.url), "utf8");
+		assert.match(dialog, /await fetchHere\(chat\.id,/);
+	});
+
+	it("the lesson greys nothing and never hides the message box", () => {
+		const chat = readFileSync(new URL("../components/chat.tsx", import.meta.url), "utf8");
+		assert.doesNotMatch(chat, /heldElsewhere|useSessionHeld|HELD_TEXT/);
+		assert.match(chat, /<div className="lh-held-dock">/, "the dock's wrapper has no data-held or inert");
 	});
 });
 

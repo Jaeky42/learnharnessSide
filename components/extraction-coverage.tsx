@@ -9,6 +9,7 @@ import { formatTokens } from "@/components/usage-format";
 import { Hint } from "@/components/ui/hint";
 import { timeAgo } from "@/components/sidebar";
 import { resolveSettings } from "@/src/core";
+import { fetchHere, isHeldRefusal } from "@/components/cloud/session-move"; // FORK (seamless sessions)
 
 /**
  * The extraction-coverage surfaces (extraction-UX redesign, owner-locked
@@ -87,11 +88,14 @@ export async function fetchGraphRead(): Promise<GraphRead | null> {
  *  real failure, where the caller reverts. */
 async function requestExtract(chatId: string): Promise<boolean> {
 	try {
-		const res = await fetch("/api/graph/coverage/extract", {
+		// FORK (seamless sessions): a session another device holds moves here
+		// first; one that couldn't be moved isn't "already running".
+		const res = await fetchHere(chatId, "/api/graph/coverage/extract", {
 			method: "POST",
 			headers: { "content-type": "application/json" },
 			body: JSON.stringify({ chatId }),
 		});
+		if (await isHeldRefusal(res)) return false;
 		if (!res.ok && res.status !== 409) return false;
 		return true; // 202 started, or 409 already-running — both "running"
 	} catch {

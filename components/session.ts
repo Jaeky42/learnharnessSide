@@ -17,6 +17,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef } from "react";
 import type { ChatInput, LhMessage, QuestionAnswerData } from "@/src/core";
 import { SessionModel, type SessionState } from "@/components/session-core";
+import { sessionMoveGate } from "@/components/cloud/session-move";
 
 export interface UseChatSessionOptions {
 	chatId: string;
@@ -35,7 +36,9 @@ export function useChatSession({ chatId, initialMessages, initialError, initiall
 	// re-render. The ref pattern keeps it stable across renders.
 	const modelRef = useRef<SessionModel | null>(null);
 	if (modelRef.current === null) {
-		modelRef.current = new SessionModel({ chatId, initialMessages, initialError, initialStamp });
+		// FORK (seamless sessions): a session another device holds moves here
+		// before a write (components/cloud/session-move.ts).
+		modelRef.current = new SessionModel({ chatId, initialMessages, initialError, initialStamp, moveGate: sessionMoveGate(chatId) });
 	}
 	const model = modelRef.current;
 	// The render VERSION — bumped by every model change, so the state memo

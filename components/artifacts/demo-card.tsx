@@ -9,6 +9,7 @@ import { useAppearance } from "@/components/settings/appearance";
 import { downloadFile, slugFilename } from "@/components/artifacts/download";
 import { DispatchCard } from "@/components/artifacts/dispatch-card";
 import type { ArtifactPartProps, DemoResult } from "@/src/core";
+import { fetchHere } from "@/components/cloud/session-move"; // FORK (seamless sessions)
 
 /**
  * Demo artifact card (W6): while the part is input-available, a job activity
@@ -157,7 +158,8 @@ function DemoFrame({
 	const toggleInverted = (next: boolean) => {
 		setChosen(next);
 		if (!actions?.chatId || !messageId) return;
-		void fetch(`/api/chats/${actions.chatId}/artifact-ui`, {
+		// FORK (seamless sessions): a session another device holds moves here first.
+		void fetchHere(actions.chatId, `/api/chats/${actions.chatId}/artifact-ui`, {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({ input: { messageId, inverted: next } }),

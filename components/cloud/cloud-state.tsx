@@ -17,6 +17,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, us
 import { syncTrouble, syncTroubleDueIn, type SessionHolder, type SyncTrouble } from "@/src/core";
 import { useServerEvent, useServerResync } from "@/components/server-events";
 import { useSyncInUse } from "./sync-marker";
+import { connectCloudSource } from "./session-move";
 
 export interface CloudNotice {
 	chatId: string;
@@ -125,6 +126,14 @@ export function CloudProvider({ children }: { children: ReactNode }) {
 		const timer = setInterval(() => { if (document.visibilityState !== "hidden") refresh(); }, POLL_MS);
 		return () => clearInterval(timer);
 	}, [inUse, refresh, store]);
+
+	// Seamless sessions (session-move.ts): a move asks whether a session is
+	// held elsewhere, and asks again when one arrives.
+	useEffect(() => connectCloudSource({
+		held: (chatId) => inUseRef.current && store.get().held[chatId] !== undefined,
+		snapshot: store.get,
+		refresh: () => refreshRef.current(),
+	}), [store]);
 
 	// A session moved, arrived or went; the PC's sync state changed.
 	useServerEvent("chats-changed", refresh);

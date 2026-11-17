@@ -44,7 +44,6 @@ import { useServerResync } from "@/components/server-events";
 import type { useSideThread } from "@/components/use-side-thread";
 import {
 	collectCitations,
-	HELD_TEXT,
 	orderTutorThreads,
 	SIDE_QUESTION_MAX_CHARS,
 	tutorStepLabel,
@@ -180,7 +179,7 @@ export function clampPos(pos: Pos, width: number, height = 64, inset = tabletTop
 	};
 }
 
-export function SideTutor({ chatId, messages, side, dictation, held = false, openRequest = 0, above }: {
+export function SideTutor({ chatId, messages, side, dictation, openRequest = 0, above }: {
 	chatId: string;
 	/** The lesson's native record messages: the order of the steps, and each step's first words. */
 	messages: readonly LhMessage[];
@@ -189,9 +188,6 @@ export function SideTutor({ chatId, messages, side, dictation, held = false, ope
 	/** The page's shared recorder (useDictation's own result, not the lesson's
 	 *  main-input view), for the tutor's Dictate button. */
 	dictation?: Dictation;
-	/** Cloud sync (Phase 6): another device holds this session. The tutor can't
-	 *  be asked until it is taken over: its window closes to a greyed bubble. */
-	held?: boolean;
 	/** Counts up each time the lesson's highlight toolbar asks about a passage:
 	 *  the window opens with that passage waiting above the typing box. */
 	openRequest?: number;
@@ -207,7 +203,7 @@ export function SideTutor({ chatId, messages, side, dictation, held = false, ope
 	/** On a computer the window comes out of the bubble and folds back into it
 	 *  ("Morph", owner's pick). While it folds back it is still on screen. */
 	const [morph, setMorph] = useState<"opening" | "closing" | null>(null);
-	const open = (openWanted || morph === "closing") && !held;
+	const open = openWanted || morph === "closing";
 	const [pos, setPos] = useState<Pos>({ left: 0, top: DEFAULT_TOP });
 	/** The size it was resized to; null until then (the frame's own size). */
 	const [size, setSize] = useState<TutorSize | null>(null);
@@ -297,11 +293,11 @@ export function SideTutor({ chatId, messages, side, dictation, held = false, ope
 
 	// Keep upstream's one open conversation on the step being asked about.
 	useEffect(() => {
-		if (held || retry || !currentStep) return;
+		if (retry || !currentStep) return;
 		if (state && (state.answering || state.pendingPassage)) return;
 		if (state?.segmentId === currentStep) return;
 		openSide({ sourceMessageId: currentStep, anchor: { kind: "composer" } });
-	}, [held, retry, currentStep, state, openSide]);
+	}, [retry, currentStep, state, openSide]);
 
 	// The answer stream of the open conversation, and the ones left behind.
 	useEffect(() => {
@@ -349,7 +345,7 @@ export function SideTutor({ chatId, messages, side, dictation, held = false, ope
 	// Retry on a conversation that wasn't the open one.
 	useEffect(() => {
 		if (!retry) return;
-		if (held || state?.answering) {
+		if (state?.answering) {
 			setRetry(null);
 			return;
 		}
@@ -360,7 +356,7 @@ export function SideTutor({ chatId, messages, side, dictation, held = false, ope
 		setRetry(null);
 		attachRef.current = { threadId: retry.threadId, attached: true };
 		void askSide("", true, retry.threadId);
-	}, [retry, held, state, openSide, askSide]);
+	}, [retry, state, openSide, askSide]);
 
 	// A failed send gives the question back (upstream returns it).
 	const failedQuestion = state?.failedQuestion;
@@ -453,7 +449,7 @@ export function SideTutor({ chatId, messages, side, dictation, held = false, ope
 
 	// PHONE: a swipe down on the sheet's handle or top bar minimizes it, and
 	// every way of minimizing slides it away (owner's ask;
-	// components/phone/tutor-sheet-swipe.ts). A held session closes at once.
+	// components/phone/tutor-sheet-swipe.ts).
 	const sheetSwipe = useTutorSheetSwipe(panelRef, dimRef, phone && open, () => setOpenPersist(false), () => setOpen(false));
 
 	// The morph itself. Only transform and opacity move (side-tutor-window.ts).
@@ -496,7 +492,6 @@ export function SideTutor({ chatId, messages, side, dictation, held = false, ope
 	useEffect(() => {
 		if (openRequest === openRequestSeen.current) return;
 		openRequestSeen.current = openRequest;
-		if (held) return;
 		if (isPhoneNow()) {
 			// Still sliding away: it comes back up.
 			sheetSwipe.current?.reopen();
@@ -510,7 +505,7 @@ export function SideTutor({ chatId, messages, side, dictation, held = false, ope
 		} else setMorph(null);
 		setOpen(true);
 		window.setTimeout(() => inputRef.current?.focus(), 0);
-	}, [openRequest, held]);
+	}, [openRequest]);
 
 	const ask = async () => {
 		// Still dictating to the tutor: end the run first, so the last words
@@ -622,22 +617,21 @@ export function SideTutor({ chatId, messages, side, dictation, held = false, ope
 	// its place against the question bar exactly, while the lesson scrolls
 	// and while a question opens or folds. With no room above an opened
 	// question it sits under the top bar, as far right as here.
-	// On a held session there is no question bar to sit above (the dock is
-	// hidden): the greyed bubble keeps to the lesson's bottom right.
-	// So does the bubble while a plugin's surface (the Drawing Pad) covers
-	// the lesson and the dock with it: there it floats above the surface.
+	// While a plugin's surface (the Drawing Pad) covers the lesson and the
+	// dock with it, the bubble keeps to the lesson's bottom right, floating
+	// above the surface.
 	const overSurface = !phone && above !== undefined;
 	// One above the surface. A menu opened from the surface has the next rank
 	// and comes later in the page, so it still covers the tutor.
 	const raised = overSurface ? { zIndex: above + 1 } : {};
-	const onDock = !phone && !held && !overSurface && anchor.place === "above-dock" && anchor.dock !== null;
+	const onDock = !phone && !overSurface && anchor.place === "above-dock" && anchor.dock !== null;
 	const bubbleStyle = (phone
 		? anchor.place === "above-dock"
 			? { top: anchor.top }
 			: {}
 		: onDock
 			? { right: BUBBLE_EDGE_GAP, bottom: `calc(100% + ${BUBBLE_BAR_GAP}px)`, WebkitAppRegion: "no-drag" }
-			: held || overSurface
+			: overSurface
 				? { right: anchor.right + BUBBLE_EDGE_GAP, bottom: BUBBLE_BAR_GAP, WebkitAppRegion: "no-drag", ...raised }
 				: { right: anchor.right + BUBBLE_EDGE_GAP, top: `calc(${BUBBLE_TOP}px + var(--lh-tablet-top, 0px))`, WebkitAppRegion: "no-drag" }) as React.CSSProperties;
 	// The dock lets clicks through to the lesson; the bubble takes its own.
@@ -656,12 +650,8 @@ export function SideTutor({ chatId, messages, side, dictation, held = false, ope
 				data-phone="tutor-bubble"
 				data-place={anchor.place}
 				data-phone-place={phone ? anchor.place : undefined}
-				data-held={held ? "" : undefined}
-				aria-disabled={held || undefined}
-				title={held ? HELD_TEXT.blocked : undefined}
 				onClick={(e) => {
 					blurAfterPointerClick(e);
-					if (held) return;
 					setOpenPersist(true);
 				}}
 				onKeyDown={(e) => e.stopPropagation()}
@@ -669,7 +659,7 @@ export function SideTutor({ chatId, messages, side, dictation, held = false, ope
 				className={cn(
 					BUBBLE_LOOK,
 					"z-30 text-muted-foreground transition-colors",
-					held ? "cursor-default opacity-40" : "hover:bg-accent hover:text-foreground",
+					"hover:bg-accent hover:text-foreground",
 					onDock ? "pointer-events-auto absolute" : "fixed",
 				)}
 				aria-label="Open the side tutor"
@@ -756,7 +746,7 @@ export function SideTutor({ chatId, messages, side, dictation, held = false, ope
 					const last = section.messages.at(-1);
 					const waiting = !stream && !pendingHere && elsewhere.has(section.id);
 					// Upstream's rule for when an answer can be asked for again.
-					const canRetry = !stream && !pendingHere && !waiting && !busy && !held && (last?.role === "user" || (last?.role === "assistant" && last.error !== undefined));
+					const canRetry = !stream && !pendingHere && !waiting && !busy && (last?.role === "user" || (last?.role === "assistant" && last.error !== undefined));
 					return (
 						<section key={section.id} data-testid="side-tutor-step" data-step={section.segmentId} className="space-y-3">
 							<StepDivider label={section.label} />

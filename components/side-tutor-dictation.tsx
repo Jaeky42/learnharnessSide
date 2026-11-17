@@ -105,6 +105,8 @@ export function SideTutorDictate({ dictation, append }: { dictation: Dictation; 
 			aria-label={error ? `Dictation failed: ${error}` : "Start dictation"}
 			title={error ?? "Dictate"}
 			data-testid="side-tutor-dictate"
+			// Seamless sessions: a press starts moving a session another device holds (components/cloud/session-move.ts).
+			data-lh-move-press=""
 		>
 			<MicIcon className="size-4.5" />
 		</button>

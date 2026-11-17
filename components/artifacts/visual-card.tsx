@@ -12,6 +12,7 @@ import { DispatchCard } from "@/components/artifacts/dispatch-card";
 import { SvgImage } from "@/components/artifacts/svg-image";
 import { embedLearnerImage, type ArtifactPartProps, type VisualResult } from "@/src/core";
 import { useImageSnapshot } from "./use-image-snapshot";
+import { fetchHere } from "@/components/cloud/session-move"; // FORK (seamless sessions)
 
 /**
  * Visual artifact card (W6 → ack protocol): the tool part's output is the
@@ -73,7 +74,8 @@ export function VisualOutputCard({
 	const toggleInverted = (next: boolean) => {
 		setChosen(next);
 		if (!actions?.chatId || !messageId) return;
-		void fetch(`/api/chats/${actions.chatId}/artifact-ui`, {
+		// FORK (seamless sessions): a session another device holds moves here first.
+		void fetchHere(actions.chatId, `/api/chats/${actions.chatId}/artifact-ui`, {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({ input: { messageId, inverted: next } }),

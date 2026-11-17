@@ -6,11 +6,16 @@
  * keeps its label and icon, has the tooltip "Take this session over first",
  * and does nothing when pressed. Without `blocked`, upstream's behaviour is
  * unchanged.
+ *
+ * Since seamless sessions (owner's decision) the lesson never passes
+ * `blocked`: the prop stays (upstream's file keeps its fork hook), and a press
+ * starts moving the session here instead (components/cloud/session-move.ts).
  */
 
 import React from "react";
 (globalThis as Record<string, unknown>).React = React;
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { MessageCircleQuestion, Quote } from "lucide-react";
 import { PluginTopBarActions } from "../components/plugin-chrome.tsx";
@@ -120,5 +125,16 @@ describe("the highlight toolbar on a held session", () => {
 			assert.deepEqual(selected, ["cite", "ask"]);
 			assert.equal(done, 2);
 		} finally { await f.close(); }
+	});
+});
+
+describe("the lesson since seamless sessions", () => {
+	it("passes no blocked tooltip to the plugin buttons or the highlight toolbar; their presses start the move", () => {
+		const chat = readFileSync(new URL("../components/chat.tsx", import.meta.url), "utf8");
+		const blocked = [...chat.matchAll(/\bblocked=\{([^}]*)\}/g)].map((m) => m[1]!.trim());
+		assert.equal(blocked.length, 2, "PluginTopBarActions and SelectionToolbar");
+		for (const value of blocked) assert.match(value, /^undefined\b/);
+		assert.match(chat, /prewarmSessionMove\(chatId\); \/\/ FORK \(seamless sessions\): a plugin button starts the move/);
+		assert.match(chat, /if \(handled\) prewarmSessionMove\(chatId\);/, "Cite and Ask");
 	});
 });

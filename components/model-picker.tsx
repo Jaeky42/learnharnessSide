@@ -13,6 +13,7 @@ import { ModelPickerPill } from "@/components/model-picker-pill";
 import { Hint } from "@/components/ui/hint";
 import { notifySettingsSaved, useSettingsSaved } from "@/components/settings-signal";
 import { useModelCatalog } from "@/components/model-catalog";
+import { fetchHere } from "@/components/cloud/session-move"; // FORK (seamless sessions)
 export { useModelCatalog } from "@/components/model-catalog";
 import { defaultOrderLevel, populateLevel, THINKING_LABEL } from "@/components/thinking-default";
 
@@ -182,7 +183,8 @@ export function ModelControl({ chatId, onModelChange }: { chatId?: string; onMod
 		async (next: ChatSettings) => {
 			setError(null);
 			try {
-				const res = await fetch(`/api/chats/${chatId}/settings`, {
+				// FORK (seamless sessions): a session another device holds moves here first.
+				const res = await fetchHere(chatId ?? "", `/api/chats/${chatId}/settings`, {
 					method: "PUT",
 					headers: { "Content-Type": "application/json" },
 					body: JSON.stringify(next),

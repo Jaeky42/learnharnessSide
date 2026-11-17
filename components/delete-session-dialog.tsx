@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type ReactElement, type ReactNode } from "react";
 import { HostDialog } from "@/components/host-dialog";
+import { fetchHere } from "@/components/cloud/session-move";
 import type { ChatDeleteMode, ChatListItem } from "@/src/core";
 
 /** The graph-traces checkbox copy (owner, 2026-09-24 flow rework — was
@@ -72,7 +73,8 @@ export function DeleteSessionDialog({
 		setBusy(true);
 		setFailure(null);
 		try {
-			const res = await fetch(`/api/chats/${chat.id}?mode=${mode}`, { method: "DELETE" });
+			// FORK (seamless sessions): a session another device holds moves here first.
+			const res = await fetchHere(chat.id, `/api/chats/${chat.id}?mode=${mode}`, { method: "DELETE" });
 			const body = (await res.json()) as {
 				ok?: boolean;
 				error?: string;

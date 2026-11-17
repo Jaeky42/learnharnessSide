@@ -19,9 +19,9 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { fuzzyScore } from "@/src/core";
 import { useServerEvent, useServerResync } from "@/components/server-events";
-import { useCloud } from "@/components/cloud/cloud-state";
 import { SyncChip } from "@/components/cloud/sync-chip";
-import { HELD_TEXT, heldByText } from "@/src/core";
+// FORK (seamless sessions): Rename and Delete move a session another device holds here first.
+import { fetchHere } from "@/components/cloud/session-move";
 import type { ChatListItem } from "@/src/core";
 import { kbdEventForAction } from "@/src/core";
 import { notifySettingsSaved } from "@/components/settings-signal";
@@ -320,14 +320,10 @@ export function SessionRow({
 	onOpen,
 	kbdSelected = false,
 	onContextMenu,
-	heldBy,
 }: {
 	chat: ChatListItem;
 	active: boolean;
 	onOpen: () => void;
-	/** Cloud sync (Phase 6): another device holds this session. The second
-	 *  line then reads "Held by Desktop" in place of the time. */
-	heldBy?: string;
 	/** Keyboard-cycle highlight (shortcut wave A: Alt+↑/↓ + Alt+Enter) —
 	 *  visually distinct from the active session, which stays filled. */
 	kbdSelected?: boolean;
@@ -356,7 +352,7 @@ export function SessionRow({
 				    rule, finally applied to the picker too (owner, typography
 				    round): mono = chrome, Source Sans = human words. */}
 				<span className="block truncate font-prose text-(length:--lh-prose-size)">{chat.title}</span>
-				<span className="block truncate text-xs text-muted-foreground" data-held={heldBy ? "" : undefined}>{heldBy ?? sessionMeta(chat)}</span>
+				<span className="block truncate text-xs text-muted-foreground">{sessionMeta(chat)}</span>
 			</span>
 			{/* The dumbbell rides the FAR RIGHT (owner round 6, 2026-10-05) —
 			    was left of the name; right-aligned keeps the titles flush with
@@ -439,8 +435,6 @@ function SessionsSidebar() {
 	useSidebarSwipe(drawerRef, dimRef, phone && open, () => {
 		if (openRef.current) toggle();
 	});
-	// Cloud sync (Phase 6): which sessions another device holds. Empty where sync isn't in use.
-	const cloud = useCloud();
 	const [chats, setChats] = useState<ChatListItem[] | null>(null);
 	const [query, setQuery] = useState("");
 	const [kindFilter, setKindFilter] = useState<SessionKindFilter>("all");
@@ -598,7 +592,6 @@ function SessionsSidebar() {
 	   right-clicked — assigned into a ref before the state flip so the
 	   shell measures it on its first (hidden) pass. */
 	const [ctxChatId, setCtxChatId] = useState<string | null>(null);
-	const ctxHeld = ctxChatId !== null && !!cloud.held[ctxChatId];
 	const ctxAnchorRef = useRef<HTMLElement | null>(null);
 	const [renamingId, setRenamingId] = useState<string | null>(null);
 	const [deleting, setDeleting] = useState<ChatListItem | null>(null);
@@ -636,7 +629,7 @@ function SessionsSidebar() {
 		const t = next.trim();
 		if (t === "") return;
 		try {
-			const res = await fetch(`/api/chats/${id}`, {
+			const res = await fetchHere(id, `/api/chats/${id}`, { // FORK (seamless sessions)
 				method: "PUT",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({ title: t }),
@@ -886,7 +879,6 @@ function SessionsSidebar() {
 										router.push(`/chat/${c.id}`);
 									}}
 									onContextMenu={(e) => openContext(e, c)}
-									heldBy={cloud.held[c.id] ? heldByText(cloud.held[c.id]!) : undefined}
 								/>
 							),
 						)
@@ -939,19 +931,14 @@ function SessionsSidebar() {
 						    hairline — the block is info + a stateful affordance, the
 						    actions above it. Fetched on menu open (the block mounts WITH
 						    the menu); 409 = benign. Renders nothing on a failed read. */}
-						{/* Cloud sync (Phase 6): a session another device holds can't be
-						    renamed or deleted here until it is taken over. Owner's choice:
-						    both stay in the menu, greyed out. */}
 						<button
 							type="button"
 							data-testid="ctx-rename"
-							disabled={ctxHeld}
-							title={ctxHeld ? HELD_TEXT.blocked : undefined}
 							onClick={() => {
 								setRenamingId(ctxChatId);
 								setCtxChatId(null);
 							}}
-							className="flex items-center rounded-lg px-2.5 py-1.5 text-left text-foreground transition-colors hover:bg-accent disabled:opacity-40 disabled:hover:bg-transparent"
+							className="flex items-center rounded-lg px-2.5 py-1.5 text-left text-foreground transition-colors hover:bg-accent"
 						>
 							Rename
 						</button>
@@ -980,14 +967,12 @@ function SessionsSidebar() {
 						<button
 							type="button"
 							data-testid="ctx-delete"
-							disabled={ctxHeld}
-							title={ctxHeld ? HELD_TEXT.blocked : undefined}
 							onClick={() => {
 								const target = chats?.find((c) => c.id === ctxChatId);
 								if (target) setDeleting(target);
 								setCtxChatId(null);
 							}}
-							className="flex items-center rounded-lg px-2.5 py-1.5 text-left text-muted-foreground/80 transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground/80"
+							className="flex items-center rounded-lg px-2.5 py-1.5 text-left text-muted-foreground/80 transition-colors hover:bg-accent hover:text-foreground"
 						>
 							Delete…
 						</button>
