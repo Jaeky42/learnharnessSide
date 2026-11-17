@@ -31,9 +31,24 @@ function literalRanges(text: string): Array<{ start: number; end: number }> {
 	return ranges.sort((a, b) => a.start - b.start);
 }
 
+/** FORK (money is not math; owner's decision, it replaces "instructions
+ * only"): a single-dollar pair is money, not a formula, when its opening
+ * dollar is directly followed by a digit and its closing dollar has
+ * whitespace before it or a digit after it ("$73,000 with $70,000"). A
+ * formula that starts with a number closes tightly ("$2x + 3 = 7$") and is
+ * left alone, as is every pair that doesn't open on a digit.
+ * `after` is the character that follows the closing dollar. */
+export function isMoneyPair(body: string, after: string): boolean {
+	return /^\d/.test(body) && (/\s$/.test(body) || /^\d/.test(after));
+}
+
 /** Mirrors the app's native dollar-run and legacy-delimiter conventions,
- * with code and blank paragraphs as inline boundaries. */
-export function readContentSpans(text: string): ContentSpan[] {
+ * with code and blank paragraphs as inline boundaries.
+ * FORK (money is not math): the opening dollar of a money pair is prose, and
+ * its offset is added to `money` when given. Only the opener is given up: the
+ * dollar that would have closed it is read afresh, so it can still open real
+ * math ("costs $5, so $3$ units"). */
+export function readContentSpans(text: string, money?: number[]): ContentSpan[] {
 	const spans: ContentSpan[] = [];
 	const literals = literalRanges(text);
 	let literal = 0, i = 0, plain = 0;
@@ -71,7 +86,10 @@ export function readContentSpans(text: string): ContentSpan[] {
 					if (j >= barrier || blankLine.test(text.slice(j))) break;
 					if (text[j] === "$" && !escaped(text, j)) {
 						const n = runLength(text, j, "$");
-						if (n === size) { at = j; close = open; after = j + n; break; }
+						if (n === size) {
+							if (size === 1 && isMoneyPair(text.slice(i + 1, j), text[j + 1] ?? "")) { money?.push(i); break; }
+							at = j; close = open; after = j + n; break;
+						}
 						j += n;
 					} else j++;
 				}

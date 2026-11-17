@@ -53,9 +53,15 @@ describe("math delimiter transform (pure unit)", () => {
 		);
 	});
 
-	it("leaves currency untouched", () => {
-		const md = "It costs $5 and $10 more. $$big$$ sums too.";
-		assert.equal(transformMathDelimiters(md), md);
+	// FORK (money is not math): upstream left bare currency untouched here,
+	// and the reader then drew "5 and" as a formula. The fork escapes the
+	// dollar that opens the pair (tests/money-not-math.test.tsx), which leaves
+	// the second with no partner; the two-dollar span is still untouched.
+	it("escapes the opener of a bare currency pair and leaves the two-dollar span untouched", () => {
+		assert.equal(
+			transformMathDelimiters("It costs $5 and $10 more. $$big$$ sums too."),
+			"It costs \\$5 and $10 more. $$big$$ sums too.",
+		);
 	});
 
 	it("leaves escaped delimiters untouched (\\\\( is a literal backslash)", () => {
@@ -285,9 +291,12 @@ describe("escaped dollars inside math — transform units", () => {
 		assert.equal(transformMathDelimiters(md), md);
 	});
 
-	it("leaves prose escaped dollars and bare currency untouched", () => {
-		const md = "It costs \\$5 flat, then $5 and $10 more.";
-		assert.equal(transformMathDelimiters(md), md);
+	// FORK (money is not math): the bare pair's opener is escaped (see above).
+	it("leaves prose escaped dollars untouched and escapes the opener of a bare currency pair", () => {
+		assert.equal(
+			transformMathDelimiters("It costs \\$5 flat, then $5 and $10 more."),
+			"It costs \\$5 flat, then \\$5 and $10 more.",
+		);
 	});
 
 	it("leaves display spans untouched — a lone $ can't close $$, \\$ already survives", () => {

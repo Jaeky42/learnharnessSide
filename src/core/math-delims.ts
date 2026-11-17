@@ -4,6 +4,7 @@ import {
 	canParseTex, knownTexCommand, mapMathContent, numericPercentEscape, outsideTexComments,
 	readContentSpans, recoverDocumentLayout, texRanges,
 } from "./content-reader.ts";
+export { isMoneyPair } from "./content-reader.ts";
 
 /** Side-tutor fork (performance): a bounded string-keyed memo for the two
  * pure text functions below, so an unchanged string isn't parsed again on a
@@ -64,13 +65,33 @@ function replaceEscapedDollars(content: string): string {
 }
 
 /** Read old \(...\)/\[...\] syntax without touching literal content or
- * reparsing native math as Markdown. Dollar authoring remains native. */
+ * reparsing native math as Markdown. Dollar authoring remains native.
+ * FORK (money is not math): the reader names the dollars that open a money
+ * pair (`isMoneyPair` in content-reader.ts); each is escaped here so the
+ * Markdown reader shows it as text and pairs the later dollars as the reader
+ * did. Display only: the stored text is never rewritten. */
 const transformMemo = boundedMemo(transformMathDelimitersUncached);
 export const transformMathDelimiters: (markdown: string) => string = transformMemo.fn;
 function transformMathDelimitersUncached(markdown: string): string {
+	const money: number[] = [];
+	const spans = readContentSpans(markdown, money);
+	let nextMoney = 0;
+	/** A prose span with a backslash put before each money dollar in it. */
+	const withMoneyEscaped = (raw: string, start: number): string => {
+		const end = start + raw.length;
+		while (nextMoney < money.length && money[nextMoney]! < start) nextMoney++;
+		if (nextMoney >= money.length || money[nextMoney]! >= end) return raw;
+		let out = "", from = 0;
+		for (; nextMoney < money.length && money[nextMoney]! < end; nextMoney++) {
+			const at = money[nextMoney]! - start;
+			out += raw.slice(from, at) + "\\"; from = at;
+		}
+		return out + raw.slice(from);
+	};
 	let offset = 0;
-	return readContentSpans(markdown).map(span => {
+	return spans.map(span => {
 		const start = offset; offset += span.raw.length;
+		if (span.kind === "prose") return withMoneyEscaped(span.raw, start);
 		if (span.kind !== "math") return span.raw;
 		if (span.open === "$") return "$" + replaceEscapedDollars(span.body) + span.close;
 		if (span.open !== "\\(" && span.open !== "\\[") return span.raw;

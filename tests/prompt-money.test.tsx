@@ -3,8 +3,9 @@
  * problem with two bare "$" amounts in one paragraph was drawn as one long
  * formula).
  *
- * The fix is one bullet in upstream's shared formatting fragment. This file
- * guards it twice:
+ * The first fix was one bullet in upstream's shared formatting fragment; the
+ * renderer's own rule came after it (tests/money-not-math.test.tsx). This file
+ * guards the bullet twice:
  *   - the bullet is still in the fragment, and reaches every agent that
  *     writes for the learner (a later upstream merge must not drop it);
  *   - each form the bullet names renders as it says, through the app's real
@@ -86,11 +87,14 @@ describe("money renders as the bullet says", () => {
 			assert.match(shown(list), /Cash paid: \$594,000[\s\S]*Loss: \$3,060/);
 		});
 
-		// The hazard the bullet describes. If this ever stops holding (upstream
-		// teaches the renderer to tell money from math), the bullet can go.
-		it(`${surface}: two bare amounts in one paragraph are still read as a formula`, () => {
+		// Since "money is not math" (the renderer's own rule, src/core/math-delims.ts;
+		// tests/money-not-math.test.tsx) the hazard the bullet describes no longer
+		// garbles this sentence. The bullet stays, by the owner's decision, as a
+		// second net for the shapes the rule can't tell apart.
+		it(`${surface}: two bare amounts in one paragraph now stay text`, () => {
 			const html = render("A face value of $100,000 and it receives $6,000 of interest.");
-			assert.ok(html.includes("katex"), "the renderer now tells money from math: revisit the Money bullet");
+			assert.ok(!html.includes("katex"), "two bare amounts must not become a formula");
+			assert.equal(shown(html), "A face value of $100,000 and it receives $6,000 of interest.");
 		});
 	}
 });
