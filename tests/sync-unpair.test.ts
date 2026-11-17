@@ -304,6 +304,26 @@ describe("pairing the same PC again", () => {
 		assert.equal(desk.sync.holds("chat_circuits"), true);
 	});
 
+	it("another desktop holds it, offline after saying \"busy\": no warning holds the PC up any more (owner's change)", async () => {
+		const { w, desk } = await synced();
+		const laptop = w.desktop(LAPTOP, "Laptop");
+		await laptop.sync.tick();
+		assert.equal((await laptop.sync.takeOver("chat_motors", false)).status, "moved");
+		await desk.sync.tick();
+		w.authority.releaseDevice(PC);
+		desk.sync.release();
+		addTurn(desk.dataDir, "chat_motors", "continued on the PC");
+		// The laptop's last word was "busy", and then it went silent.
+		w.authority.exchange(LAPTOP, { cursor: 0, reports: { chat_motors: "busy" } });
+		w.pass(60 * SECOND);
+		assert.equal(w.authority.takeOver("cloud", "chat_motors", false).body.status, "warning", "the old rule would have warned");
+		desk.sync.rejoin();
+		const round = await desk.sync.tick();
+		assert.deepEqual(round.ok && round.sent, ["chat_motors"]);
+		assert.deepEqual(turnsOf(w.serverDir, "chat_motors"), ["phone", "continued on the PC"]);
+		assert.equal(w.authority.held()["chat_motors"]?.id, PC);
+	});
+
 	it("another desktop holds it and is online: the PC waits, keeps its turns, and gets it at the hand-over", async () => {
 		const { w, desk } = await synced();
 		const laptop = w.desktop(LAPTOP, "Laptop");

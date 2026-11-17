@@ -12,7 +12,15 @@
  * (held by whoever holds it there). Pairing never deletes anything.
  *
  * A session held by another device is read-only here (holds() is false):
- * its files are only ever replaced by what the server sends.
+ * its files are only ever replaced by what the server sends. The page asks
+ * for it as soon as the learner continues it (takeOver, no warning
+ * anywhere). If the server can't be asked, the PC carries on anyway: the
+ * session is provisionally its own (`freed: "held"`) and is settled at the
+ * next round that reaches the server (settleFreed).
+ *
+ * A session this PC held and another device took over: if this PC has
+ * changes it never sent and the taker added nothing, the PC asks for it
+ * back and keeps its turns; otherwise the server's version wins (no copies).
  *
  * A chat file in a newer format than this build reads (chatFileTooNew: a
  * newer build wrote it, and this one was installed over it) is never sent,
@@ -39,9 +47,13 @@ export interface DesktopSession {
 	/** Both sides had a session with this id before they ever synced. Left alone on both. */
 	conflict?: true;
 	/**
-	 * The learner unpaired this PC ("Unpair this PC", Phase 6): it is no longer
-	 * syncing, so every session is its own to continue (`mine` is true). This
-	 * remembers whose it was, for when the PC is paired again.
+	 * The session is this PC's to continue (`mine` is true) without the
+	 * server having said so; settleFreed settles it once the server answers.
+	 * Set for every session when the learner unpaired this PC ("Unpair this
+	 * PC", Phase 6), remembering whose it was. "held" is also set on one
+	 * session another device holds when the PC carried on with it anyway: the
+	 * server couldn't be asked (offline, paused, removed), or this PC asked
+	 * for one of its own sessions back and the holder is still handing over.
 	 */
 	freed?: "mine" | "held";
 }
@@ -110,10 +122,13 @@ export interface DesktopSync {
 	holderOf(chatId: string): { id: string; name: string | null } | null;
 	tick(): Promise<TickResult>;
 	/**
-	 * Ask the server for a session another device holds. Needs the server:
-	 * an offline desktop can only continue what it already held. The answer's
-	 * `status` is the server's ("yours", "moved", "waiting", "warning") or
-	 * "offline" / "not-paired" / "paused".
+	 * Ask the server for a session another device holds. The answer's
+	 * `status` is the server's ("yours", "moved", "waiting", "warning"),
+	 * "refused" (the server answered no: no such session, a newer format), or
+	 * "continued-offline": the server couldn't be asked (offline, paused, or
+	 * it removed this PC), so this PC carries on with the session anyway and
+	 * it is settled at reconnect. "not-paired" only when this PC has never
+	 * synced with the server it is paired with.
 	 */
 	takeOver(chatId: string, force: boolean): Promise<Record<string, unknown>>;
 	/** Every session this desktop may not change. */
@@ -183,30 +198,81 @@ export function createDesktopSync(deps: DesktopSyncDeps): DesktopSync {
 		return { turns, title: typeof mine.title === "string" ? mine.title : "" };
 	}
 
+	/** What was discarded here is told to the learner (a notice) and to the graph log. */
+	function discard(state: DesktopState, id: string, local: SessionBundle, remote: SessionBundle): void {
+		deps.localWork?.stop(id, { turn: true });
+		deps.onDiscard?.(id);
+		const gone = unsentTurns(local, remote);
+		state.notices = [...(state.notices ?? []), { chatId: id, title: gone.title, turns: gone.turns, at: deps.now() }].slice(-50);
+	}
+
 	/**
-	 * This desktop held the session and another device holds it now. Whatever
-	 * it hadn't sent is discarded and the server's version takes its place
-	 * (owner's rule: no copies). If anything was discarded, a notice is kept.
+	 * Ask for a session back that this PC held, with unsent changes, and that
+	 * another device took without adding anything. Never a warning (owner's
+	 * rule: none anywhere), so `force`. "kept": it is this PC's again and its
+	 * turns go up with the normal send. "waiting": the holder is finishing a
+	 * reply or handing over; the PC keeps its turns and carries on with the
+	 * session (`freed: "held"`), and settleFreed asks again each round.
 	 */
-	async function giveUp(state: DesktopState, change: SessionChange): Promise<boolean> {
+	async function takeBack(entry: DesktopSession, id: string, holder: SessionChange): Promise<"kept" | "waiting" | "refused" | "failed"> {
+		const take = note(await request<SessionChange & { status: string }>(`${sessionPath(id)}/take`, { method: "POST", body: { force: true } }));
+		if (!take.ok) return take.reason === "refused" ? "refused" : "failed";
+		if (take.body.status === "moved" || take.body.status === "yours") {
+			entry.mine = true;
+			entry.holder = take.body.holder;
+			entry.holderName = take.body.holderName;
+			entry.serverVersion = take.body.version;
+			delete entry.freed;
+			return "kept";
+		}
+		if (take.body.status === "waiting") {
+			entry.mine = true;
+			entry.freed = "held";
+			entry.holder = holder.holder;
+			entry.holderName = holder.holderName;
+			return "waiting";
+		}
+		return "refused";
+	}
+
+	/**
+	 * This desktop held the session and another device holds it now.
+	 *  - This PC has changes it never sent and the server's copy is still what
+	 *    it last synced (the taker added nothing): it asks for the session back
+	 *    and keeps its turns ("kept", or "waiting" while the holder hands over).
+	 *  - Otherwise whatever it hadn't sent is discarded and the server's version
+	 *    takes its place (owner's rule: no copies); if anything was discarded, a
+	 *    notice is kept ("lost").
+	 * false: nothing could be settled this round (it is tried again).
+	 */
+	async function giveUp(state: DesktopState, change: SessionChange): Promise<"lost" | "kept" | "waiting" | false> {
 		const entry = state.sessions[change.id];
 		// Not this build's format: left as it is, never replaced by a discard.
 		const before = files.read(change.id);
 		if (before && chatFileTooNew(before.chat)) return false;
-		// A reply, helpers and extraction still running here for it stop now.
-		deps.localWork?.stop(change.id, { turn: true });
 		const reply = note(await request<SessionChange & { bundle: unknown }>(sessionPath(change.id)));
 		if (!reply.ok) return false;
 		const remote = checkBundle(change.id, reply.body.bundle);
 		if (!remote) return false;
-		deps.onDiscard?.(change.id);
+		const theirs: SessionChange = { ...change, version: reply.body.version, holder: reply.body.holder, holderName: reply.body.holderName };
+		const remoteDigest = bundleDigest(remote);
 		const local = files.read(change.id);
-		if (local && entry && bundleDigest(local) !== entry.digest && bundleDigest(local) !== bundleDigest(remote)) {
-			const lost = unsentTurns(local, remote);
-			state.notices = [...(state.notices ?? []), { chatId: change.id, title: lost.title, turns: lost.turns, at: deps.now() }].slice(-50);
+		const localDigest = local ? bundleDigest(local) : null;
+		const unsent = !!local && !!entry && localDigest !== entry.digest && localDigest !== remoteDigest;
+		if (unsent && entry && remoteDigest === entry.digest) {
+			const back = await takeBack(entry, change.id, theirs);
+			if (back === "kept" || back === "waiting") return back;
+			if (back === "failed") return false;
+			// Refused (the session went meanwhile): settled as before.
 		}
-		adopt(state, { ...change, version: reply.body.version, holder: reply.body.holder, holderName: reply.body.holderName }, remote, false);
-		return true;
+		if (unsent && local) discard(state, change.id, local, remote);
+		else {
+			// Nothing of this PC's is lost; a reply, helpers and extraction still running here for it stop.
+			deps.localWork?.stop(change.id, { turn: true });
+			deps.onDiscard?.(change.id);
+		}
+		adopt(state, theirs, remote, false);
+		return "lost";
 	}
 
 	async function fetchInto(state: DesktopState, change: SessionChange, mine: boolean): Promise<boolean> {
@@ -219,11 +285,15 @@ export function createDesktopSync(deps: DesktopSyncDeps): DesktopSync {
 	}
 
 	/**
-	 * After "Unpair this PC" every session was this PC's to continue. Paired
-	 * again, each one is settled once (owner's rules):
+	 * Sessions this PC continued without the server's word (`freed`): every
+	 * session after "Unpair this PC", or one it carried on with while the
+	 * server couldn't be asked. Once the server answers, each one is settled
+	 * (owner's rules):
 	 *  - not continued here since: it is whose it was, and the usual round
 	 *    hears of anything that happened to it meanwhile;
-	 *  - continued here only: this PC asks for it back and sends its version;
+	 *  - continued here only: this PC asks for it back (never a warning, so
+	 *    `force`) and sends its version; a holder still busy with it is asked
+	 *    again next round, and the turns are kept meanwhile;
 	 *  - continued on both sides: the server's version stays (no copies), and
 	 *    a notice says what was discarded here.
 	 */
@@ -257,6 +327,16 @@ export function createDesktopSync(deps: DesktopSyncDeps): DesktopSync {
 			if (!remote) continue;
 			const remoteDigest = bundleDigest(remote);
 			const theirs: SessionChange = { id, version: reply.body.version, holder: reply.body.holder, holderName: reply.body.holderName, deleted: false };
+			if (theirs.holder === deviceId && remoteDigest !== localDigest && entry.freed === "held" && remoteDigest !== entry.digest) {
+				// The server gave it to this PC (a take-over whose fetch never
+				// arrived), but its copy has turns this PC never saw, and this PC
+				// continued from an older one. Sending would overwrite them: the
+				// server's version stays, with a notice, and the session is this PC's.
+				discard(state, id, local, remote);
+				adopt(state, theirs, remote, true);
+				lost.push(id);
+				continue;
+			}
 			if (theirs.holder === deviceId || remoteDigest === localDigest) {
 				// Still this PC's on the server, or both sides ended up the same.
 				entry.mine = theirs.holder === deviceId;
@@ -269,8 +349,9 @@ export function createDesktopSync(deps: DesktopSyncDeps): DesktopSync {
 			}
 			if (remoteDigest === entry.digest) {
 				// Only this PC continued it: ask for it back. A holder that is busy
-				// with it is asked again next round; nothing is forced.
-				const take = await request<SessionChange & { status: string }>(`${sessionPath(id)}/take`, { method: "POST", body: { force: false } });
+				// with it is asked again next round. No warning anywhere (owner's
+				// rule), so nothing waits on one: `force`.
+				const take = await request<SessionChange & { status: string }>(`${sessionPath(id)}/take`, { method: "POST", body: { force: true } });
 				if (!take.ok) {
 					if (take.reason !== "refused") return take.reason;
 					continue;
@@ -285,10 +366,7 @@ export function createDesktopSync(deps: DesktopSyncDeps): DesktopSync {
 				continue;
 			}
 			// Continued on both sides: the server's version, and a notice.
-			deps.localWork?.stop(id, { turn: true });
-			deps.onDiscard?.(id);
-			const gone = unsentTurns(local, remote);
-			state.notices = [...(state.notices ?? []), { chatId: id, title: gone.title, turns: gone.turns, at: deps.now() }].slice(-50);
+			discard(state, id, local, remote);
 			adopt(state, theirs, remote, false);
 			lost.push(id);
 		}
@@ -387,8 +465,8 @@ export function createDesktopSync(deps: DesktopSyncDeps): DesktopSync {
 				continue;
 			}
 			if (entry.mine) {
-				// Another device holds it now: this desktop lost the session.
-				if (await giveUp(state, change)) result.lost.push(change.id);
+				// Another device holds it now: this desktop takes it back, or lost it.
+				if (await giveUp(state, change) === "lost") result.lost.push(change.id);
 				continue;
 			}
 			if (change.version > entry.serverVersion || entry.holder !== change.holder) {
@@ -421,19 +499,23 @@ export function createDesktopSync(deps: DesktopSyncDeps): DesktopSync {
 				await fetchInto(state, { id, version: entry.serverVersion, holder: entry.holder, holderName: entry.holderName, deleted: false }, false);
 				continue;
 			}
-			const reply = await request<SessionChange>(sessionPath(id), { method: "PUT", body: { baseVersion: entry?.serverVersion ?? 0, bundle, word: replying(id) ? "busy" : "all-sent" } });
+			let reply = await request<SessionChange>(sessionPath(id), { method: "PUT", body: { baseVersion: entry?.serverVersion ?? 0, bundle, word: replying(id) ? "busy" : "all-sent" } });
+			if (!reply.ok && reply.reason === "refused" && reply.code === "lease_lost" && entry) {
+				// Taken over before the send got there: take it back (the taker
+				// added nothing) and send again, or lose it.
+				const change = reply.body as unknown as SessionChange;
+				const outcome = await giveUp(state, { id, version: change.version, holder: change.holder, holderName: change.holderName, deleted: false });
+				if (outcome === "lost") result.lost.push(id);
+				if (outcome !== "kept") continue;
+				reply = await request<SessionChange>(sessionPath(id), { method: "PUT", body: { baseVersion: entry.serverVersion, bundle, word: replying(id) ? "busy" : "all-sent" } });
+			}
 			if (reply.ok) {
 				state.sessions[id] = { mine: true, holder: reply.body.holder, holderName: reply.body.holderName, serverVersion: reply.body.version, stamp, digest };
 				result.sent.push(id);
 				continue;
 			}
-			if (reply.reason === "refused" && reply.code === "lease_lost") {
-				const change = reply.body as unknown as SessionChange;
-				if (entry) {
-					if (await giveUp(state, { id, version: change.version, holder: change.holder, holderName: change.holderName, deleted: false })) result.lost.push(id);
-				}
-				continue;
-			}
+			// Taken over again in the instant after it was taken back: the next round settles it.
+			if (reply.reason === "refused" && reply.code === "lease_lost") continue;
 			if (reply.reason === "refused" && reply.code === "deleted") {
 				files.remove(id);
 				delete state.sessions[id];
@@ -493,17 +575,47 @@ export function createDesktopSync(deps: DesktopSyncDeps): DesktopSync {
 		const state = current();
 		if (!identity || !state) return { status: "not-paired" };
 		const reply = await request<SessionChange & { status: string }>(`${sessionPath(chatId)}/take`, { method: "POST", body: { force } });
-		if (!reply.ok) return { status: reply.reason === "refused" ? "refused" : reply.reason, ...(reply.reason === "refused" ? { error: reply.error } : {}) };
+		if (!reply.ok) {
+			// The server answered no (no such session, …): nothing changes here.
+			if (reply.reason === "refused") return { status: "refused", error: reply.error };
+			// It couldn't be asked: this PC carries on anyway.
+			return carryOn(state, chatId);
+		}
 		if (reply.body.status === "moved" || reply.body.status === "yours") {
 			// The session is this desktop's: bring the server's version here.
 			const entry = state.sessions[chatId];
 			if (!entry?.mine) {
 				const change: SessionChange = { id: chatId, version: reply.body.version, holder: reply.body.holder, holderName: reply.body.holderName, deleted: false };
-				if (!(await fetchInto(state, change, true))) return { status: "offline" };
+				const fetched = await request<SessionChange & { bundle: unknown }>(sessionPath(chatId));
+				// The server moved it here but its version didn't arrive: carry on
+				// with the copy here; settleFreed keeps the server's newer turns, if any.
+				if (!fetched.ok && fetched.reason !== "refused") return carryOn(state, chatId);
+				if (!fetched.ok) return { status: "refused", error: fetched.error };
+				const bundle = checkBundle(chatId, fetched.body.bundle);
+				if (!bundle) return { status: "offline" };
+				adopt(state, { ...change, version: fetched.body.version, holder: fetched.body.holder, holderName: fetched.body.holderName }, bundle, true);
 				deps.state.write(state);
 			}
 		}
 		return reply.body as unknown as Record<string, unknown>;
+	}
+
+	/**
+	 * The page asked for a session and the server couldn't be asked (offline,
+	 * sync paused, or the server removed this PC): owner's rule, the PC
+	 * carries on anyway. That one session is provisionally this PC's
+	 * (`freed: "held"`, as at Unpair) until settleFreed settles it at the next
+	 * round that reaches the server.
+	 */
+	function carryOn(state: DesktopState, chatId: string): Record<string, unknown> {
+		const entry = state.sessions[chatId];
+		// Already this PC's to continue (or never synced): nothing to mark.
+		if (!entry || entry.mine || entry.conflict) return { status: "yours" };
+		entry.freed = "held";
+		entry.mine = true;
+		deps.state.write(state);
+		deps.announce?.(chatId, "written");
+		return { status: "continued-offline" };
 	}
 
 	return {

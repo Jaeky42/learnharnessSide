@@ -8,6 +8,8 @@
  *          desktop the discards the learner hasn't been told about, and on
  *          the server its paired desktop apps (name, online, last seen)
  *   POST {op:"take-over", chatId, force}    ask for a session another device holds
+ *                                           (a desktop that can't ask the server
+ *                                           carries on: "continued-offline")
  *   POST {op:"pair", server, code, name}    desktop only: pair with a server
  *   POST {op:"check"}                       desktop only: contact the server now
  *   POST {op:"sync"}                        desktop only: one sync round now
@@ -60,7 +62,12 @@ export async function cloudActionResponse(request: Request): Promise<Response> {
 			const reply = syncAuthority().takeOver(CLOUD_HOLDER, body.chatId, force);
 			return json(reply.body, reply.status);
 		}
-		return json(await desktopSync().takeOver(body.chatId, force));
+		// On a desktop that can't reach the server the answer is
+		// {status:"continued-offline"}: the PC carries on with the session anyway.
+		const result = await desktopSync().takeOver(body.chatId, force);
+		// Every open window learns the session isn't held any more.
+		if (result.status === "continued-offline") emit("cloud-changed", {});
+		return json(result);
 	}
 	if (serverModeEnabled()) return json({ error: "Not found." }, 404);
 	if (body.op === "pair") {

@@ -93,7 +93,9 @@ export function desktopSync(): DesktopSync {
 		files: sessionFiles(),
 		state: stateFile(path.join(/* turbopackIgnore: true */ syncStateDir(), "desktop.json"), isDesktopState),
 		// Who this desktop is stays known while it is unpaired or paused, so
-		// sessions held elsewhere stay read-only until sync resumes.
+		// sessions held elsewhere stay held until the learner continues one:
+		// then the PC carries on with that one session and settles it once
+		// sync resumes (desktop-sync.ts, takeOver and settleFreed).
 		identity: () => {
 			const pairing = readCloudPairing();
 			return pairing ? { server: pairing.server, deviceId: pairing.deviceId } : null;

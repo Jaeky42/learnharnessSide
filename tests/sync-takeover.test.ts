@@ -9,8 +9,10 @@
  *    (they start again on the new holder).
  *  - No copies: a desktop that lost a session discards what it hadn't sent,
  *    shows the server's version, and keeps a notice with the session and
- *    the number of turns.
- *  - An offline desktop can only continue what it already held.
+ *    the number of turns; unless the taker added nothing, and then the
+ *    desktop takes it back with its turns (tests/sync-seamless.test.ts).
+ *  - An offline desktop carries on with a session it is asked for anyway
+ *    (owner's change; settled at reconnect, tests/sync-seamless.test.ts).
  */
 
 import assert from "node:assert/strict";
@@ -216,11 +218,30 @@ describe("no copies: what the losing desktop hadn't sent is discarded", () => {
 		assert.deepEqual(desk.sync.notices(), []);
 	});
 
-	it("a send that arrives after the take-over is refused and discarded the same way", async () => {
+	it("a send that arrives after the take-over is refused and discarded the same way, once the taker added something", async () => {
 		const { w, desk } = await synced();
 		addTurn(desk.dataDir, "chat_circuits", "too late");
 		const exchange = w.authority.exchange.bind(w.authority);
-		// The take-over lands between the desktop's question and its send.
+		// The take-over lands between the desktop's question and its send, and the phone continues it.
+		w.authority.exchange = (deviceId, body) => {
+			const result = exchange(deviceId, body);
+			w.pass(60 * SECOND);
+			w.authority.takeOver(CLOUD_HOLDER, "chat_circuits", true);
+			addTurn(w.serverDir, "chat_circuits", "on the phone");
+			w.authority.scan();
+			return { ...result, body: { ...result.body, changes: [] } };
+		};
+		const round = await desk.sync.tick();
+		assert.deepEqual(round, { ...quiet, lost: ["chat_circuits"] });
+		assert.deepEqual(turnsOf(w.serverDir, "chat_circuits"), ["one", "on the phone"]);
+		assert.deepEqual(turnsOf(desk.dataDir, "chat_circuits"), ["one", "on the phone"]);
+		assert.equal(desk.sync.notices()[0]!.turns, 1);
+	});
+
+	it("a send that arrives after a take-over that added nothing takes the session back and goes up", async () => {
+		const { w, desk } = await synced();
+		addTurn(desk.dataDir, "chat_circuits", "not too late");
+		const exchange = w.authority.exchange.bind(w.authority);
 		w.authority.exchange = (deviceId, body) => {
 			const result = exchange(deviceId, body);
 			w.pass(60 * SECOND);
@@ -228,10 +249,11 @@ describe("no copies: what the losing desktop hadn't sent is discarded", () => {
 			return { ...result, body: { ...result.body, changes: [] } };
 		};
 		const round = await desk.sync.tick();
-		assert.deepEqual(round, { ...quiet, lost: ["chat_circuits"] });
-		assert.deepEqual(turnsOf(w.serverDir, "chat_circuits"), ["one"]);
-		assert.deepEqual(turnsOf(desk.dataDir, "chat_circuits"), ["one"]);
-		assert.equal(desk.sync.notices()[0]!.turns, 1);
+		assert.deepEqual(round, { ...quiet, sent: ["chat_circuits"] });
+		assert.deepEqual(turnsOf(w.serverDir, "chat_circuits"), ["one", "not too late"]);
+		assert.equal(w.authority.holderOf("chat_circuits")?.id, desk.deviceId);
+		assert.deepEqual(desk.sync.notices(), []);
+		assert.deepEqual(desk.work.stopped, [], "nothing is stopped when the PC takes it back");
 	});
 });
 
@@ -323,11 +345,12 @@ describe("a desktop takes a session over", () => {
 		assert.equal((await desk.sync.takeOver("chat_motors", false)).status, "moved");
 	});
 
-	it("needs the server: offline, a desktop can only continue what it already held", async () => {
+	it("offline, a desktop carries on anyway (owner's change: it used to need the server)", async () => {
 		const { desk } = await synced();
 		desk.setOnline(false);
-		assert.equal((await desk.sync.takeOver("chat_motors", false)).status, "offline");
-		assert.equal(desk.sync.holds("chat_motors"), false);
+		assert.equal((await desk.sync.takeOver("chat_motors", false)).status, "continued-offline");
+		assert.equal(desk.sync.holds("chat_motors"), true);
+		assert.equal((await desk.sync.takeOver("chat_circuits", false)).status, "yours", "one it already holds");
 		assert.equal(desk.sync.holds("chat_circuits"), true);
 	});
 
