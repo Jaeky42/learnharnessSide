@@ -13,7 +13,7 @@ import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import type { Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
-import { CLOUD_SERVER_TEXT, CLOUD_TEXT, codeTimeLeft, heldByExample, recentlyText, removeConfirm, serverNotTold } from "../src/core/sync/screens.ts";
+import { CLOUD_SERVER_TEXT, CLOUD_TEXT, codeTimeLeft, NAME_HELP_TEXT, recentlyText, removeConfirm, serverNotTold } from "../src/core/sync/screens.ts";
 
 const dom = parseHTML("<html><body></body></html>");
 let cookie = "";
@@ -127,7 +127,7 @@ describe("Settings → Cloud on a desktop app that isn't paired", () => {
 		assert.ok(text.includes("Pairing code"));
 		assert.ok(text.includes("On the server's site: Settings → Cloud → Add a desktop app."));
 		assert.ok(text.includes("This PC's name"));
-		assert.ok(text.includes("Your other devices show it: “Held by Desktop”."));
+		assert.ok(text.includes("The server lists this PC by this name: Settings → Cloud."));
 		assert.ok(text.includes("Pairing combines this PC's sessions with the server's. Nothing is deleted, and a backup is made first."));
 		assert.equal(value(host, "cloud-address"), "");
 		assert.equal(value(host, "cloud-code"), "");
@@ -140,13 +140,13 @@ describe("Settings → Cloud on a desktop app that isn't paired", () => {
 		assert.deepEqual(intervals, [], "and no repeating check");
 	});
 
-	it("the line under the name box follows what is typed", async () => {
+	it("the line under the name box is one fixed sentence, whatever is typed", async () => {
 		scriptCloud(() => off);
 		const { CloudSection } = await import("../components/settings/cloud-section.tsx");
 		const host = await mount(<CloudSection />);
 		await type(host.querySelector("#cloud-name"), "Laptop");
-		assert.equal(byTest(host, "cloud-name-help")?.textContent, "Your other devices show it: “Held by Laptop”.");
-		assert.equal(heldByExample("  "), "Your other devices show it: “Held by Desktop”.");
+		assert.equal(byTest(host, "cloud-name-help")?.textContent, "The server lists this PC by this name: Settings → Cloud.");
+		assert.equal(NAME_HELP_TEXT, "The server lists this PC by this name: Settings → Cloud.");
 	});
 
 	it("pairs: the three fields go to the app's own server, and the paired screen takes the form's place", async () => {

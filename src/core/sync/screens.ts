@@ -34,8 +34,8 @@ export const CLOUD_TEXT = {
 	cancel: "Cancel",
 } as const;
 
-/** Under the name box: what the other devices will read. */
-export const heldByExample = (name: string): string => `Your other devices show it: “Held by ${name.trim() || DEFAULT_DESKTOP_NAME}”.`;
+/** Under the name box: where the server lists this PC. */
+export const NAME_HELP_TEXT = "The server lists this PC by this name: Settings → Cloud.";
 
 /** After an Unpair made without a connection. */
 export const serverNotTold = (name: string): string => `The server couldn't be told. Remove “${name}” there too: Settings → Cloud.`;

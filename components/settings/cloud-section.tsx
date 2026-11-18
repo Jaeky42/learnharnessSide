@@ -14,7 +14,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { CLOUD_TEXT, DEFAULT_DESKTOP_NAME, heldByExample, normalizeServerAddress, recentlyText, serverNotTold } from "@/src/core";
+import { CLOUD_TEXT, DEFAULT_DESKTOP_NAME, NAME_HELP_TEXT, normalizeServerAddress, recentlyText, serverNotTold } from "@/src/core";
 import { announceSyncInUse } from "@/components/cloud/sync-marker";
 import { SettingsGroup } from "./controls.tsx";
 import { lastSyncedText } from "./obsidian-section.tsx";
@@ -111,7 +111,7 @@ function PairForm({ view, notice, onPaired }: { view: CloudView; notice: string 
 			</label>
 			<label className="flex flex-col gap-1 text-xs text-muted-foreground" htmlFor="cloud-name">{CLOUD_TEXT.nameLabel}
 				<input id="cloud-name" name="cloud-name" type="text" autoComplete="off" spellCheck={false} maxLength={40} className={`${fieldClass} max-w-60`} value={name} onChange={(e) => setName(e.target.value)} />
-				<span data-testid="cloud-name-help">{heldByExample(name)}</span>
+				<span data-testid="cloud-name-help">{NAME_HELP_TEXT}</span>
 			</label>
 			<p className="text-xs text-muted-foreground" data-testid="cloud-pair-note">{again ? CLOUD_TEXT.pairingAgain : CLOUD_TEXT.firstPairing}</p>
 			<button type="submit" className={primaryClass} disabled={busy || !address.trim() || !code.trim() || !name.trim()} data-testid="cloud-pair">{busy ? CLOUD_TEXT.pairing : CLOUD_TEXT.pair}</button>
