@@ -21,6 +21,7 @@ import { AttachFilesButton } from "@/components/attach-files-button";
 import { SessionStarter } from "@/components/start-session";
 import type { TurnUsage } from "@/src/core";
 import { enterSends } from "@/components/phone/enter-key";
+import { DictationErrorLine } from "@/components/phone/dictation-error-line"; // FORK (phone dictation error)
 
 /**
  * Home — the knowledge graph is the main view, full-bleed edge to edge
@@ -211,6 +212,8 @@ export function Home({
 			    bottom edge). Matches chat.tsx's DOCK geometry (max-w-[46rem]
 			    px-4) so nothing shifts when a session starts (owner). */}
 			<div className="pointer-events-none absolute inset-x-0 bottom-0 pb-5">
+				{/* FORK (phone dictation error): phone only, floats above the dock. */}
+				<DictationErrorLine error={dictation.error} className="mb-2" />
 				<div className="pointer-events-auto mx-auto w-full max-w-[46rem] px-4">
 					{/* The pick bar (owner vision, 2026-10-04): the chain
 					    table's selection is PERSISTENT — picked

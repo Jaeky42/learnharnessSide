@@ -17,6 +17,7 @@ import { ChainTableOverlay } from "@/components/chain-table.tsx";
 import { ComposerActions, NodePickerControl } from "@/components/composer-actions";
 import { OPENING_PROMPT_FAILURE } from "@/components/opening-prompt";
 import { SessionStarter } from "@/components/start-session";
+import { DictationErrorLine } from "@/components/phone/dictation-error-line"; // FORK (phone dictation error)
 import type { ChatSettings, GraphSnapshot } from "@/src/core";
 
 /** The draft's pick set (owner round 10): the SAME shape the home pick
@@ -188,7 +189,9 @@ export function DraftShell({
 							</ConversationContent>
 						</Conversation>
 						<div className="h-24 bg-gradient-to-t from-background via-background/85 to-transparent" />
-						<div className="bg-background pb-4">
+						<div className="relative bg-background pb-4">
+							{/* FORK (phone dictation error): phone only, floats above the dock. */}
+							<DictationErrorLine error={dictation.error} className="mb-2" />
 							<div className={DOCK}>
 								<ComposerActions
 									picker={(picks.length > 0 || mode === "practice") && (

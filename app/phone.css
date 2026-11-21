@@ -491,6 +491,16 @@
 }
 
 @media (max-width: 639.98px) {
+	/* A failed Dictate run: the mic takes the theme's error colour until the
+	   next tap (the idle button carries data-dictation-error while the
+	   dictation's error is set). The reason itself is the short line above the
+	   message box (components/phone/dictation-error-line.tsx). */
+	html:not(.lh-electron) :is([data-phone="stats"] [data-testid="dictation-toggle"], [data-testid="side-tutor-dictate"])[data-dictation-error] {
+		color: var(--lh-error);
+	}
+}
+
+@media (max-width: 639.98px) {
 	/* Press-and-hold rows: no text selection or iOS callout while holding. */
 	html:not(.lh-electron) [data-phone-press] {
 		-webkit-user-select: none;

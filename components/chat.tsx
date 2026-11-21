@@ -106,6 +106,7 @@ import { ThinkingCard, ProblemCard, type PracticeThinkingData } from "@/componen
 import { GraphContextCard, type GraphContextData } from "@/components/graph-context-card";
 import { TopBar } from "@/components/top-bar";
 import { useIsTouchPhone } from "@/components/phone/use-phone";
+import { DictationErrorLine } from "@/components/phone/dictation-error-line"; // FORK (phone dictation error)
 import { PluginTopBarActions } from "@/components/plugin-chrome";
 import { usePluginShortcutPage } from "@/components/plugin-shortcuts";
 import { createPluginSessionActionContext, type PluginSessionViewInput } from "@/src/core";
@@ -2204,6 +2205,7 @@ export function Chat({
 					onReserve={setDockReserve}
 					dictationSlot={<DictationBar dictation={dictation} disabled={pluginOwnsDock && !pluginMicAvailable} />}
 					dictationCancel={dictation.cancel}
+					dictationError={dictation.error} // FORK (phone dictation error)
 					queuedSteers={visibleQueuedSteers(steerQueue, nativeMessages)}
 					setupCta={
 						zeroKeys ? (
@@ -2491,6 +2493,7 @@ export function DockOverlay({
 	onOpenPlan,
 	dictationSlot,
 	dictationCancel,
+	dictationError,
 	setupCta,
 	queuedSteers,
 }: {
@@ -2562,6 +2565,8 @@ export function DockOverlay({
 	/** Esc in a pending question's field stops dictation (the strip is the
 	 *  stats bar's; the stop belongs to the page-owned hook, threaded down). */
 	dictationCancel?: () => void;
+	/** FORK (phone dictation error): the failed run's reason, for the phone's short line above the dock. */
+	dictationError?: string | null;
 	/** The queued-steer indicator's lines (composer steering, 2026-10-03):
 	 *  already filtered by visibleQueuedSteers — only undrained steers. */
 	queuedSteers: QueuedSteerLine[];
@@ -3119,6 +3124,8 @@ export function DockOverlay({
 		<div className="pointer-events-none absolute inset-x-0 bottom-0" style={{ right: sbInset }}>
 			<div className="h-24 bg-gradient-to-t from-background via-background/85 to-transparent" />
 			<div ref={blockRef} data-phone="dock" className="relative bg-background pb-5">
+				{/* FORK (phone dictation error): phone only, floats above the dock (clear of the scroll-down disc and the Tutor's bubble). */}
+				<DictationErrorLine error={dictationError} className="mb-12" />
 				<div className={DOCK}>
 					<div ref={viewportRef} data-dock-viewport="" className="pointer-events-auto">
 					<div ref={bodyRef}>

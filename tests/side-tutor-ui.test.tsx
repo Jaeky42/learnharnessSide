@@ -490,6 +490,48 @@ describe("speaking to the tutor", () => {
 	});
 });
 
+describe("a failed run of the tutor's own, on a phone (phone dictation error)", () => {
+	const REASON = "Microphone permission denied";
+	const TUTOR = "side-tutor";
+	const onPhone = async (width: boolean, test: () => Promise<void>) => {
+		Object.assign(dom.window, { matchMedia: (query: string) => ({ matches: width && query.includes("max-width"), addEventListener() {}, removeEventListener() {} }) });
+		try { await test(); } finally { delete (dom.window as unknown as Record<string, unknown>).matchMedia; }
+	};
+
+	it("shows the reason for five seconds in the line above the typing box, and marks the mic", async () => {
+		await onPhone(true, async () => {
+			const host = await mountTutor(fakeDictation({ error: REASON, destinationId: TUTOR }), LESSON, { opened: false });
+			await act(async () => (document.querySelector("[data-testid='side-tutor-toggle']") as HTMLElement).click());
+			const notice = host.querySelector("[data-testid='side-tutor-notice']") as HTMLElement;
+			assert.ok(notice, "the existing line above the typing box");
+			assert.equal(notice.textContent, REASON, "the words exactly");
+			assert.equal(notice.getAttribute("role"), "alert");
+			assert.ok(notice.querySelector(".line-clamp-3"));
+			assert.equal(host.querySelector("[data-testid='side-tutor-dictate']")!.hasAttribute("data-dictation-error"), true, "app/phone.css gives it the error colour");
+			await act(async () => new Promise((r) => setTimeout(r, 4500)));
+			assert.ok(host.querySelector("[data-testid='side-tutor-notice']"), "still there before five seconds");
+			await act(async () => new Promise((r) => setTimeout(r, 800)));
+			assert.equal(host.querySelector("[data-testid='side-tutor-notice']"), null, "gone after five seconds");
+			assert.equal(host.querySelector("[data-testid='side-tutor-dictate']")!.hasAttribute("data-dictation-error"), true, "the mic stays marked until the next tap");
+		});
+	});
+
+	it("shows nothing for a failure of the lesson's own run", async () => {
+		await onPhone(true, async () => {
+			const host = await mountTutor(fakeDictation({ error: REASON, destinationId: "main" }), LESSON, { opened: false });
+			await act(async () => (document.querySelector("[data-testid='side-tutor-toggle']") as HTMLElement).click());
+			assert.equal(host.querySelector("[data-testid='side-tutor-notice']"), null);
+			assert.equal(host.querySelector("[data-testid='side-tutor-dictate']")!.hasAttribute("data-dictation-error"), false);
+		});
+	});
+
+	it("on a computer there is no extra line (the error stays in the button's tooltip)", async () => {
+		const host = await mountTutor(fakeDictation({ error: REASON, destinationId: TUTOR }));
+		assert.equal(host.querySelector("[data-testid='side-tutor-notice']"), null);
+		assert.equal(host.querySelector("[data-testid='side-tutor-dictate']")!.getAttribute("title"), REASON);
+	});
+});
+
 describe("minimized", () => {
 	it("is a round bubble with no words", async () => {
 		dockAt(640, 900);

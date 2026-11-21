@@ -36,6 +36,7 @@ import { useDockAnchor } from "@/components/phone/use-dock-anchor";
 import { plainEnterSends } from "@/components/phone/enter-key";
 import { joinDictation, type Dictation } from "@/components/dictation";
 import { SIDE_TUTOR_DICTATION_ID, SideTutorDictate, tutorOwnsDictation } from "@/components/side-tutor-dictation";
+import { useDictationErrorFlash } from "@/components/phone/dictation-error-line"; // FORK (phone dictation error)
 import { MORPH_CLOSE_MS, MORPH_EASE, MORPH_OPEN_MS, morphStart, resizeTutorRect, storedTutorSize, TUTOR_EDGE, TUTOR_RESIZE_EDGES, type MorphBox, type TutorRect, type TutorResizeEdge, type TutorSize } from "@/components/side-tutor-window";
 import { tabletTopInset } from "@/components/phone/tablet-top";
 import { SWIPE_BAR_ATTR, useTutorSheetSwipe } from "@/components/phone/tutor-sheet-swipe";
@@ -218,6 +219,8 @@ export function SideTutor({ chatId, messages, side, dictation, openRequest = 0, 
 	/** Spoken words join what is already typed (the lesson's separator rule). */
 	const appendDictated = useCallback((text: string) => setInput(joinDictation(inputTextRef.current, text).slice(0, SIDE_QUESTION_MAX_CHARS)), [setInput]);
 	const tutorDictating = tutorOwnsDictation(dictation);
+	// FORK (phone dictation error): on a phone a failed run of the tutor's own shows for 5 s in the line above the typing box.
+	const dictationNotice = useDictationErrorFlash(dictation?.destinationId === SIDE_TUTOR_DICTATION_ID ? dictation.error : null);
 
 	const panelRef = useRef<HTMLDivElement>(null);
 	/** The minimized bubble, and (while the window is open on a computer) an
@@ -783,8 +786,8 @@ export function SideTutor({ chatId, messages, side, dictation, openRequest = 0, 
 			</div>
 
 			{/* A refusal with nothing saved to show it under (no model set up, say): upstream's reason. */}
-			{state?.error !== undefined && !answering && sections.find((section) => section.id === state.threadId)?.messages.at(-1)?.role !== "user" && (
-				<div data-testid="side-tutor-notice" className={cn("border-t border-border px-3 py-1.5 text-xs text-error", BAR_BG)}>{state.error}</div>
+			{(dictationNotice || (state?.error !== undefined && !answering && sections.find((section) => section.id === state.threadId)?.messages.at(-1)?.role !== "user")) && (
+				<div data-testid="side-tutor-notice" role={dictationNotice ? "alert" : undefined} className={cn("border-t border-border px-3 py-1.5 text-xs text-error", BAR_BG)}><span className={dictationNotice ? "line-clamp-3" : undefined}>{dictationNotice ?? state?.error}</span></div>
 			)}
 
 			{/* A highlighted passage waiting for its question (the lesson's Ask). */}

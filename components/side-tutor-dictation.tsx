@@ -103,6 +103,8 @@ export function SideTutorDictate({ dictation, append }: { dictation: Dictation; 
 			disabled={busyElsewhere}
 			className="flex size-(--lh-tutor-row) shrink-0 items-center justify-center rounded-md border border-input text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40"
 			aria-label={error ? `Dictation failed: ${error}` : "Start dictation"}
+			// FORK (phone dictation error): app/phone.css colours the mic in the error colour on a phone.
+			data-dictation-error={error ? "" : undefined}
 			title={error ?? "Dictate"}
 			data-testid="side-tutor-dictate"
 			// Seamless sessions: a press starts moving a session another device holds (components/cloud/session-move.ts).
