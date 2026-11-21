@@ -2,11 +2,11 @@
  * FORK (Firefox sample rate): the pcm-capture worklet's rate conversion
  * (processorOptions.targetRate), run in Node with the AudioWorklet globals
  * stubbed. The unchanged path is compared sample for sample against the
- * worklet as it was before the fork edit (git HEAD~ copy kept below as a
- * reference implementation of the same loop).
+ * worklet as it was before the fork edit, kept as a fixture
+ * (tests/fixtures/pcm-capture-before-native-rate.js), and against a
+ * reference implementation of the same loop.
  */
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -41,14 +41,7 @@ function load(source: string, sampleRate: number): new (options?: unknown) => Pr
 }
 
 const current = readFileSync(join(root, "public/worklets/pcm-capture.js"), "utf8");
-let original: string | null = null;
-try {
-	original = execFileSync("git", ["show", "HEAD:public/worklets/pcm-capture.js"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
-	// Once the change is committed HEAD already has the new file: only compare then if it is the old one.
-	if (original.includes("targetRate")) original = null;
-} catch {
-	original = null;
-}
+const original = readFileSync(join(root, "tests/fixtures/pcm-capture-before-native-rate.js"), "utf8");
 
 function run(Ctor: new (options?: unknown) => Processor, signal: Float32Array, quantum = 128) {
 	const p = new Ctor({ processorOptions: undefined });
@@ -117,9 +110,9 @@ describe("pcm-capture at the native 16 kHz path", () => {
 		assert.ok(frameLengths.every((n) => n === 2048));
 	});
 
-	it("is identical to the worklet before the change, sample for sample", { skip: original === null }, () => {
+	it("is identical to the worklet before the change, sample for sample", () => {
 		const signal = noise(128 * 300);
-		const before = run(load(original!, 16000), signal);
+		const before = run(load(original, 16000), signal);
 		const after = run(load(current, 16000), signal);
 		assert.deepEqual(after.audio, before.audio);
 		assert.deepEqual(after.levels, before.levels);

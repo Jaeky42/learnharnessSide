@@ -83,6 +83,7 @@ Branch `side-tutor`, based on upstream amosblomqvist/learnharness v0.6.0 (merged
   - The button shows only an error of its own run, as upstream's views do.
   - Send while still listening ends the run first, then asks with the spoken words. Esc cancels the run (the words are dropped), as in the lesson; a second Esc minimizes. Minimizing ends the run and keeps the words.
   - The button is off while the lesson itself is dictating. Without a Deepgram key it says so, and a click opens Settings → Keys, as the lesson's Dictate does.
+  - **On a phone a failed run says why** (owner's choice; "Footer row" under "Phone layouts" in `docs/cloud-sync.md`): the reason of the Tutor's own run shows for 5 seconds in the sheet's line above the typing box (the line a refusal uses), and the mic is in the theme's error colour until the next tap. On a computer the window is unchanged (the reason is the button's tooltip).
 - **The Tutor on upstream's side conversations** (owner's decisions at the 0.6.0 merge; before it, a second agent of the fork's own answered and kept its thread outside the chat record):
   - **What changed with upstream's behaviour:**
     - The main teacher receives every exchange with its next turn, and summaries include them. The teacher's prompt has upstream's paragraph about them (`shared/35-side-conversations.md`).

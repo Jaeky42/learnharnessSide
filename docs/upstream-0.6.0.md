@@ -407,4 +407,10 @@ Protocol 2 means both sides must be updated, or sync pauses (nothing is discarde
     - `src/core/content-reader.ts`: `isMoneyPair`; `readContentSpans` takes an optional `money` list, and a single-dollar pair that is money gives up its opening dollar as prose;
     - `src/core/math-delims.ts`: `transformMathDelimiters` escapes the money dollars inside prose spans; re-exports `isMoneyPair`;
     - `tests/render-markdown.test.tsx`: two cases that pinned bare currency as untouched now expect the opening dollar escaped.
+  - **Added by dictation in Firefox** ("Dictation in Firefox" under "Footer row" in `docs/cloud-sync.md`; each edit marked `FORK (Firefox sample rate)`):
+    - `components/dictation.tsx`: `needsNativeRate`, `dropAudioGraph`, `isGraphRateError`, `__resetAudioGraphForTests`; `ensureAudioGraph` builds a default-rate context once the 16 kHz one was refused; in `start`, the graph is built by `buildGraph` and retried once on that refusal;
+    - `public/worklets/pcm-capture.js`: `processorOptions.targetRate` and the two conversions; without it the loop is upstream's.
+  - **Added by the phone's dictation reason** ("A Dictate that fails shows its reason" there; each edit marked `FORK (phone dictation error)`):
+    - `components/dictation.tsx` (`DictationBar`): `data-dictation-error` on the errored idle button;
+    - `components/chat.tsx`: a `dictationError` prop on the dock, and `DictationErrorLine` inside the `data-phone="dock"` block; `components/home.tsx` and `components/new-session.tsx`: the same line above their bottom block (new-session's block made `relative`).
   - The phone styling of Flashcards and Rich code blocks hangs on upstream's class names and markup from the fork's own stylesheets; `tests/phone-flashcards.test.ts`, `tests/phone-flashcards-structure.test.tsx` and `tests/phone-rich-code-blocks.test.tsx` fail when one of those names or structures changes upstream.
