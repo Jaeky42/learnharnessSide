@@ -787,7 +787,7 @@ export function SideTutor({ chatId, messages, side, dictation, openRequest = 0, 
 
 			{/* A refusal with nothing saved to show it under (no model set up, say): upstream's reason. */}
 			{(dictationNotice || (state?.error !== undefined && !answering && sections.find((section) => section.id === state.threadId)?.messages.at(-1)?.role !== "user")) && (
-				<div data-testid="side-tutor-notice" role={dictationNotice ? "alert" : undefined} className={cn("border-t border-border px-3 py-1.5 text-xs text-error", BAR_BG)}><span className={dictationNotice ? "line-clamp-3" : undefined}>{dictationNotice ?? state?.error}</span></div>
+				<div data-testid="side-tutor-notice" role={dictationNotice ? "alert" : undefined} className={cn("border-t border-border px-3 py-1.5 text-xs text-error", BAR_BG)}><span className={dictationNotice ? "line-clamp-3 [overflow-wrap:anywhere]" : undefined}>{dictationNotice ?? state?.error}</span></div>
 			)}
 
 			{/* A highlighted passage waiting for its question (the lesson's Ask). */}

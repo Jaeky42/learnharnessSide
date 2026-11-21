@@ -31,7 +31,7 @@ Object.assign(globalThis, {
 	HTMLElement: dom.window.HTMLElement, Element: dom.window.Element, IS_REACT_ACT_ENVIRONMENT: true,
 });
 const { createRoot } = await import("react-dom/client");
-const { DICTATION_ERROR_MS, DictationErrorLine } = await import("../components/phone/dictation-error-line.tsx");
+const { DICTATION_ERROR_MS, DictationErrorLine, LINE_TOP_GAP, lineDrop } = await import("../components/phone/dictation-error-line.tsx");
 
 const roots: { root: import("react-dom/client").Root; host: HTMLElement }[] = [];
 async function mount(error: string | null) {
@@ -111,6 +111,92 @@ describe("the short line above the message box", () => {
 		assert.ok(line(host));
 		await render(null);
 		assert.equal(line(host), null, "cleared with the error");
+	});
+});
+
+describe("never behind the top bar (an opened question fills the screen)", () => {
+	it("the rule: down to the gap under the top bar's end, and not at all when there is room", () => {
+		assert.equal(LINE_TOP_GAP, 8);
+		// Found in a real Firefox: the line's top 15 px from the screen's top, the top bar ending at 60.
+		assert.equal(lineDrop(15, 60), 53);
+		// The home-screen app's taller top bar (148 points).
+		assert.equal(lineDrop(15, 148), 141);
+		// A plain message box: the line is far below the top bar and stays.
+		assert.equal(lineDrop(575, 60), 0);
+		assert.equal(lineDrop(68, 60), 0, "exactly at the gap: not moved");
+		assert.equal(lineDrop(67.4, 60), 1, "whole pixels, never short of the gap");
+		// No top bar (home, new session): only the screen's own top counts.
+		assert.equal(lineDrop(575, null), 0);
+		assert.equal(lineDrop(-20, null), 28);
+	});
+
+	// linkedom lays nothing out: the boxes are scripted. The line's box follows
+	// its own transform, as a real one does.
+	const boxes = { bar: 60, line: 15 };
+	const proto = dom.window.HTMLElement.prototype as unknown as { getBoundingClientRect?: () => { top: number; bottom: number } };
+	const script = () => {
+		proto.getBoundingClientRect = function (this: HTMLElement) {
+			if (this.getAttribute("data-phone") === "topbar") return { top: 0, bottom: boxes.bar };
+			if (this.getAttribute("data-testid") === "dictation-error-line") {
+				const moved = Number(/translateY\(([-\d.]+)px\)/.exec(this.style.transform ?? "")?.[1] ?? 0);
+				return { top: boxes.line + moved, bottom: boxes.line + moved + 30 };
+			}
+			return { top: 1000, bottom: 1000 };
+		};
+	};
+	const addBar = () => {
+		const bar = document.createElement("div");
+		bar.setAttribute("data-phone", "topbar");
+		document.body.appendChild(bar);
+		return bar;
+	};
+	afterEach(() => {
+		delete proto.getBoundingClientRect;
+		document.querySelector("[data-phone='topbar']")?.remove();
+		boxes.bar = 60;
+		boxes.line = 15;
+	});
+
+	it("a line that would sit behind the top bar is moved to just under it, with a transform only", async () => {
+		script();
+		addBar();
+		const { host } = await mount("Deepgram token grant failed (403)");
+		const el = line(host)!;
+		assert.equal(el.style.transform, "translateY(53px)", "15 px down to 68: the top bar's 60 plus the gap");
+		assert.equal(el.getBoundingClientRect().top, boxes.bar + LINE_TOP_GAP);
+		const classes = (el.getAttribute("class") ?? "").split(/\s+/);
+		assert.ok(classes.includes("absolute") && classes.includes("bottom-full"), "its anchor is unchanged, so nothing else moves");
+	});
+
+	it("with a plain message box it stays where it was", async () => {
+		script();
+		addBar();
+		boxes.line = 575;
+		const { host } = await mount("Microphone permission denied");
+		assert.equal(line(host)!.style.transform ?? "", "");
+	});
+
+	it("follows the block while it shows: a question opening moves it down, folding puts it back", async () => {
+		script();
+		addBar();
+		boxes.line = 575;
+		const { host } = await mount("Microphone permission denied");
+		const el = line(host)!;
+		boxes.line = 15; // the question opened and the block grew to the top bar
+		await act(async () => { dom.window.dispatchEvent(new dom.window.Event("resize")); });
+		assert.equal(el.style.transform, "translateY(53px)");
+		await act(async () => { dom.window.dispatchEvent(new dom.window.Event("resize")); });
+		assert.equal(el.style.transform, "translateY(53px)", "measured from its unmoved place: it doesn't creep");
+		boxes.line = 575;
+		await act(async () => { dom.window.dispatchEvent(new dom.window.Event("resize")); });
+		assert.equal(el.style.transform ?? "", "");
+	});
+
+	it("a long unbroken reason wraps inside the line", async () => {
+		const { host } = await mount('Deepgram token grant failed (403): {"err_code":"FORBIDDEN","err_msg":"Insufficient permissions."}');
+		const span = line(host)!.querySelector("span")!;
+		const classes = (span.getAttribute("class") ?? "").split(/\s+/);
+		assert.ok(classes.includes("line-clamp-3") && classes.includes("[overflow-wrap:anywhere]"));
 	});
 });
 
