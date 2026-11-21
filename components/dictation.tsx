@@ -204,9 +204,14 @@ const warmTokens = createWarmMinter(mintFreshToken);
  * (source, worklet) disconnect at teardown instead. */
 let sharedCtx: AudioContext | null = null;
 let workletModule: Promise<void> | null = null;
+/* FORK (Firefox sample rate): Firefox can't connect a MediaStream running
+ * at the device rate (48000/44100) to a 16 kHz AudioContext (NotSupportedError,
+ * Mozilla bug 1725336). Set after that exact failure; later runs then go
+ * straight to a native-rate context + a worklet that converts to 16 kHz. */
+let needsNativeRate = false;
 
 function ensureAudioGraph(): { ctx: AudioContext; module: Promise<void> } {
-	if (!sharedCtx) sharedCtx = new AudioContext({ sampleRate: 16000 });
+	if (!sharedCtx) sharedCtx = needsNativeRate ? new AudioContext() : new AudioContext({ sampleRate: 16000 });
 	if (!workletModule) {
 		workletModule = sharedCtx.audioWorklet.addModule("/worklets/pcm-capture.js").catch((e: unknown) => {
 			workletModule = null; // failed load: retry next run
@@ -214,6 +219,27 @@ function ensureAudioGraph(): { ctx: AudioContext; module: Promise<void> } {
 		});
 	}
 	return { ctx: sharedCtx, module: workletModule };
+}
+
+/** FORK (Firefox sample rate): close and forget the shared context and its module memo. */
+function dropAudioGraph(): void {
+	const ctx = sharedCtx;
+	sharedCtx = null;
+	workletModule = null;
+	try {
+		void Promise.resolve(ctx?.close()).catch(() => {});
+	} catch {}
+}
+
+/** FORK (Firefox sample rate): the one failure that means "this browser can't do a 16 kHz graph". */
+function isGraphRateError(e: unknown): boolean {
+	return typeof DOMException !== "undefined" && e instanceof DOMException && e.name === "NotSupportedError";
+}
+
+/** Test-only: start from a clean app-lifetime graph. */
+export function __resetAudioGraphForTests(): void {
+	dropAudioGraph();
+	needsNativeRate = false;
 }
 
 /** RMS (0..1) → normalized 0..1 across the audible dB window. */
@@ -582,35 +608,60 @@ export function useDictation({ append, destination = "primary", disabled = false
 
 			// Mitigation C: app-lifetime context + memoized worklet module —
 			// per-run costs (context creation, module fetch) are gone.
-			const { ctx, module } = ensureAudioGraph();
-			await module;
-			if (ctx.state === "suspended") await ctx.resume();
-			if (gen !== genRef.current) return;
+			// FORK (Firefox sample rate): built by a function so a NotSupportedError
+			// from the 16 kHz graph can retry once with a native-rate graph.
+			const buildGraph = async (): Promise<boolean> => {
+				const { ctx, module } = ensureAudioGraph();
+				await module;
+				if (ctx.state === "suspended") await ctx.resume();
+				if (gen !== genRef.current) return false;
 
-			const worklet = new AudioWorkletNode(ctx, "pcm-capture");
-			workletRef.current = worklet;
-			worklet.port.onmessage = (e) => {
-				if (gen !== genRef.current) return;
-				const msg = e.data as { type: string; rms?: number; buffer?: ArrayBuffer };
-				if (msg.type === "level") {
-					levelRef.current = msg.rms ?? 0; // never reset to zero (dictate pattern)
-				} else if (msg.type === "audio") {
-					const ws = wsRef.current;
-					if (ws && ws.readyState === WebSocket.OPEN) ws.send(msg.buffer!);
-					// Mitigation A: not OPEN yet (handshake or reconnect gap) —
-					// queue, capped; the open handler flushes in order.
-					else {
-						pendingRef.current.push(msg.buffer!);
-						if (pendingRef.current.length > 256) pendingRef.current.shift();
+				const worklet = needsNativeRate
+					? new AudioWorkletNode(ctx, "pcm-capture", { processorOptions: { targetRate: 16000 } })
+					: new AudioWorkletNode(ctx, "pcm-capture");
+				workletRef.current = worklet;
+				worklet.port.onmessage = (e) => {
+					if (gen !== genRef.current) return;
+					const msg = e.data as { type: string; rms?: number; buffer?: ArrayBuffer };
+					if (msg.type === "level") {
+						levelRef.current = msg.rms ?? 0; // never reset to zero (dictate pattern)
+					} else if (msg.type === "audio") {
+						const ws = wsRef.current;
+						if (ws && ws.readyState === WebSocket.OPEN) ws.send(msg.buffer!);
+						// Mitigation A: not OPEN yet (handshake or reconnect gap) —
+						// queue, capped; the open handler flushes in order.
+						else {
+							pendingRef.current.push(msg.buffer!);
+							if (pendingRef.current.length > 256) pendingRef.current.shift();
+						}
 					}
-				}
+				};
+				const source = ctx.createMediaStreamSource(stream);
+				sourceRef.current = source;
+				source.connect(worklet);
+				// Pull the graph with silence out (the worklet writes no output) —
+				// an unconnected worklet node is never clocked.
+				worklet.connect(ctx.destination);
+				return true;
 			};
-			const source = ctx.createMediaStreamSource(stream);
-			sourceRef.current = source;
-			source.connect(worklet);
-			// Pull the graph with silence out (the worklet writes no output) —
-			// an unconnected worklet node is never clocked.
-			worklet.connect(ctx.destination);
+			try {
+				if (!(await buildGraph())) return;
+			} catch (graphError) {
+				// FORK (Firefox sample rate): retry once, in this run, natively.
+				if (needsNativeRate || !isGraphRateError(graphError)) throw graphError;
+				if (gen !== genRef.current) return;
+				try {
+					sourceRef.current?.disconnect();
+				} catch {}
+				sourceRef.current = null;
+				try {
+					workletRef.current?.disconnect();
+				} catch {}
+				workletRef.current = null;
+				dropAudioGraph();
+				needsNativeRate = true;
+				if (!(await buildGraph())) return;
+			}
 		} catch (e) {
 			if (gen !== genRef.current) return;
 			const msg =
@@ -826,6 +877,8 @@ export function DictationBar({ dictation, disabled = false }: { dictation: Dicta
 					disabled={disabled || blocked}
 					aria-label={error ? `Dictation failed: ${error}` : "Start dictation"}
 					data-testid="dictation-toggle"
+					// FORK (phone dictation error): lets stylesheets/tests see the errored idle button.
+					data-dictation-error={error ? "" : undefined}
 					className="flex h-7 w-full items-center justify-center gap-1.5 rounded-md border border-border/50 bg-card/50 text-xs text-muted-foreground/70 shadow-lg backdrop-blur transition-colors hover:border-border hover:text-muted-foreground"
 				>
 					<MicIcon className="size-3.5" />
