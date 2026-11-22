@@ -4,6 +4,8 @@
 
 ### Login (VPS) — built in Phase 1
 
+This is the login of a single-copy server (no `LH_GATE_SECRET`). Behind the gateway, which is what the owner's server runs since the switch-over, the copy's own login routes and pages answer 404 and the gateway's sign-in applies ("Sign-in, sessions and the lockout" under "Accounts on one server"); there `reset-password` runs in the gateway's container.
+
 - Browser mode had no authentication (`desktopAPIAuthorized` returns `true` when it isn't the desktop server). Server mode (`LH_SERVER_MODE=1`, set by the Docker image) puts a login gate in front of **every page and API**; only `/login`, `/setup` and static build files are open.
 - **First start:** the server prints a one-time **setup code** to its log (`docker compose logs lh`). `/setup` takes the code and a new password. It works once.
 - **Password:** at least **8 characters**, stored only as a scrypt hash.
@@ -17,7 +19,7 @@
   - **Sign out everywhere**, this device included.
 - **Forgot password:** `docker compose exec lh reset-password` removes the password and every login and prints a new setup code. Data isn't touched.
 - **Storage:** `server-login.json` beside `auth.json`, mode 0600. It's never synced, and the agents' file tools refuse it. A damaged file closes the site (503) instead of opening it.
-- **Later (Phase 6):** desktop sync will use per-device tokens that can be revoked.
+- **Desktop sync** uses per-device keys that can be revoked (built in Phase 5: a pairing code gives each desktop app its own device key; `src/core/sync/devices.ts`, `syncGate` in `src/server/server-auth.ts`).
 
 ### Code and tests
 
@@ -79,7 +81,7 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 **Leaving folders out (owner's choice: fully automatic, no list to paste)**
 
 - Obsidian Sync can only exclude folders, so every top-level folder except `LearnHarness/` goes on `ob`'s excluded-folders list.
-- Why not a list up front: the server can't list the vault before syncing (`ob` starts downloading while the file list is still arriving), and the desktop app gets no new code until the final merge.
+- Why not a list up front: the server can't list the vault before syncing (`ob` starts downloading while the file list is still arriving), and only a paired desktop app sends its folder names (below).
 - So the manager leaves a folder out **the moment it first shows up**:
   - on `ob`'s `Downloaded <name>` line for a new top-level folder (a folder's record arrives before its files, so usually none of them is downloaded);
   - on a `Downloading <folder>/…` line;
@@ -89,7 +91,7 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 - Kept: `LearnHarness/` (the exact name) and dot-folders (`ob` never syncs those).
 - **Strays:** a file or two can arrive before its folder is left out. They stay on the server, unused. `ob` never uploads, changes or deletes anything in an excluded folder, so they can't affect Obsidian.
 - **Loose files at the top of the vault always sync**; Obsidian Sync can't exclude single files. The owner's pasted pictures live there, which is why pictures in notes show on the phone.
-- **Later (Phases 5–6):** the desktop can send the folder names ahead of time, so even the strays stop.
+- **A paired desktop app sends its vault's top-level folder names** with a sync round, and the manager leaves them out before `ob` starts and at once while it runs, so the strays stop for those folders (`desktopVaultFolders` in `src/store/sync/vault-folders.ts`, `foldersAnnounced` in `src/server/obsidian-sync.ts`).
 
 **Passwords**
 
@@ -184,6 +186,8 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 
 ### State
 
+- **The owner's server runs the gateway** (switched over). The owner reported "everything works great" without saying which steps or screens they tried, so an invite, the home-screen app through the gateway and the PC carrying on are confirmed only as far as that sentence goes. Records: `docs/fork/history/ship-log.md`.
+- Two things the guide asked for that haven't been confirmed one by one: "Concurrent worker requests" lowered to 3 on the owner's copy, and the recovery codes kept.
 - **After `git pull` on the server, `./make-secrets.sh` must run before the next `./update.sh`:** the new compose file refuses to start without the secrets, so the nightly update would fail (and change nothing) until they exist.
 - **The sync protocol stays 3 and no stored format changed.** Nothing on the wire changed shape, so the order of updating the server and a PC doesn't matter. A desktop app and a single-copy server (no gateway) behave as before: everything new is switched by `LH_GATE_SECRET` / `LH_ACCOUNT_TAG` being set, or lives in the gateway and the maker. No existing test file was edited.
 - **Where to read:** the owner's decisions and every approved sentence are in `docs/multi-account-plan.md` (the sentences live in code in `src/core/account-screens.ts`). This part records what was built, where, and what the builder decided beyond the plan.
@@ -402,7 +406,7 @@ Bodies are at most 16 KB; a request has 10 s for its headers and 30 s in all.
 - **The pairing code says whose copy it is** (decision 7 in the plan). The desktop app's form (address, code, this PC's name) is unchanged and sends the code as typed (up to 64 characters); `POST /api/sync/pair` goes to the gateway, which reads the tag and forwards the body unchanged through the relay (with the copy's secret, scope `sync` and the client's address). The copy checks the code and counts a wrong one in its own lockout; a code of no copy's shape is refused here (401 or 429) and counted in the gateway's lockout.
 - **After pairing**, `/api/sync/*` is sorted by the tag in the key. A PC paired **before** the gateway has a 43-character key, goes to the owner's copy and **keeps syncing through the switch-over** without pairing again.
 - **A paused or removed account's PC** gets 503 (offline, key kept); **after the account is deleted for good** 401 `not_paired` (the app drops its key).
-- **The desktop app's pairing box was not widened:** a 13-character code fits (worked out from the font's metrics: 118 of 138 px; not looked at in a browser).
+- **The desktop app's pairing box was widened one step** (`max-w-44` in `components/settings/cloud-section.tsx`; it was `max-w-40`), which the owner allowed: in Chromium's font a 13-character code filled the old box with no room to spare (158 of 158 px, where the font's metrics had given 118 of 138 px).
 - Tests drive the real desktop client (`pairWithServer`, `syncRequest`) through the gateway's real functions to the real copy, for the owner's copy and a tagged one.
 
 ### Updates and the switch-over
@@ -432,7 +436,7 @@ None of these is approved item by item. Each went the way the plan or the code p
 - **The accounts file is backed up daily** beside itself, a missing file with a backup reads as damaged, and **while no owner exists, tagged device keys and pairing codes answer 503, never 401**, so a lost file doesn't make members' PCs drop their keys. An untagged key or code always goes to the configured owner's copy, also before the owner has claimed the gateway, so the PC paired today keeps syncing through the switch-over.
 - **Download my data limits:** refuses (413) above 3.5 GiB or 65,000 files (no Zip64); one at a time per copy (429); unsafe-for-Windows names skipped, not renamed, with a count in `skipped-files.txt`.
 - **Browser storage at sign-out** clears the four keys listed above; view state stays.
-- **The desktop app's pairing box was not widened** (above).
+- **The desktop app's pairing box was widened one step** (above), which the owner allowed.
 - **Delete my account** sits at the bottom of Settings → Account as a red text button under a divider.
 - **The owner's own copy gets the account copies' limits** (1 GB, 2 GB with swap, 512 processes, no capabilities, init) in `deploy/compose.yaml`. The plan sets the ceiling per copy; the owner's copy ran unlimited before, with "helpers at once" at 8, so the switch-over guide tells the owner to lower that to 3 by hand. **For the owner to confirm.**
 - **Changes to the build guide's contract** (each is marked in `docs/multi-account-build.md`): the network layout (nothing but Caddy reaches the gateway; no copy shares a network with another); the relay; `X-LH-Scope`; Caddy stripping the session cookie, refusing `Service-Worker`, `admin off` and failing closed; the maker's `start: false` and `fresh: true`, `GET /volumes`, the swap that keeps the old container until the new one runs, waiting for work on SIGTERM, `Init`, a log bound and `User: node` in the template, Docker Engine API 1.44, and socket access through `group_add` (`LH_DOCKER_GID`); the three secrets; `update.sh`'s rule for restarting the maker.
@@ -449,15 +453,10 @@ None of these is approved item by item. Each went the way the plan or the code p
 Not built; each is a decision for the owner.
 
 - **Asking for the owner's password again on Reset, Remove and Delete now.** All copies share one origin, so a tab left open from a member's copy in a browser the owner then signs in on could call the owner's Accounts routes (the routes check the session's role, not where the page came from). A password box on those confirm boxes would close that; the approved confirm boxes have none, so it changes approved screens.
-- **A firewall rule on the server: built, then declined** (the owner: "i dont really want the firewall"). Not open any more; the record is "The host firewall: built and checked, then declined" above.
-  - **The trial the owner saw first** (the sandbox, Docker 29, stand-in containers on a non-internal user bridge, on `docker0` and on a network made after the rules; a stand-in host service; the metadata address both forwarded to an "outside" namespace and bound on the host): every route to the host service and to `169.254.169.254` went from reached to refused; outbound (a real HTTPS request through a relay to the sandbox's proxy, a 1 MiB upload over an MTU-1280 hop), DNS through Docker's resolver, container to container, the published port from the host and from containers all still worked. Applied three times: the same rules. Removed: `iptables-save` identical to before. After a `dockerd` restart the rules were still there.
+- **A firewall rule on the server: built, then declined** (the owner: "i dont really want the firewall"). Not open any more; the record, with the trial the owner saw first, is "The host firewall: built and checked, then declined" in `docs/fork/history/server.md`.
 - **Each password check holds the gateway's one thread briefly** (scrypt, as on a single-copy server today): a flood of sign-in tries slows the site for everyone. The lockout bounds one address, not many.
 - **The owner's Reset is, by design (plan decisions 6 and 8), the power to set a member's password.** It signs the member out and unpairs their desktop apps, which is how the member can tell. Recorded here so the owner can confirm they accept it.
 - **The four first values** (4 accounts, 1 GB per copy, 2 GB of swap, 3 helpers at once) are approved as first values to tune on the real server ("Still for the owner, after the build" in the plan).
-
-#### From the switch-over on the owner's server
-
-- Two things the guide asked for that haven't been confirmed one by one: "Concurrent worker requests" lowered to 3 on the owner's copy, and the recovery codes kept.
 
 #### Known limits
 
@@ -511,15 +510,15 @@ Run one file at a time (`NODE_ENV=test npx tsx --test tests/<file>`).
 | `tests/gateway-gate.test.ts` | `/gate` in its order and every branch; the small rules repeated from the copy compared with the copy's own. |
 | `tests/gateway-routes.test.ts` | Sign-in, the first start, sessions extended by use and ended (a moved clock), the lockout, same answer for a wrong name and a wrong password, sign-out, password change and the unpairing it owes, the pages and manifest, a damaged file, the file's mode, the listener. |
 | `tests/gate-secret.test.ts` | A copy behind the gateway: the secret, the scopes, the copy's 404s, no setup code, `/api/internal/*`. |
-| `tests/sync-tags.test.ts`, `gateway-sync.test.ts`, `gateway-sync-tagged.test.ts` (+ `gateway-sync-harness.ts`) | Tags in codes and keys; the real desktop client through the gateway to the real copy, the owner's copy (a PC paired before the gateway carries on) and a tagged one (Pause → offline with the key kept, deleted → drops it, another account's cookie or tag never reaches it). |
+| `tests/sync-tags.test.ts`, `gateway-sync.test.ts`, `gateway-sync-tagged.test.ts` (+ `helpers/gateway-sync-harness.ts`) | Tags in codes and keys; the real desktop client through the gateway to the real copy, the owner's copy (a PC paired before the gateway carries on) and a tagged one (Pause → offline with the key kept, deleted → drops it, another account's cookie or tag never reaches it). |
 | `tests/maker.test.ts` | The fixed template, the tag check, the token, call sequences, the re-create on a new image, against a stand-in Docker API on a socket. |
-| `tests/gateway-invite.test.ts`, `gateway-accounts.test.ts`, `gateway-lifecycle.test.ts`, `gateway-reset.test.ts` (+ `gateway-fakes.ts`) | Redeeming (the maker failing, losing its answer or hanging; two redeems of one code; the last slot); every owner op; every branch of the loop; reset, new codes, Delete my account and `reset-owner`. |
+| `tests/gateway-invite.test.ts`, `gateway-accounts.test.ts`, `gateway-lifecycle.test.ts`, `gateway-reset.test.ts` (+ `helpers/gateway-fakes.ts`) | Redeeming (the maker failing, losing its answer or hanging; two redeems of one code; the last slot); every owner op; every branch of the loop; reset, new codes, Delete my account and `reset-owner`. |
 | `tests/gateway-review.test.ts` | The security review's findings, end to end. |
 | `tests/accounts-ui.test.tsx`, `account-own-ui.test.tsx` | The owner's screen and each person's new parts in the approved words; the row absent for a member and in the desktop app; the phone group; a single-copy server's Account screen unchanged. |
 | `tests/account-export.test.ts`, `sign-out-storage.test.ts` | The download (what is in, what never is; read back by a reader written in the test and by `unzip` / Python when present); the storage audit. |
 | `tests/deploy-files.test.ts` | The Caddyfile, compose file, entrypoint seed, `make-secrets.sh`, `build-gateway.mjs` and the image's wrappers (shell and YAML nothing else runs). |
 
-The existing tests that guard "unchanged" (`tests/server-auth.test.ts`, `sync-inert.test.ts`, `sync-pairing.test.ts`, `claude-code-status-ui.test.tsx`) stay as they were. **Run in the sandbox:** the whole suite, one file at a time, by an independent run (495 files, 6,805 tests; the only failures are the four known sandbox ones; typecheck clean; lint only the existing warning).
+The existing tests that guard "unchanged" (`tests/server-auth.test.ts`, `sync-inert.test.ts`, `sync-pairing.test.ts`, `claude-code-status-ui.test.tsx`) stay as they were.
 
 ## Updating the server
 
