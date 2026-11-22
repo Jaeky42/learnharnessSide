@@ -1,3 +1,5 @@
+> **This repository is a fork.** LearnHarness Side Tutor is a fork of [amosblomqvist/learnharness](https://github.com/amosblomqvist/learnharness). It adds a side tutor, a notes drawer, cloud sync with a self-hosted server, phone and tablet layouts, and several accounts on one server, and ships as a separate Windows app from this repository's releases. The fork's own docs are in [`docs/fork/`](docs/fork/README.md). Everything below is the upstream project's README.
+
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/assets/lh_banner_dark.png">
