@@ -1,5 +1,5 @@
 /**
- * Multi-account, slice 1c (docs/multi-account-build.md): a copy behind the
+ * Multi-account, slice 1c (docs/fork/plans/multi-account-build.md): a copy behind the
  * gateway. With server mode and LH_GATE_SECRET set, the copy's whole gate is
  * "does X-LH-Gate equal the secret" (constant time), sync paths then run the
  * device-key gate as before, the copy's own account routes and pages answer

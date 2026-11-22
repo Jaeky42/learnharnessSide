@@ -5,7 +5,7 @@ import { usePlugins } from "@/components/plugins";
 import type { FrontendPlugin } from "@/components/plugin-manager";
 import { Button } from "@/components/ui/button";
 import { SettingsRow, SettingsSection, Toggle } from "./controls";
-// Side-tutor fork: on a phone only the phone-ready core plugins can be changed.
+// FORK (phone): on a phone only the phone-ready core plugins can be changed.
 import { useIsPhone } from "@/components/phone/use-phone";
 import { isPhoneLockedPlugin } from "@/components/phone/phone-plugins";
 
@@ -56,7 +56,7 @@ function PluginRow({ plugin, onSettings }: { plugin: FrontendPlugin; onSettings:
 	const { manager, snapshot } = usePlugins();
 	const { info } = plugin;
 	const name = info.manifest?.name ?? info.id;
-	// Side-tutor fork: on a phone a core plugin that isn't phone-ready reads
+	// FORK (phone): on a phone a core plugin that isn't phone-ready reads
 	// as off ("Disabled", its switch off), greyed (app/phone.css) and
 	// unchangeable, with no settings button. Display only: nothing is written.
 	const phoneLocked = isPhoneLockedPlugin(useIsPhone(), info);

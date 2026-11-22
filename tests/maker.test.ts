@@ -508,7 +508,7 @@ describe("POST /copies", () => {
 			Driver: "local",
 			Labels: { "lh.account.tag": "K7Q", "lh.managed": "1" },
 		});
-		// The account network never takes Caddy's default route (docs/cloud-sync.md, "Networks").
+		// The account network never takes Caddy's default route (docs/fork/server.md, "Networks").
 		assert.deepEqual(docker.calls.find((c) => c.path.endsWith("/connect"))!.body, {
 			Container: "caddy",
 			EndpointConfig: { GwPriority: CADDY_ACCOUNT_GW_PRIORITY },

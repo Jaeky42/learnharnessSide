@@ -20,7 +20,7 @@ import * as acc from "../src/core/accounts.ts";
 import * as words from "../src/core/account-screens.ts";
 import * as core from "../src/core/server-auth.ts";
 import * as pages from "../gateway/pages.ts";
-import { cookiesOf, harness, MIN, PASSWORD, sessionFrom, type Harness } from "./gateway-fakes.ts";
+import { cookiesOf, harness, MIN, PASSWORD, sessionFrom, type Harness } from "./helpers/gateway-fakes.ts";
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "lh-gateway-invite-"));
 after(() => fs.rmSync(TMP, { recursive: true, force: true }));

@@ -46,7 +46,7 @@ function ActionIcon({ action }: { action: PluginAction }) {
 		: <PuzzleIcon aria-hidden="true" className="size-4 shrink-0" />;
 }
 
-// Side-tutor fork (cloud sync): a held action's look, keyed to aria-disabled
+// FORK (cloud sync): a held action's look, keyed to aria-disabled
 // (set only by `blocked`), as upstream's attach button does.
 const HELD_LOOK = "aria-disabled:cursor-default aria-disabled:opacity-40 aria-disabled:hover:bg-transparent aria-disabled:hover:text-muted-foreground";
 
@@ -58,7 +58,7 @@ function ActionButton({ item, context, captureContext, className, iconOnly = fal
 	iconOnly?: boolean;
 	menuItem?: boolean;
 	onRun?: () => void;
-	/** Side-tutor fork (cloud sync): why the action can't run here. The button
+	/** FORK (cloud sync): why the action can't run here. The button
 	 * keeps its name and icon, is greyed with this as its tooltip, and a press
 	 * does nothing (not `disabled`, so the tooltip still shows). */
 	blocked?: string;
@@ -118,7 +118,7 @@ export function fitPluginTopBarActions(widths: readonly number[], available: num
 	return count;
 }
 
-// Side-tutor fork (cloud sync): `blocked` greys every action, in the row and
+// FORK (cloud sync): `blocked` greys every action, in the row and
 // in the overflow menu (which still opens, so they can be seen), on a session
 // another device holds.
 export function PluginTopBarActions({ context, captureContext, blocked }: { context: Extract<PluginActionContext, { placement: "top-bar" }>; captureContext?: () => PluginActionContext | undefined; blocked?: string }) {

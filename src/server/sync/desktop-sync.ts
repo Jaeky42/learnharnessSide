@@ -1,5 +1,5 @@
 /**
- * Cloud sync (Phase 5, docs/cloud-sync.md): the DESKTOP's side of session
+ * Cloud sync (Phase 5, docs/fork/cloud-sync.md): the DESKTOP's side of session
  * sync. One call to tick() is one round with the server:
  *
  *   1. ask what changed since last time, and bring those sessions here;

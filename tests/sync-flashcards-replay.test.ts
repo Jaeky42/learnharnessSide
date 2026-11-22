@@ -1,5 +1,5 @@
 /**
- * Flashcards sync (docs/phone-plugins-plan.md): schedules never travel; each
+ * Flashcards sync (docs/fork/plans/phone-plugins-plan.md): schedules never travel; each
  * device works them out again from the reviews with the plugin's own
  * scheduler. These tests drive the plugin's real back end through a long
  * single-device history (every rating, learning and relearning steps,
@@ -11,7 +11,7 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 import { applyFlashcardsChanges, rebuildFlashcards, readFlashcards, replayProposition, FLASHCARDS_DEFAULT_SETTINGS, type FlashcardsMemory } from "../src/core/sync/flashcards.ts";
-import { clock, DAY, Device, MINUTE, pluginDefaults, scheduler } from "./sync-flashcards-harness.ts";
+import { clock, DAY, Device, MINUTE, pluginDefaults, scheduler } from "./helpers/sync-flashcards-harness.ts";
 
 Date.now = () => clock.now;
 

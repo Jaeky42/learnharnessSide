@@ -1,6 +1,6 @@
 /**
  * RICH CODE BLOCKS ON A PHONE: THE SERVER'S MARK (fork;
- * docs/phone-plugins-plan.md, decision 8 and the owner's "spinner from the
+ * docs/fork/plans/phone-plugins-plan.md, decision 8 and the owner's "spinner from the
  * start").
  *
  * Whether the Rich code blocks plugin is switched on and installed, read from

@@ -1,7 +1,7 @@
 "use client";
 /**
  * Settings → Cloud on the SERVER's site (side-tutor fork, cloud sync
- * Phase 6; docs/cloud-sync.md). Shown only on a server-mode LearnHarness;
+ * Phase 6; docs/fork/cloud-sync.md). Shown only on a server-mode LearnHarness;
  * the desktop app shows cloud-section.tsx under the same row and never
  * renders or requests this.
  *

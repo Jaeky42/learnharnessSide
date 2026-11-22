@@ -1,5 +1,5 @@
 /**
- * Cloud sync (Phase 5, docs/cloud-sync.md): the protocol version rule.
+ * Cloud sync (Phase 5, docs/fork/cloud-sync.md): the protocol version rule.
  *
  * Owner-approved: the number starts at 1 and rises only when a release
  * changes what the two sides send each other, a stored format that syncs,
@@ -14,7 +14,7 @@
  * never receive any of that. tests/sync-sessions.test.ts pins which chat
  * format needs which protocol.
  *
- * 3 (Flashcards sync, docs/phone-plugins-plan.md): the Flashcards library
+ * 3 (Flashcards sync, docs/fork/plans/phone-plugins-plan.md): the Flashcards library
  * travels item by item (POST /api/sync/flashcards), and a PC sends its time
  * zone. A protocol-2 build knows nothing of it, and a server of protocol 2
  * would refuse the route. tests/sync-sessions.test.ts pins which Flashcards

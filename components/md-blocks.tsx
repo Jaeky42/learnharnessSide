@@ -44,7 +44,7 @@ import { blurAfterPointerClick } from "@/components/focus-hygiene";
 import { chartSize, useSessionMermaid } from "@/components/session-overlay";
 import { Hint } from "@/components/ui/hint";
 import { BUILTIN_MERMAID_LANGUAGE, PluginCodeBlock } from "@/components/plugin-renderers";
-// Side-tutor fork (phone): Rich code blocks' phone frame (components/phone/rich-drawing-frame.tsx).
+// FORK (phone): Rich code blocks' phone frame (components/phone/rich-drawing-frame.tsx).
 import { isRichDrawingLanguage, PhoneRichDrawingFrame } from "@/components/phone/rich-drawing-frame";
 
 /** Local rendering profile for host-mounted, display-only Markdown. Ordinary
@@ -267,7 +267,7 @@ export function MarkdownCode(props: ComponentProps<"code"> & ExtraProps) {
 	const startLine = startMatch ? Number.parseInt(startMatch[1]!, 10) : undefined;
 	const lineNumbers = !/\bnoLineNumbers\b/.test(meta);
 	const fallback = (
-		// Side-tutor fork (phone): data-lh-rich-fence marks a smiles, abc or tikz
+		// FORK (phone): data-lh-rich-fence marks a smiles, abc or tikz
 		// fence's code, so a phone can show the spinner box in its place while
 		// the plugin starts (components/phone/rich-drawing-frame.tsx). No effect on a computer.
 		<div className="group/md relative" data-testid="md-code" data-lh-rich-fence={!displayOnly && isRichDrawingLanguage(language) ? "" : undefined}>
@@ -284,7 +284,7 @@ export function MarkdownCode(props: ComponentProps<"code"> & ExtraProps) {
 	);
 	if (displayOnly) return fallback;
 	const block = <PluginCodeBlock language={language} source={source} meta={meta} incomplete={incomplete} fallback={fallback} />;
-	// Side-tutor fork (phone): a smiles, abc or tikz fence gets the phone's
+	// FORK (phone): a smiles, abc or tikz fence gets the phone's
 	// enlarge button and spinner states (components/phone/rich-drawing-frame.tsx);
 	// it adds nothing on a computer, and other fences never reach it.
 	return isRichDrawingLanguage(language) ? <PhoneRichDrawingFrame language={language}>{block}</PhoneRichDrawingFrame> : block;

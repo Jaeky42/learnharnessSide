@@ -1,12 +1,12 @@
 #!/bin/sh
-# Container start (side-tutor fork, docs/cloud-sync.md). HOME is /data/home
+# Container start (side-tutor fork, docs/fork/server.md). HOME is /data/home
 # on the persistent volume, so Claude Code (the CLI) and its login survive
 # LearnHarness image updates. First start installs Claude Code in the
 # background; later starts ask it to update itself. LearnHarness starts
 # straight away either way; Settings shows "isn't installed yet" until done.
 mkdir -p "$HOME/.local/bin"
 
-# A new account's copy (multi-account; docs/multi-account-plan.md): the maker
+# A new account's copy (multi-account; docs/fork/plans/multi-account-plan.md): the maker
 # sets LH_SEED_WORKER_CONCURRENCY, and a volume with no settings.json yet gets
 # "helpers at once" at that number, in the shape the app writes
 # (src/store/settings.ts: version 1, tab-indented, no trailing newline). An

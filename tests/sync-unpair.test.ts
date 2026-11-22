@@ -1,5 +1,5 @@
 /**
- * Cloud sync Phase 6, slice 1 (docs/cloud-sync.md): "Unpair this PC".
+ * Cloud sync Phase 6, slice 1 (docs/fork/cloud-sync.md): "Unpair this PC".
  *
  * Pins the owner's decisions:
  *  - Unpairing on the PC sends what it has (when the server can be reached),

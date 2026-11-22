@@ -1,6 +1,6 @@
 /**
  * Accounts on one server: the owner-approved words of the new screens
- * (docs/multi-account-plan.md, "The approved words"), in one place so the
+ * (docs/fork/plans/multi-account-plan.md, "The approved words"), in one place so the
  * pages, the screens and their tests agree. A change here is a change to
  * approved wording: ask the owner first. Quoted names take curly quotes.
  *

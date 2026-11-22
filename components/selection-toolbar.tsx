@@ -38,10 +38,10 @@ export function SelectionToolbarButtons({ capture, actions, onDone, blocked, tou
 	capture: CapturedSelection;
 	actions: readonly SelectionAction[];
 	onDone: () => void;
-	/** Side-tutor fork: a touch selection's buttons are a little bigger
+	/** FORK (touch): a touch selection's buttons are a little bigger
 	 *  (TOUCH_BUTTON_CLASS, components/phone/touch-selection.ts). */
 	touch?: boolean;
-	/** Side-tutor fork (cloud sync): why no action can run here (a session
+	/** FORK (cloud sync): why no action can run here (a session
 	 * another device holds). Every button keeps its label and icon, is greyed
 	 * with this as its tooltip, and a press does nothing. */
 	blocked?: string;
@@ -116,7 +116,7 @@ function selectionVisible(range: Range, viewport: HTMLElement): boolean {
 }
 
 /** The floating toolbar over a tutor-text selection inside `viewport`.
- *  Side-tutor fork (cloud sync): `blocked` greys every button (see
+ *  FORK (cloud sync): `blocked` greys every button (see
  *  SelectionToolbarButtons). */
 export function SelectionToolbar({ viewport, actions, blocked }: { viewport: HTMLElement | null; actions: readonly SelectionAction[]; blocked?: string }) {
 	const controller = useOptionalInteractionLayers();
@@ -132,7 +132,7 @@ export function SelectionToolbar({ viewport, actions, blocked }: { viewport: HTM
 		if (!toolbar || !state) return;
 		const rect = toolbar.getBoundingClientRect();
 		toolbar.style.left = `${Math.max(8, Math.min(state.position.x, window.innerWidth - rect.width - 8))}px`;
-		// Side-tutor fork (touch): measured from the fixed frame (the shifted
+		// FORK (touch): measured from the fixed frame (the shifted
 		// body while the iPhone keyboard is up); exactly upstream's otherwise.
 		toolbar.style.top = state.touch
 			? `${touchToolbarTop({ y: state.position.y, height: rect.height, innerHeight: window.innerHeight, shift: state.shift ?? 0 })}px`
@@ -145,7 +145,7 @@ export function SelectionToolbar({ viewport, actions, blocked }: { viewport: HTM
 		const eligible = () => isInteractionScopeEligible(viewport, controller);
 		const unsubscribe = controller?.subscribe(() => { if (!eligible()) clear(); });
 		const update = (pointer: SelectionActionPoint | null, touch?: boolean) => {
-			// Side-tutor fork (touch): a toolbar that follows the selection stops
+			// FORK (touch): a toolbar that follows the selection stops
 			// following once there is nothing to show (the selection cleared).
 			const hide = () => { if (touch) observerRef.current?.cancel(); clear(); };
 			if (!eligible()) { hide(); return; }
@@ -154,7 +154,7 @@ export function SelectionToolbar({ viewport, actions, blocked }: { viewport: HTM
 			const viewportRect = viewport.getBoundingClientRect();
 			if (!isSelectionRectVisible(capture.range.getBoundingClientRect(), [viewportRect]) || !selectionVisible(capture.range, viewport)) { hide(); return; }
 			const lines = Array.from(capture.range.getClientRects());
-			// Side-tutor fork (touch): opposite the system's Copy / Look Up box,
+			// FORK (touch): opposite the system's Copy / Look Up box,
 			// clear of the selection handles, inside the part of the lesson the
 			// top bar and the dock leave visible (components/phone/touch-selection.ts).
 			if (touch) {

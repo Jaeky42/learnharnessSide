@@ -1,5 +1,5 @@
 /**
- * Cloud sync (Phase 5, docs/cloud-sync.md): the files that sync one item at
+ * Cloud sync (Phase 5, docs/fork/cloud-sync.md): the files that sync one item at
  * a time. The latest change to an item wins; times are on the server's clock.
  *
  * Neither side is told about changes as they happen. Each compares its
@@ -31,7 +31,7 @@
  * prompt text, theme, record or node place, the server's is kept; and anything
  * of those kinds that only the new PC has is added, as above.
  *
- * A SECOND INSTANCE (Flashcards sync, docs/phone-plugins-plan.md): the same
+ * A SECOND INSTANCE (Flashcards sync, docs/fork/plans/phone-plugins-plan.md): the same
  * exchange runs for the Flashcards library with its own kinds and checks
  * (`ExchangeRules`), its own route and its own state files. Because every
  * review is an item there, an exchange goes in PAGES both ways: the desktop

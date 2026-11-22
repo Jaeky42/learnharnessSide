@@ -1,5 +1,5 @@
 /**
- * Settings → Accounts (several accounts on one server; docs/multi-account-plan.md,
+ * Settings → Accounts (several accounts on one server; docs/fork/plans/multi-account-plan.md,
  * "The owner's screen" and "The approved words"): the owner's list of accounts,
  * invite codes and removed accounts, its ⋯ menu and confirm boxes, and where it
  * sits in Settings (a row under Account on a computer, a group inside Account

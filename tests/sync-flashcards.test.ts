@@ -1,5 +1,5 @@
 /**
- * Flashcards sync (docs/phone-plugins-plan.md, decisions S1–S6 and the
+ * Flashcards sync (docs/fork/plans/phone-plugins-plan.md, decisions S1–S6 and the
  * "Flashcards sync" smaller rules): the pure rules, with two devices that
  * each run the plugin's real back end, synced through a stand-in for the
  * per-item exchange (latest change wins per key).
@@ -20,7 +20,7 @@ import {
 	applyFlashcardsChanges, checkFlashcardsChange, combine, emptyFlashcardsFile, flashcardsFormatTooNew, readFlashcards, rebuildFlashcards,
 	type FlashcardsFile, type Items,
 } from "../src/core/sync/flashcards.ts";
-import { clock, DAY, Device, Hub, MINUTE, scheduler } from "./sync-flashcards-harness.ts";
+import { clock, DAY, Device, Hub, MINUTE, scheduler } from "./helpers/sync-flashcards-harness.ts";
 
 Date.now = () => clock.now;
 

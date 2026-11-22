@@ -77,7 +77,7 @@ export type ChatDeleteOutcome =
  *      nothing merged.
  */
 export function runningWorkBlocker(chatId: string): Extract<ChatDeleteOutcome, { status: 409 }> | null {
-	// Side-tutor fork (cloud sync): a session another device holds can't be deleted here.
+	// FORK (cloud sync): a session another device holds can't be deleted here.
 	if (!holdsSession(chatId)) {
 		return { ok: false, status: 409, code: HELD_ELSEWHERE_CODE, error: HELD_ELSEWHERE_MESSAGE, jobIds: [] };
 	}
@@ -154,7 +154,7 @@ export function deleteIdleChatRecord(chatId: string): Extract<ChatDeleteOutcome,
 function finishChatDeletion(chatId: string, mode: ChatDeleteMode): Extract<ChatDeleteOutcome, { ok: true }> {
 	// THE SYNC BLOCK — no awaits below (see the doc comment). Order:
 	// ledgers → jobs → the chat record.
-	// Side-tutor fork (cloud sync): logged as what it is, so other devices repeat it.
+	// FORK (cloud sync): logged as what it is, so other devices repeat it.
 	const stats = recordGraphAction({ kind: "delete-sources", ids: [chatId], mode }, () => deleteChatTraces(stores.graphStore, chatId, mode));
 	const jobsRemoved = finishChatRecordDeletion(chatId);
 	return { ok: true, mode, stats, jobsRemoved, graphRevision: graphRevision() };

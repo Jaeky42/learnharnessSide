@@ -84,7 +84,7 @@ const SECTIONS = [
 	{ id: "graph", label: "Graph", icon: WaypointsIcon },
 	{ id: "keyboard", label: "Keyboard", icon: KeyboardIcon, hint: "Stored on this device" },
 	{ id: "general", label: "General", icon: SettingsIcon },
-	// Side-tutor fork: Obsidian and Account are shown only on a server-mode
+	// FORK (server mode): Obsidian and Account are shown only on a server-mode
 	// LearnHarness (obsidian-section.tsx, account-section.tsx). Cloud (cloud
 	// sync Phase 6) is shown everywhere: the desktop app's pairing and sync
 	// state (cloud-section.tsx), the server's paired desktop apps
@@ -92,7 +92,7 @@ const SECTIONS = [
 	{ id: "obsidian", label: "Obsidian", icon: NotebookPenIcon },
 	{ id: "cloud", label: "Cloud", icon: CloudIcon },
 	{ id: "account", label: "Account", icon: UserIcon },
-	// Side-tutor fork (several accounts on one server): Accounts, for the
+	// FORK (several accounts on one server): Accounts, for the
 	// server's owner only (the lh_owner marker; accounts-section.tsx). On a
 	// phone it is a group inside Account, with no row.
 	{ id: "accounts", label: "Accounts", icon: UsersIcon },
@@ -181,7 +181,7 @@ export function SettingsDialogProvider({
 		interactions.invalidateOpening();
 		fadingCopy.current?.remove();
 		fadingCopy.current = null;
-		// Side-tutor fork: a phone lists only some plugin sections, so a link
+		// FORK (phone): a phone lists only some plugin sections, so a link
 		// to any other plugin section opens on the section list instead.
 		if (section && isPhoneNow() && isPhoneHiddenSettingsSection(section)) section = undefined;
 		setNavigationRequest(request => request + 1);
@@ -336,7 +336,7 @@ export function SettingsDialogBody({
 	useEffect(() => {
 		if (phoneOpensSection) setPhoneScreen("section");
 	}, [initialSection, phoneOpensSection, navigationRequest]);
-	// Side-tutor fork: a phone lists only Core plugins and the phone-ready
+	// FORK (phone): a phone lists only Core plugins and the phone-ready
 	// plugins' pages (phone-plugins.ts); any other plugin section still open
 	// when the layout turns into the phone one goes back to the list. Links
 	// are turned away in open() above.
@@ -346,7 +346,7 @@ export function SettingsDialogBody({
 		setActive("keys");
 		setPhoneScreen("list");
 	}, [phonePluginSection]);
-	// Side-tutor fork: on a phone Obsidian is a group inside Cloud (owner's
+	// FORK (phone): on a phone Obsidian is a group inside Cloud (owner's
 	// ask; phone-plugins.ts). A link to it, or the layout turning into the
 	// phone one on it, shows Cloud with the group scrolled into view; Cloud
 	// then stays when the layout turns wide again.
@@ -373,12 +373,12 @@ export function SettingsDialogBody({
 		if (missingPlugin) setActive(management);
 	}, [missingPlugin, management]);
 	const selected = missingPlugin ? management : phoneMoved ? phoneSection(active) as SectionId : active;
-	// Side-tutor fork: a scroll to the Obsidian group that never happened is dropped once Cloud is left.
+	// FORK (phone): a scroll to the Obsidian group that never happened is dropped once Cloud is left.
 	useEffect(() => {
 		if (!phone || selected !== "cloud") setScrollToObsidian(false);
 		if (!phone || selected !== "account") setScrollToAccounts(false);
 	}, [phone, selected]);
-	// Side-tutor fork: the server-only rows (on a phone, Account shows from
+	// FORK (phone): the server-only rows (on a phone, Account shows from
 	// the first frame on the server, from the lh_server cookie, so it doesn't
 	// pop into the list once the device list arrives), and no Keyboard row
 	// and no Obsidian row (it is inside Cloud) on a phone.
@@ -387,7 +387,7 @@ export function SettingsDialogBody({
 		(s.id !== "obsidian" || isServerMode()) &&
 		(s.id !== "accounts" || (!phone && isServerMode() && isOwnerMode())) &&
 		!(phone && (s.id === "keyboard" || phoneSection(s.id) !== s.id)));
-	// Side-tutor fork: a phone lists Core plugins; no Community plugins row,
+	// FORK (phone): a phone lists Core plugins; no Community plugins row,
 	// no plugin's own page (it opens from its settings button on Core
 	// plugins; owner's ask) and none of the dividers that set the plugin rows
 	// apart below.
@@ -400,7 +400,7 @@ export function SettingsDialogBody({
 		{ id: "plugins", label: "Community plugins", icon: PuzzleIcon },
 		...enabledPlugins.map(plugin => ({ id: `plugin:${plugin.info.id}` as const, label: plugin.info.manifest?.name ?? plugin.info.id })),
 	];
-	// Side-tutor fork: a plugin's page has no row on a phone; its title is still the plugin's name.
+	// FORK (phone): a plugin's page has no row on a phone; its title is still the plugin's name.
 	const selectedPlugin = snapshot.plugins.find(plugin => `plugin:${plugin.info.id}` === selected)?.info;
 	const activeLabel = navSections.find((s) => s.id === selected)?.label ??
 		(selectedPlugin ? selectedPlugin.manifest?.name ?? selectedPlugin.id : "Settings");
@@ -510,7 +510,7 @@ export function SettingsDialogBody({
 					<button
 						type="button"
 						data-phone="settings-back"
-						// Side-tutor fork: from a plugin's own page back to Core plugins (owner's choice).
+						// FORK (phone): from a plugin's own page back to Core plugins (owner's choice).
 						aria-label={phoneSettingsBack(selected) === "core-plugins" ? "Back to Core plugins" : "Back to all settings"}
 						onClick={() => { if (phoneSettingsBack(selected) === "core-plugins") setActive("core-plugins"); else setPhoneScreen("list"); }}
 						className="-ml-2 flex items-center gap-1 rounded-md py-2 pr-2 font-title text-2xl tracking-tight"
@@ -638,7 +638,7 @@ export function SettingsDialogBody({
 							{selected === "cloud" && (
 								<SettingsSection title="Cloud" testid="section-cloud">
 									{isServerMode() ? <CloudServerSection /> : <CloudSection />}
-									{/* Side-tutor fork: on a phone on the server, Obsidian is a group here (owner's ask). */}
+									{/* FORK (phone): on a phone on the server, Obsidian is a group here (owner's ask). */}
 									{phone && isServerMode() && <CloudObsidianGroup scrollIntoView={scrollToObsidian} onScrolled={obsidianScrolled} />}
 								</SettingsSection>
 							)}
@@ -650,7 +650,7 @@ export function SettingsDialogBody({
 							{active === "account" && account.devices && (
 								<SettingsSection title="Account" testid="section-account">
 									<AccountSection devices={account.devices} reload={account.reload} />
-									{/* Side-tutor fork: on a phone, Accounts is a group here, for the owner only. */}
+									{/* FORK (phone): on a phone, Accounts is a group here, for the owner only. */}
 									{phone && isServerMode() && isOwnerMode() && <AccountAccountsGroup scrollIntoView={scrollToAccounts} onScrolled={accountsScrolled} />}
 								</SettingsSection>
 							)}

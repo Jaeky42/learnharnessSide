@@ -1,7 +1,7 @@
 "use client";
 /**
  * THE SYNC CHIP at the foot of the session list, above Settings (cloud sync
- * Phase 6, docs/cloud-sync.md). Owner's choices: it shows only when
+ * Phase 6, docs/fork/cloud-sync.md). Owner's choices: it shows only when
  * something is off, as an outline ring and a word or two, both amber:
  * OFFLINE, SYNC PAUSED or NOT PAIRED. A click opens Settings → Cloud.
  * The amber is the theme's warning colour (`text-warning`), so the chip

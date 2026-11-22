@@ -2,7 +2,7 @@
 
 /**
  * RICH CODE BLOCKS ON A PHONE: THE ENLARGE BUTTON (fork;
- * docs/phone-plugins-plan.md, decision 7 and "Enlarging a drawing").
+ * docs/fork/plans/phone-plugins-plan.md, decision 7 and "Enlarging a drawing").
  *
  * In the phone layout every drawn Rich code blocks block (smiles, abc, tikz)
  * gets the lesson's own enlarge control, the one its other diagrams have

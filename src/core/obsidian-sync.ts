@@ -1,6 +1,6 @@
 /**
  * The Obsidian vault on the cloud server (side-tutor fork, cloud sync
- * Phase 4; docs/cloud-sync.md). Pure rules and wording, shared by the
+ * Phase 4; docs/fork/server.md). Pure rules and wording, shared by the
  * server's sync manager (src/server/obsidian-sync.ts) and Settings →
  * Obsidian (components/settings/obsidian-section.tsx). Browser-safe.
  *

@@ -1,5 +1,5 @@
 /**
- * Cloud sync (Phase 5, docs/cloud-sync.md): the graph log in motion.
+ * Cloud sync (Phase 5, docs/fork/cloud-sync.md): the graph log in motion.
  *
  *   loggedGraphStore   the wrapper at the composition root: every change to
  *                      the four ledgers is written down as an entry BEFORE

@@ -3,7 +3,7 @@
  * config.AUTH_FILE, mode 0600. Holds the password hash, the setup code
  * hash, hashed session tokens and lockout counters (src/core/server-auth.ts).
  *
- * Never synced between devices (docs/cloud-sync.md: credentials stay per
+ * Never synced between devices (docs/fork/server.md: credentials stay per
  * device), and the agents' file tools refuse it like auth.json
  * (src/agent/tools/fs-shared.ts SUBSCRIPTION_FILES).
  *

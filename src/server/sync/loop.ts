@@ -1,5 +1,5 @@
 /**
- * Cloud sync (Phase 5, docs/cloud-sync.md): WHEN a paired desktop syncs
+ * Cloud sync (Phase 5, docs/fork/cloud-sync.md): WHEN a paired desktop syncs
  * (owner's decision):
  *
  *   - a full round when the app starts;
@@ -55,7 +55,7 @@ export function retryDelayMs(failures: number): number {
 const CHANGES = new Set<ServerEvent["type"]>(["turn-settled", "record-changed", "chats-changed", "jobs-changed", "sources-changed", "activity-changed"]);
 
 /**
- * Flashcards (docs/phone-plugins-plan.md) changed its library here. Cards a
+ * Flashcards (docs/fork/plans/phone-plugins-plan.md) changed its library here. Cards a
  * generation adds are announced as `batch-changed`. What sync itself wrote
  * into the library is announced too (for open pages), and isn't a change made here.
  */

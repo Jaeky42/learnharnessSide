@@ -11,13 +11,13 @@ import { createRequire } from "node:module";
 import * as os from "node:os";
 import * as path from "node:path";
 import { randomUUID } from "node:crypto";
-import { applyFlashcardsChanges, readFlashcards, type FlashcardsFile, type FlashcardsMemory, type FlashcardsScheduler } from "../src/core/sync/flashcards.ts";
-import { itemHash } from "../src/core/sync/maps.ts";
+import { applyFlashcardsChanges, readFlashcards, type FlashcardsFile, type FlashcardsMemory, type FlashcardsScheduler } from "../../src/core/sync/flashcards.ts";
+import { itemHash } from "../../src/core/sync/maps.ts";
 
 const require = createRequire(import.meta.url);
-const { activate } = require("../plugins/flashcards/src/backend.cjs") as { activate: (ctx: unknown) => void };
-export const scheduler = require("../plugins/flashcards/src/scheduler.cjs") as FlashcardsScheduler;
-export const { defaults: pluginDefaults } = require("../plugins/flashcards/src/store.cjs") as { defaults: () => Record<string, unknown> };
+const { activate } = require("../../plugins/flashcards/src/backend.cjs") as { activate: (ctx: unknown) => void };
+export const scheduler = require("../../plugins/flashcards/src/scheduler.cjs") as FlashcardsScheduler;
+export const { defaults: pluginDefaults } = require("../../plugins/flashcards/src/store.cjs") as { defaults: () => Record<string, unknown> };
 
 export const DAY = 86_400_000;
 export const MINUTE = 60_000;

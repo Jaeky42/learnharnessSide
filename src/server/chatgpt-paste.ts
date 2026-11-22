@@ -1,6 +1,6 @@
 /**
  * ChatGPT "paste the address you landed on" (side-tutor fork, cloud sync
- * Phase 2; docs/cloud-sync.md). Server mode only.
+ * Phase 2; docs/fork/server.md). Server mode only.
  *
  * ChatGPT sign-in redirects the browser to http://127.0.0.1:<port>/auth/callback
  * on the SERVER (electron/chatgpt.cjs), which a phone can't open. The learner

@@ -1,5 +1,5 @@
 /**
- * Each person's account lifecycle at the gateway (docs/multi-account-build.md
+ * Each person's account lifecycle at the gateway (docs/fork/plans/multi-account-build.md
  * slices 3b and 5b): redeeming an invite, the reset page (a recovery code or
  * the owner's reset code), new recovery codes and Delete my account. The
  * shapes follow ./routes.ts; every sentence comes from

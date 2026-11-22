@@ -61,7 +61,7 @@ describe("SettingsDialog (the designed surface, SSR)", () => {
 			["graph", "Graph", "waypoints"],
 			["keyboard", "Keyboard", "keyboard"],
 			["general", "General", "settings"],
-			// Side-tutor fork: the Cloud row (cloud sync), above the plugin rows.
+			// FORK (cloud sync): the Cloud row (cloud sync), above the plugin rows.
 			["cloud", "Cloud", "cloud"],
 			["core-plugins", "Core plugins", "plug"],
 			["plugins", "Community plugins", "puzzle"],

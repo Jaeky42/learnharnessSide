@@ -1,5 +1,5 @@
 /**
- * Flashcards sync (docs/phone-plugins-plan.md): the second per-item exchange
+ * Flashcards sync (docs/fork/plans/phone-plugins-plan.md): the second per-item exchange
  * (maps-sync.ts) as this copy runs it, beside the settings one (maps-engine.ts).
  *
  *   flashcardsAuthority()   the server's side     POST /api/sync/flashcards

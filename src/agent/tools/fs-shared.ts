@@ -59,7 +59,7 @@ const SENSITIVE_HOME_PATHS = [
 	".aws",
 	".azure",
 	".config/gcloud",
-	// obsidian-headless (the cloud server's Obsidian sync, docs/cloud-sync.md):
+	// obsidian-headless (the cloud server's Obsidian sync, docs/fork/server.md):
 	// its sign-in token, the vault key and its sync state.
 	".config/obsidian-headless",
 	".obsidian-headless",
@@ -89,7 +89,7 @@ const SENSITIVE_HOME_PATHS = [
 
 /** Templates are deliberately included: their names do not guarantee safe contents. */
 const ENV_FILE = /^\.env(\..*)?$/i;
-// server-login.json: the side-tutor fork's server-mode password/session hashes (src/store/server-auth.ts).
+// FORK (server mode): server-login.json holds the server-mode password/session hashes (src/store/server-auth.ts).
 // cloud-sync.json: the desktop app's device key for its cloud server (src/store/sync/pairing.ts).
 const SUBSCRIPTION_FILES = ["chatgpt-credentials.json", "github-copilot-credentials.json", "xai-credentials.json", "server-login.json", "cloud-sync.json"];
 // Match the actual writers in store/auth.ts and electron/{chatgpt,subscription-store}.cjs.

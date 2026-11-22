@@ -1,6 +1,6 @@
 /**
  * Claude sign-in from Settings on the cloud server (side-tutor fork, cloud
- * sync Phase 2; docs/cloud-sync.md). Server mode only; the desktop app keeps
+ * sync Phase 2; docs/fork/server.md). Server mode only; the desktop app keeps
  * "authenticate Claude Code in your terminal".
  *
  * The official CLI owns the login: LearnHarness runs `claude auth login`

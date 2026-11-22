@@ -1,5 +1,5 @@
 /**
- * Flashcards sync (docs/phone-plugins-plan.md, decisions S1–S6 and
+ * Flashcards sync (docs/fork/plans/phone-plugins-plan.md, decisions S1–S6 and
  * "Flashcards sync" under the smaller rules): the pure rules. The owner's
  * design is "combine everything": every change travels on its own, every
  * review from both devices is kept, and each fact's schedule is worked out

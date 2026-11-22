@@ -1,5 +1,5 @@
 /**
- * Cloud sync (Phase 5, docs/cloud-sync.md): the small files that sync ONE
+ * Cloud sync (Phase 5, docs/fork/cloud-sync.md): the small files that sync ONE
  * ITEM AT A TIME, latest change wins. Pure rules; the files themselves are
  * read and written by src/server/sync/map-views.ts.
  *

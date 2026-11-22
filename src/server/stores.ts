@@ -20,7 +20,7 @@ import { loggedGraph } from "./sync/graph-engine.ts";
 import { guardChatStore, guardJobStore } from "./sync/guarded-stores.ts";
 /** The wired adapters. Satisfies core/graph.ts's GraphDeps structurally.
  *
- * Side-tutor fork (cloud sync Phase 5): the session stores are wrapped so a
+ * FORK (cloud sync Phase 5): the session stores are wrapped so a
  * session another device holds can't be changed here (sync/guarded-stores.ts).
  * Until a desktop has synced, the wrappers pass everything through. */
 export const stores = {

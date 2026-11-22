@@ -48,7 +48,7 @@ export function makeFirstSyncBackup(dataDir: string, now: Date = new Date()): st
 }
 
 /**
- * Flashcards sync (docs/phone-plugins-plan.md): each side copies the
+ * Flashcards sync (docs/fork/plans/phone-plugins-plan.md): each side copies the
  * Flashcards folder aside once, right before its first Flashcards exchange,
  * beside the backups above:
  *

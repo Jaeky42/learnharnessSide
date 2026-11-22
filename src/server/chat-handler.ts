@@ -218,7 +218,7 @@ export async function handleChatInput(
 	buildAgent?: (opts: AgentBuildOptions & { teaching: boolean }) => TeachingAgent,
 	sideContext: Pick<SideChatService, "snapshot"> = sideChats,
 ): Promise<Response> {
-	// Side-tutor fork (cloud sync): a session another device holds is
+	// FORK (cloud sync): a session another device holds is
 	// read-only here. Refused first: before the plugin question reconcile
 	// (which can write the record), compaction, or any write or model call.
 	const heldElsewhere = heldElsewhereResponse(chatId);

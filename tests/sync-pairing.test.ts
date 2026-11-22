@@ -1,5 +1,5 @@
 /**
- * Cloud sync Phase 5, slice 1 (docs/cloud-sync.md): pairing a desktop app
+ * Cloud sync Phase 5, slice 1 (docs/fork/cloud-sync.md): pairing a desktop app
  * with the server, device keys, and the protocol version rule.
  *
  * Pins the owner's decisions: a pairing code that works once for 10 minutes;

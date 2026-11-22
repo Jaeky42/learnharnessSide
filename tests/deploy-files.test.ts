@@ -8,7 +8,7 @@ import { createRequire } from "node:module";
 import { ACCOUNT_NETWORK_PREFIX, COPY_MEMORY_BYTES, COPY_MEMORY_SWAP_BYTES, COPY_PIDS_LIMIT, TAG_ALPHABET, accountNetworkWouldLead, copyTemplate, networkName } from "../gateway/maker.ts";
 import { sanitizeUserSettings } from "../src/core/settings.ts";
 
-// The multi-account build and deploy files (docs/multi-account-build.md,
+// The multi-account build and deploy files (docs/fork/plans/multi-account-build.md,
 // slices 1d, 3c and 3d): the Caddyfile, the compose file, the entrypoint's
 // seed, make-secrets.sh, build-gateway.mjs and the image's wrappers. They are
 // shell and YAML that nothing else runs in a test, so they are pinned here.

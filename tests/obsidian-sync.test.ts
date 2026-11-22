@@ -1,5 +1,5 @@
 /**
- * Cloud sync Phase 4 (side-tutor fork; docs/cloud-sync.md): the Obsidian
+ * Cloud sync Phase 4 (side-tutor fork; docs/fork/server.md): the Obsidian
  * vault on the cloud server.
  *
  *  - The rules and wording (src/core/obsidian-sync.ts), checked against what

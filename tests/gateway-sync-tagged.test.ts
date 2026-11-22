@@ -26,7 +26,7 @@ const SAM_SECRET = "sams-copy-gate-secret-".padEnd(43, "s");
 process.env.LH_ACCOUNT_TAG = TAG;
 process.env.LH_GATE_SECRET = SAM_SECRET;
 
-const h = await import("./gateway-sync-harness.ts");
+const h = await import("./helpers/gateway-sync-harness.ts");
 const core = await import("../src/core/server-auth.ts");
 const acc = await import("../src/core/accounts.ts");
 const copyStore = await import("../src/store/server-auth.ts");

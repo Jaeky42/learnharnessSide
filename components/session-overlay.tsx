@@ -45,7 +45,7 @@ export const SessionMermaidContext = createContext<{
 	openMermaid: (chart: string) => void;
 	openFigure: (svg: string, inverted: boolean) => void;
 	openImage?: (image: SessionImage) => void;
-	/** Side-tutor fork (phone): a drawn Rich code blocks picture, as inline
+	/** FORK (phone): a drawn Rich code blocks picture, as inline
 	 *  svg markup, opened by its enlarge button
 	 *  (components/phone/rich-drawing-frame.tsx). */
 	openDrawing?: (drawing: string) => void;
@@ -98,7 +98,7 @@ export function MermaidOverlay({
 	chart?: string;
 	svg?: string;
 	image?: SessionImage;
-	/** Side-tutor fork (phone): a Rich code blocks drawing as inline svg markup,
+	/** FORK (phone): a Rich code blocks drawing as inline svg markup,
 	 *  shown as it is in the page so the theme's ink and the plugin's fonts
 	 *  apply (components/phone/rich-drawing-frame.tsx). */
 	drawing?: string;
@@ -106,7 +106,7 @@ export function MermaidOverlay({
 	onClose: () => void;
 }) {
 	// ── chart render (own instance, own ids); figure mode uses the raw svg ──
-	// Side-tutor fork (phone): `drawing` is shown like `rawSvg`, but in the inline branch below.
+	// FORK (phone): `drawing` is shown like `rawSvg`, but in the inline branch below.
 	const [svg, setSvg] = useState<string | null>(rawSvg ?? drawing ?? null);
 	const [error, setError] = useState<string | null>(null);
 	const [attempt, setAttempt] = useState(0);

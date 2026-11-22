@@ -1,6 +1,6 @@
 /**
  * Files behind the Obsidian vault on the cloud server (side-tutor fork,
- * cloud sync Phase 4; docs/cloud-sync.md). Server mode only.
+ * cloud sync Phase 4; docs/fork/server.md). Server mode only.
  *
  *   <data>/obsidian-sync.json   LearnHarness's own small record: how many
  *                               notes the last healthy sync saw, and when.

@@ -1,5 +1,5 @@
 /**
- * Cloud sync Phase 5, slice 5 (docs/cloud-sync.md): the files that sync one
+ * Cloud sync Phase 5, slice 5 (docs/fork/cloud-sync.md): the files that sync one
  * item at a time, latest change wins.
  *
  * Pins the owner's decisions: the settings split (what travels and what

@@ -12,14 +12,14 @@
 
 import path from "node:path";
 
-const core = await import("../src/core/server-auth.ts");
-const server = await import("../src/server/server-auth.ts");
-const syncHttp = await import("../src/server/sync/http.ts");
-const routes = await import("../gateway/routes.ts");
-const { createStore } = await import("../gateway/state.ts");
-const { createUnpairer } = await import("../gateway/copies.ts");
+const core = await import("../../src/core/server-auth.ts");
+const server = await import("../../src/server/server-auth.ts");
+const syncHttp = await import("../../src/server/sync/http.ts");
+const routes = await import("../../gateway/routes.ts");
+const { createStore } = await import("../../gateway/state.ts");
+const { createUnpairer } = await import("../../gateway/copies.ts");
 
-type RelayRequest = import("../gateway/copies.ts").RelayRequest;
+type RelayRequest = import("../../gateway/copies.ts").RelayRequest;
 
 export const SERVER = "https://learn.example.com";
 export const HOST = "learn.example.com";
@@ -46,7 +46,7 @@ async function copyRoutes(request: Request): Promise<Response> {
 }
 
 export interface World {
-	deps: import("../gateway/routes.ts").RouteDeps;
+	deps: import("../../gateway/routes.ts").RouteDeps;
 	relayCalls: RelayRequest[];
 	/** The copy this process plays is reachable through the relay (and from Caddy). */
 	copyUp: { value: boolean };

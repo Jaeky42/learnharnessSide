@@ -1,6 +1,6 @@
 /**
  * FLASHCARDS ON A PHONE: the touch behaviour CSS can't give
- * (docs/phone-plugins-plan.md, decisions 4b, 5b and 5c and "The keyboard").
+ * (docs/fork/plans/phone-plugins-plan.md, decisions 4b, 5b and 5c and "The keyboard").
  * The look is app/phone-flashcards.css. Nothing here edits the plugin's
  * files: it works on the page the plugin and the host render.
  *

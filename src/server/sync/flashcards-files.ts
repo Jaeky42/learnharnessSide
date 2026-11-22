@@ -1,5 +1,5 @@
 /**
- * Flashcards sync (docs/phone-plugins-plan.md, "Flashcards sync"): the
+ * Flashcards sync (docs/fork/plans/phone-plugins-plan.md, "Flashcards sync"): the
  * plugin's one file as the per-item exchange (maps-sync.ts) sees it.
  *
  *   <data>/core-plugin-data/flashcards/flashcards.json   the library (the plugin's own file)

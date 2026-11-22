@@ -1,6 +1,6 @@
 "use client";
 /**
- * Is cloud sync in use on this copy (cloud sync Phase 6, docs/cloud-sync.md)?
+ * Is cloud sync in use on this copy (cloud sync Phase 6, docs/fork/cloud-sync.md)?
  * The app's own server sets a plain `lh_cloud=1` marker cookie (proxy.ts)
  * only where a PC is paired (or was removed by its server), or where a
  * desktop has synced with this server. Nothing else sets it, so an app that

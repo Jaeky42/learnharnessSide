@@ -78,7 +78,7 @@ export { claudeCodeInstallationResponse } from "./claude-code.ts";
 // No import side effects; the boot sync lives in stores.ts.
 export * from "./custom-provider.ts";
 export { customProviderGet, customProviderMutation } from "./custom-provider-http.ts";
-// Server-mode login (side-tutor fork, cloud sync Phase 1; docs/cloud-sync.md).
+// FORK (server mode): server-mode login (cloud sync Phase 1; docs/fork/server.md).
 export {
 	loginPageResponse,
 	setupPageResponse,
@@ -92,10 +92,10 @@ export {
 } from "./server-auth.ts";
 // Multi-account: Download my data (a .zip of this copy's data folder).
 export { accountExportResponse } from "./account-export.ts";
-// Claude sign-in on the cloud server (side-tutor fork, cloud sync Phase 2).
+// FORK (server mode): Claude sign-in on the cloud server (cloud sync Phase 2).
 export { claudeLoginStatusResponse, claudeLoginControlResponse, claudeLoginOpenResponse } from "./claude-login-http.ts";
 export { obsidianStatusResponse, obsidianControlResponse } from "./obsidian-sync-http.ts";
-// Cloud sync (side-tutor fork, Phase 5): pairing, and this copy's own sync control.
+// FORK (cloud sync): Phase 5, pairing, and this copy's own sync control.
 export { desktopsResponse, pairResponse, helloResponse, unpairSelfResponse, sessionsExchangeResponse, sessionBundleResponse, sessionTakeResponse, sessionPictureResponse, graphLogResponse, mapsExchangeResponse, flashcardsExchangeResponse } from "./sync/http.ts";
 export { heldElsewhereResponse, holdsSession } from "./sync/engine.ts";
 import "./sync/local-work.ts";

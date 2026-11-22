@@ -1,5 +1,5 @@
 /**
- * Cloud sync Phase 5, slice 3 (docs/cloud-sync.md): take-over.
+ * Cloud sync Phase 5, slice 3 (docs/fork/cloud-sync.md): take-over.
  *
  * Pins the owner's decisions:
  *  - Take over warns only on evidence: the offline holder's last word was

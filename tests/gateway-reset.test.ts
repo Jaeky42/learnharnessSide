@@ -21,7 +21,7 @@ import * as core from "../src/core/server-auth.ts";
 import * as control from "../gateway/control.ts";
 import * as gatewayMain from "../gateway/main.ts";
 import * as pages from "../gateway/pages.ts";
-import { config, cookiesOf, DAY, harness, PASSWORD, SAM_PASSWORD, type Harness } from "./gateway-fakes.ts";
+import { config, cookiesOf, DAY, harness, PASSWORD, SAM_PASSWORD, type Harness } from "./helpers/gateway-fakes.ts";
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "lh-gateway-reset-"));
 after(() => fs.rmSync(TMP, { recursive: true, force: true }));

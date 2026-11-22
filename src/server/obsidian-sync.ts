@@ -1,6 +1,6 @@
 /**
  * The Obsidian sync manager on the cloud server (side-tutor fork, cloud sync
- * Phase 4; docs/cloud-sync.md). Server mode only.
+ * Phase 4; docs/fork/server.md). Server mode only.
  *
  * Obsidian's official headless client (`ob`, obsidian-headless) does the
  * syncing as one more Obsidian Sync device. This module drives it over

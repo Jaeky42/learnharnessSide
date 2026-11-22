@@ -1,6 +1,6 @@
 "use client";
 /**
- * What the page knows about cloud sync (cloud sync Phase 6, docs/cloud-sync.md):
+ * What the page knows about cloud sync (cloud sync Phase 6, docs/fork/cloud-sync.md):
  * which sessions another device holds, this PC's sync state, and the
  * discards the learner hasn't been told about. One provider in the root
  * layout; the session list, the lesson's strip, the sync chip and the

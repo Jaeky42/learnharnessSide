@@ -1,6 +1,6 @@
 /**
  * PLUGINS ON A PHONE (fork; components/phone/phone-plugins.ts and
- * docs/phone-plugins-plan.md). Flashcards and Rich code blocks are
+ * docs/fork/plans/phone-plugins-plan.md). Flashcards and Rich code blocks are
  * phone-ready: Flashcards' session-list entry and page show, and Settings
  * lists Core plugins, from which both plugins' own pages open (their back
  * arrow returns there). Every other plugin stays hidden: its page reads

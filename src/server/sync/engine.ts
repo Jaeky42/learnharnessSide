@@ -1,5 +1,5 @@
 /**
- * Cloud sync (Phase 5, docs/cloud-sync.md): the sync engine as this copy
+ * Cloud sync (Phase 5, docs/fork/cloud-sync.md): the sync engine as this copy
  * runs it. One process is either the cloud server (the lease authority) or
  * a desktop; which one follows from LH_SERVER_MODE.
  *

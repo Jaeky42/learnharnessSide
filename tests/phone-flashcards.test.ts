@@ -1,5 +1,5 @@
 /**
- * FLASHCARDS ON A PHONE (docs/phone-plugins-plan.md, package B):
+ * FLASHCARDS ON A PHONE (docs/fork/plans/phone-plugins-plan.md, package B):
  * app/phone-flashcards.css and components/phone/flashcards-touch.ts.
  *
  * 1. The guard. The phone rules restyle upstream's markup (the plugin's own

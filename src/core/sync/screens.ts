@@ -1,5 +1,5 @@
 /**
- * Cloud sync Phase 6 (docs/cloud-sync.md): the owner-approved words of the
+ * Cloud sync Phase 6 (docs/fork/cloud-sync.md): the owner-approved words of the
  * sync screens, in one place so the screens and their tests agree. A change
  * here is a change to approved wording: ask the owner first.
  *

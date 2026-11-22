@@ -1,5 +1,5 @@
 /**
- * Accounts on one server (docs/multi-account-build.md, slice 1a): the pure
+ * Accounts on one server (docs/fork/plans/multi-account-build.md, slice 1a): the pure
  * rules in src/core/accounts.ts and the approved words in
  * src/core/account-screens.ts. Every state passed in is deep-frozen, so a
  * function that mutates its input throws. Real scrypt is used sparingly: most

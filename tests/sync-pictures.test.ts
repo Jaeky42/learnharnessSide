@@ -1,5 +1,5 @@
 /**
- * Cloud sync Phase 5, slice 6 (docs/cloud-sync.md): the pictures in a
+ * Cloud sync Phase 5, slice 6 (docs/fork/cloud-sync.md): the pictures in a
  * session are sent once, not with every send of the session (approved with
  * the plan), and both sides still end with the same files, byte for byte.
  *

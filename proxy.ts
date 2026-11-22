@@ -9,7 +9,7 @@ import { heldElsewhereResponse, sessionWritePath, syncInUse } from "./src/server
  * inside its handler, avoiding Next's silently truncated Proxy body clone.
  * No public callback or worker bypass: legitimate self-HTTP still needs the capability.
  *
- * Side-tutor fork (cloud sync Phase 1): with LH_SERVER_MODE=1 the login
+ * FORK (cloud sync Phase 1): with LH_SERVER_MODE=1 the login
  * gate (src/server/server-auth.ts) covers every page and API, so the matcher
  * includes pages; static build files stay outside it. Without server mode
  * pages pass straight through.

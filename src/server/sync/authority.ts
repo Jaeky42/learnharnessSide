@@ -1,5 +1,5 @@
 /**
- * Cloud sync (Phase 5, docs/cloud-sync.md): the SERVER as lease authority.
+ * Cloud sync (Phase 5, docs/fork/cloud-sync.md): the SERVER as lease authority.
  * It records, for every session, which device holds it and which version
  * of its files is current. Only the holder's send is accepted; everyone
  * else fetches.

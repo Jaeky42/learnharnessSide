@@ -1,5 +1,5 @@
 /**
- * Settings → Cloud (cloud sync Phase 6, slice 1; docs/cloud-sync.md): the
+ * Settings → Cloud (cloud sync Phase 6, slice 1; docs/fork/cloud-sync.md): the
  * desktop app's pairing form and sync state, and the server's list of
  * paired desktop apps. fetch is scripted; no server. The wording here is the
  * owner-approved wording, so a change to it is a deliberate one.

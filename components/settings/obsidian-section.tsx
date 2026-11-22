@@ -1,7 +1,7 @@
 "use client";
 /**
  * Settings → Obsidian (side-tutor fork, cloud sync Phase 4). Shown only on
- * a server-mode LearnHarness (docs/cloud-sync.md); the desktop app never
+ * a server-mode LearnHarness (docs/fork/server.md); the desktop app never
  * renders it and makes no request for it. Backend:
  * src/server/obsidian-sync-http.ts.
  *

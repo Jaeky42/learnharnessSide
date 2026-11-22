@@ -17,7 +17,7 @@ const root = path.resolve(import.meta.dirname, "..");
 const readCss = (file: string) => readFileSync(path.join(root, file), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
 const css = readCss("app/phone.css");
 /** The fork's phone-only stylesheets: phone.css, and one per phone-ready
- *  plugin (docs/phone-plugins-plan.md), which may have no rules yet. */
+ *  plugin (docs/fork/plans/phone-plugins-plan.md), which may have no rules yet. */
 const PHONE_STYLESHEETS = ["app/phone.css", "app/phone-flashcards.css", "app/phone-rich-code-blocks.css"];
 
 /** Top-level blocks of a stylesheet: { prelude, body }. */

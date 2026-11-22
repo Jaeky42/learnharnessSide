@@ -1,5 +1,5 @@
 /**
- * Cloud sync Phase 5, slice 4 (docs/cloud-sync.md): the graph log.
+ * Cloud sync Phase 5, slice 4 (docs/fork/cloud-sync.md): the graph log.
  *
  * Pins the owner's decisions: the server keeps one ordered log of graph
  * changes and every device replays it in that order; a deletion is logged

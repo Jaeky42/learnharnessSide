@@ -462,7 +462,7 @@ export function concludedByDismissalPair(
  *  subject is the call, not a dangling result). */
 /** Lookups the problem folds repeat once per tool call (clean results, the
  *  owner of an occurrence, the result batch after it), built once per
- *  history instead of by a scan per call. Side-tutor fork (performance):
+ *  history instead of by a scan per call. FORK (performance):
  *  results are identical to the per-call scans this replaced. */
 class ProblemIndex {
 	private cleanIds?: Set<string>;

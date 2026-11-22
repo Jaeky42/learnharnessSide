@@ -1,5 +1,5 @@
 /**
- * Cloud sync (docs/cloud-sync.md), seamless sessions: a session another
+ * Cloud sync (docs/fork/cloud-sync.md), seamless sessions: a session another
  * device holds looks like any other. The page's shared sync state, the
  * session list's plain lines, and the floating box at the top of a lesson
  * (a failed move, sync trouble), which names no holder and offers no

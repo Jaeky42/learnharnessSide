@@ -1,5 +1,5 @@
 /**
- * Server-mode login (cloud sync Phase 1, docs/cloud-sync.md): pure rules
+ * Server-mode login (cloud sync Phase 1, docs/fork/server.md): pure rules
  * for the password gate a public LearnHarness server puts in front of
  * everything. The desktop app and local dev never use this (no
  * LH_SERVER_MODE), so nothing here changes their behavior.

@@ -1,5 +1,5 @@
 /**
- * Cloud sync Phase 6, slice 3 (docs/cloud-sync.md): the desktop's own
+ * Cloud sync Phase 6, slice 3 (docs/fork/cloud-sync.md): the desktop's own
  * notices. The sync chip at the foot of the session list, the offline
  * heads-up strip in a session the PC can continue, the 30-second quiet
  * rule, and the discard box. fetch is scripted; no server. The wording is

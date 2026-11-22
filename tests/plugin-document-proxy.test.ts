@@ -39,7 +39,7 @@ it("Proxy retains API roots, siblings, endpoint lookalikes and all other API rou
 		"/api/plugins/document-one/other/documents/markdown", "/api/plugins/documents/markdown",
 		"/api/graph/import", "/api/events", "/api/chat", "/api/settings/models", "/api/chats/scratch/markdown",
 	]) assert.equal(proxyMatches(path), true, path);
-	// Side-tutor fork: pages run through the Proxy too, for the cloud server's
+	// FORK (server mode): pages run through the Proxy too, for the cloud server's
 	// login gate (they pass straight through outside server mode). Only static
 	// build files and the exact document endpoint stay outside it.
 	for (const path of ["/", "/chat/new", "/apix", "/api-other/plugins/document-one/documents/markdown"]) {

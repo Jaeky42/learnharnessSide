@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * The crossing tests (docs/multi-account-build.md, slice 6): against a
+ * The crossing tests (docs/fork/plans/multi-account-build.md, slice 6): against a
  * RUNNING stack (deploy/compose.yaml), make two member accounts through the
  * real invite flow and try every way one account could reach another's copy,
  * the owner's, the gateway, the maker or Caddy's relay. Each crossing must be

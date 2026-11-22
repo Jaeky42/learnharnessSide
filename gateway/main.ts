@@ -1,5 +1,5 @@
 /**
- * The gateway program (docs/multi-account-plan.md "The pieces"): accounts,
+ * The gateway program (docs/fork/plans/multi-account-plan.md "The pieces"): accounts,
  * sign-in sessions and `/gate`, which tells Caddy whose copy each request
  * belongs to. Plain node:http, no Next, no dependencies; bundled into one
  * file by scripts/build-gateway.mjs and started as `lh-gateway`. Only Caddy

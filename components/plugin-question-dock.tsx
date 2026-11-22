@@ -17,7 +17,7 @@ import { createQuestionEditorLease, type QuestionEditorLease } from "./plugin-qu
 import { PluginQuestionPresentation, questionMountContext } from "./plugin-question-slots";
 import type { PreparePluginQuestionSubmission } from "./plugin-submission-adapters";
 import { Button } from "./ui/button";
-// Side-tutor fork: the phone's Enter rule and hint (components/phone/enter-key.ts).
+// FORK (phone): the phone's Enter rule and hint (components/phone/enter-key.ts).
 import { enterSends } from "@/components/phone/enter-key";
 import { EnterHint } from "@/components/phone/enter-hint";
 
@@ -166,7 +166,7 @@ export function PluginQuestionDockContent({ viewReader, snapshot, chatId, draft,
 						<PathInput ref={thinking} value={draft.thinking} onValueChange={value => { draft.thinking = value; render(); }} onKeyDown={event => {
 							if (composingQuestionKey(event) || pluginQuestionKeySuppressed(event)) return;
 							if (!isInteractionScopeEligible(event.currentTarget, controller)) return;
-							// Side-tutor fork: enterSends is this rule plus the phone's (a touch phone's Enter is a new line).
+							// FORK (phone): enterSends is this rule plus the phone's (a touch phone's Enter is a new line).
 							if (!event.altKey && enterSends(event)) { event.preventDefault(); void submit(); }
 						}} className="field-sizing-content lh-input max-h-48 min-h-10 w-full resize-none bg-transparent px-2.5 py-2 outline-none placeholder:text-muted-foreground/70" placeholder="Your thinking" />
 					</>}

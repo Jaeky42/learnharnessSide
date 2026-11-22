@@ -47,7 +47,7 @@ export const metadata: Metadata = {
 // PHONE (cloud sync Phase 3): viewport-fit=cover lets the app paint under the
 // notch and home bar (app/phone.css pads with the safe-area insets), and
 // resizes-content makes Android shrink the layout above its keyboard.
-// Side-tutor fork (themes): the browser's bar colour is the saved theme's
+// FORK (themes): the browser's bar colour is the saved theme's
 // background, read per request like the <html> variables below.
 export async function generateViewport(): Promise<Viewport> {
 	await connection();
@@ -69,7 +69,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
 	// prerendered route (settings) would bake the BUILD machine's record.
 	await connection();
 	const { appearance, theme, vars } = readThemeBoot();
-	// Side-tutor fork (phone): whether Rich code blocks is on, marked on <body>,
+	// FORK (phone): whether Rich code blocks is on, marked on <body>,
 	// so a phone shows its spinner box from the first paint
 	// (components/phone/rich-drawing-frame.tsx). No effect on a computer.
 	const richCodeBlocks = await richCodeBlocksBoot();

@@ -1,5 +1,5 @@
 /**
- * Accounts and their copies over time (docs/multi-account-build.md slices 3b,
+ * Accounts and their copies over time (docs/fork/plans/multi-account-build.md slices 3b,
  * 4 and 5b): the owner's Pause, Resume, Remove, Restore and Delete now, the
  * copy made for a redeemed invite, deletions (the owner's, the 30 days, and
  * Delete my account), and one loop that keeps copies in step with accounts.

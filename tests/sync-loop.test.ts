@@ -1,5 +1,5 @@
 /**
- * Cloud sync Phase 5, slice 6 (docs/cloud-sync.md): WHEN a paired desktop
+ * Cloud sync Phase 5, slice 6 (docs/fork/cloud-sync.md): WHEN a paired desktop
  * syncs. Owner's decision: a round at app start; about 2 seconds after a
  * change; at once when a reply starts; every 10 seconds otherwise; quiet
  * retries while offline that slow to once every few minutes; and nothing

@@ -42,7 +42,7 @@ export async function subscriptionControlsResponse(request: Request): Promise<Re
 		const fields = command as Record<string, unknown>;
 		const providerId = fields.providerId;
 		if (providerId !== "chatgpt" && !NATIVE_SUBSCRIPTIONS.some((provider) => provider.providerId === providerId)) return error("Unsupported connection.", 400);
-		// Side-tutor fork: server mode's ChatGPT paste step (chatgpt-paste.ts).
+		// FORK (server mode): server mode's ChatGPT paste step (chatgpt-paste.ts).
 		if (providerId === "chatgpt" && fields.op === "callback" && serverModeEnabled()) {
 			const owner = webSubscriptionOwner();
 			const checked = checkPastedCallback(fields.url, owner.chatgpt.pendingCallbackOrigin());

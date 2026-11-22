@@ -1,6 +1,6 @@
 /**
- * The maker (multi-account plan, slice 3a; docs/multi-account-plan.md "The
- * pieces", docs/multi-account-build.md "The maker's API"). The only program
+ * The maker (multi-account plan, slice 3a; docs/fork/plans/multi-account-plan.md "The
+ * pieces", docs/fork/plans/multi-account-build.md "The maker's API"). The only program
  * with the Docker socket. It builds every account's container from ONE fixed
  * template: a caller can name a tag and nothing else; no image, mount,
  * command, environment or name from a request ever reaches Docker.

@@ -1,6 +1,6 @@
 /**
  * PLUGINS ON A PHONE (fork). Two core plugins are phone-ready, Flashcards
- * and Rich code blocks (owner's plan, docs/phone-plugins-plan.md, decisions
+ * and Rich code blocks (owner's plan, docs/fork/plans/phone-plugins-plan.md, decisions
  * 1-3 and 11); every other plugin stays hidden in the phone layout, as at
  * the upstream 0.6.0 merge:
  *   - the ways in: only Flashcards' session-list entry shows

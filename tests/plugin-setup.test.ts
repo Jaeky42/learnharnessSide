@@ -65,7 +65,7 @@ test("contributor and CI entry points prepare plugins before typechecking or bui
 	const root = path.resolve(import.meta.dirname, "..");
 	const pkg = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"));
 	assert.equal(pkg.scripts["plugins:setup"], "node scripts/setup-plugins.mjs");
-	// Side-tutor fork: its own two workflows replace upstream's ci.yml and release.yml.
+	// FORK (release): its own two workflows replace upstream's ci.yml and release.yml.
 	for (const workflow of ["side-tutor-windows.yml", "server-image.yml"]) {
 		const source = readFileSync(path.join(root, ".github", "workflows", workflow), "utf8");
 		for (const section of source.split("- run: npm ci").slice(1)) {

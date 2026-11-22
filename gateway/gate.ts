@@ -1,5 +1,5 @@
 /**
- * The `/gate` decision (docs/multi-account-build.md "What /gate decides"):
+ * The `/gate` decision (docs/fork/plans/multi-account-build.md "What /gate decides"):
  * Caddy's forward_auth asks it about every request that goes to a copy, and
  * a 200 names the copy (X-LH-Upstream), its secret (X-LH-Gate) and why the
  * request may go there (X-LH-Scope: public, sync or session), which the copy

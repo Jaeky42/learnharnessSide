@@ -25,7 +25,7 @@ export async function POST(request: Request) {
 	if (typeof chatId !== "string" || chatId === "") {
 		return Response.json({ error: 'Body must be {chatId: string}' }, { status: 400 });
 	}
-	// Side-tutor fork (cloud sync): extraction runs only on the device that holds the session.
+	// FORK (cloud sync): extraction runs only on the device that holds the session.
 	const heldElsewhere = heldElsewhereResponse(chatId);
 	if (heldElsewhere) return heldElsewhere;
 	if (extractionStatuses().some((run) => run.kind === "chat" && run.chatId === chatId)) {

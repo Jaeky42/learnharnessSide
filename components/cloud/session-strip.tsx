@@ -1,6 +1,6 @@
 "use client";
 /**
- * THE FLOATING BOX at the top of a lesson (cloud sync, docs/cloud-sync.md).
+ * THE FLOATING BOX at the top of a lesson (cloud sync, docs/fork/cloud-sync.md).
  *
  * Sessions move between devices by themselves (seamless sessions, owner's
  * decision: components/cloud/session-move.ts), so nothing here says who holds

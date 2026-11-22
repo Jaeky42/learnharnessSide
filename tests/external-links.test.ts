@@ -91,7 +91,7 @@ describe("links leaving the app window", () => {
 		assert.deepEqual(w.opened, allowed);
 	});
 
-	// Side-tutor fork: the notes drawer's "Open in Obsidian".
+	// FORK (notes): the notes drawer's "Open in Obsidian".
 	it("obsidian://open reaches the OS; any other Obsidian address stays blocked", () => {
 		const w = appWindow();
 		const open = "obsidian://open?vault=My%20Vault&file=Physics%2FElectricity";

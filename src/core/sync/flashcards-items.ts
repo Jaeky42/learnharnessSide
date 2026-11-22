@@ -1,5 +1,5 @@
 /**
- * Flashcards sync (docs/phone-plugins-plan.md, "Flashcards sync"): the
+ * Flashcards sync (docs/fork/plans/phone-plugins-plan.md, "Flashcards sync"): the
  * shared items a Flashcards library is made of, what may arrive, and the
  * rules that combine them. Pure. The file itself is turned into items and
  * back by flashcards.ts.

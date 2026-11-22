@@ -1,5 +1,5 @@
 /**
- * Cloud sync (Phase 5, docs/cloud-sync.md): pairing a desktop app with the
+ * Cloud sync (Phase 5, docs/fork/cloud-sync.md): pairing a desktop app with the
  * server. Pure rules over the server's login state (core/server-auth.ts);
  * the HTTP side is src/server/sync/http.ts.
  *
@@ -16,7 +16,7 @@
  * code (XXXX-XXXX), wrong codes count toward the login lockout, and at most
  * 10 desktops are paired at once.
  *
- * Multi-account (docs/multi-account-build.md, "Tags in codes and keys"): a
+ * Multi-account (docs/fork/plans/multi-account-build.md, "Tags in codes and keys"): a
  * copy that knows its account tag appends it to the code (XXXX-XXXX-TTT, 11
  * characters normalized) and puts it before the key (46 characters). The
  * stored hashes cover the whole code and key. No tag: exactly as before

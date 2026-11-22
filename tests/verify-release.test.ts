@@ -307,7 +307,7 @@ describe("release gate — update feeds", () => {
 	}
 });
 
-// Side-tutor fork: upstream's release.yml is deleted here (the fork releases
+// FORK (release): upstream's release.yml is deleted here (the fork releases
 // through side-tutor-windows.yml); skipped while the file is absent.
 describe("release gate — workflow wiring", { skip: !fs.existsSync(path.join(repoRoot, ".github", "workflows", "release.yml")) }, () => {
 	const yaml = require("js-yaml") as { load(source: string): any };

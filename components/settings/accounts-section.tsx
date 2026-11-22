@@ -1,7 +1,7 @@
 "use client";
 /**
  * Settings → Accounts: the server owner's screen (side-tutor fork, several
- * accounts on one server; docs/multi-account-plan.md, "The owner's screen").
+ * accounts on one server; docs/fork/plans/multi-account-plan.md, "The owner's screen").
  * Shown only on the server's site to its owner: the `lh_server` and
  * `lh_owner` marker cookies decide whether it SHOWS, the gateway decides what
  * is allowed (GET and POST /api/accounts answer 404 to anyone else).

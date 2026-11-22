@@ -1,5 +1,5 @@
 /**
- * Settings → Accounts at the gateway (docs/multi-account-build.md slice 4):
+ * Settings → Accounts at the gateway (docs/fork/plans/multi-account-build.md slice 4):
  * GET /api/accounts (the list) and POST /api/accounts {op, id?}. The owner
  * only, decided here from the session's account role (the `lh_owner` marker
  * cookie only decides what the page shows): anyone else, signed in or not,

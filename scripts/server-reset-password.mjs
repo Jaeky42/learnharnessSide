@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * server-reset-password.mjs: the "forgot my password" path for server mode
- * (docs/cloud-sync.md, Phase 1). In the Docker image it is on PATH as
+ * (docs/fork/server.md, Phase 1). In the Docker image it is on PATH as
  * `reset-password`:
  *
  *   docker compose exec lh reset-password

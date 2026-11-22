@@ -1,5 +1,5 @@
 /**
- * Cloud sync (Phase 5, docs/cloud-sync.md): the graph log, the pure part.
+ * Cloud sync (Phase 5, docs/fork/cloud-sync.md): the graph log, the pure part.
  *
  * Every change to the four graph ledgers is an ENTRY. The server keeps one
  * ordered log of entries and every device applies them in that order, so

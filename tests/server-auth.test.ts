@@ -1,5 +1,5 @@
 /**
- * Server-mode login (side-tutor fork, cloud sync Phase 1; docs/cloud-sync.md).
+ * Server-mode login (side-tutor fork, cloud sync Phase 1; docs/fork/server.md).
  *
  * Pins the approved rules: 8+ character passwords, a fixed 30-day login,
  * 5 wrong attempts → 15 min pause doubling to 24 h, the one-time setup code,

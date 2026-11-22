@@ -4,7 +4,7 @@
  * Plugins use the documented per-server initialization hook. A plugin failure
  * must not prevent access to existing learning data or teaching/practice.
  *
- * Side-tutor fork, cloud sync Phase 1: in server mode with no password set,
+ * FORK (cloud sync Phase 1): in server mode with no password set,
  * print a fresh one-time setup code to the log (`docker compose logs lh`).
  * Phase 4: start Obsidian sync again if a vault is connected.
  * Everywhere: the old side-tutor conversation files are removed (the Tutor's
@@ -30,7 +30,7 @@ export async function register() {
 	} catch (error) {
 		console.error("[plugins] Initialization failed; plugin management will report the error:", error);
 	}
-	// Side-tutor fork: the Tutor's old conversation files went with its engine.
+	// FORK (side tutor): the Tutor's old conversation files went with its engine.
 	const { removeOldSideTutorThreads } = await import("./src/server/side-tutor-cleanup.ts");
 	removeOldSideTutorThreads();
 	if (process.env.LH_SERVER_MODE !== "1") return;

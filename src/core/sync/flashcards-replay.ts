@@ -1,5 +1,5 @@
 /**
- * Flashcards sync (docs/phone-plugins-plan.md, "Flashcards sync"): schedules
+ * Flashcards sync (docs/fork/plans/phone-plugins-plan.md, "Flashcards sync"): schedules
  * never travel. Each device works a fact's schedule out again from the
  * combined reviews, in the order they were made, with the plugin's own
  * scheduler and the settings copy each review recorded.

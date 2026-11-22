@@ -1,5 +1,5 @@
 /**
- * Flashcards sync, decision S2 (docs/phone-plugins-plan.md): the server
+ * Flashcards sync, decision S2 (docs/fork/plans/phone-plugins-plan.md): the server
  * follows the PC's time zone. Pins: a zone a paired desktop gives is kept
  * and used by this very process at once, by Date's local getters (the
  * plugin's scheduler) and by Intl's default zone (its review tickets); it

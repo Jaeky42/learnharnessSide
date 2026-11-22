@@ -274,7 +274,7 @@ export function Home({
 								dictation.cancel();
 								return;
 							}
-							// Side-tutor fork: the phone's Enter rule (components/phone/enter-key.ts).
+							// FORK (phone): the phone's Enter rule (components/phone/enter-key.ts).
 							if (enterSends(e)) {
 								e.preventDefault();
 								void start();

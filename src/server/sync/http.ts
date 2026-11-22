@@ -1,5 +1,5 @@
 /**
- * Cloud sync (Phase 5, docs/cloud-sync.md): the SERVER's side of pairing.
+ * Cloud sync (Phase 5, docs/fork/cloud-sync.md): the SERVER's side of pairing.
  *
  *   POST /api/server-auth/desktops   signed-in browser: {op:"code"} makes a
  *                                    pairing code, {op:"remove", id} unpairs
@@ -22,7 +22,7 @@
  *   POST /api/sync/maps              settings and the other files that
  *                                    sync one item at a time (slice 5)
  *   POST /api/sync/flashcards        the Flashcards library, item by item
- *                                    (docs/phone-plugins-plan.md)
+ *                                    (docs/fork/plans/phone-plugins-plan.md)
  *
  * Everything answers 404 outside server mode. The gate for /api/sync/* is
  * syncGate in server-auth.ts: a device key, never the login cookie.
@@ -272,7 +272,7 @@ export async function mapsExchangeResponse(request: Request): Promise<Response> 
 	return json(reply.body, reply.status);
 }
 
-// ─── Flashcards (docs/phone-plugins-plan.md) ─────────────────────────────────
+// ─── Flashcards (docs/fork/plans/phone-plugins-plan.md) ─────────────────────────────────
 
 const flashcardsFailures = globalThis as typeof globalThis & { __lhFlashcardsFailure?: string };
 

@@ -22,7 +22,7 @@ export interface SyncRound {
 	graph: GraphRound | null;
 	/** Settings and the other files that sync one item at a time. */
 	maps: MapsRound | null;
-	/** The Flashcards library (docs/phone-plugins-plan.md), item by item too. */
+	/** The Flashcards library (docs/fork/plans/phone-plugins-plan.md), item by item too. */
 	flashcards: MapsRound | null;
 }
 

@@ -1,5 +1,5 @@
 /**
- * Multi-account, slice 2 (docs/multi-account-build.md "Slice 2"), the
+ * Multi-account, slice 2 (docs/fork/plans/multi-account-build.md "Slice 2"), the
  * owner's copy: the REAL desktop client pairs and syncs through a stand-in
  * Caddy, the gateway's real /gate and /api/sync/pair, and the REAL copy's
  * gate and routes (behind the gateway: LH_GATE_SECRET set). A desktop paired
@@ -23,7 +23,7 @@ process.env.LH_TRUST_PROXY = "1";
 process.env.LH_SYNC_LOOP = "off";
 delete process.env.LH_ACCOUNT_TAG;
 
-const h = await import("./gateway-sync-harness.ts");
+const h = await import("./helpers/gateway-sync-harness.ts");
 process.env.LH_GATE_SECRET = h.OWNER_SECRET;
 
 const core = await import("../src/core/server-auth.ts");

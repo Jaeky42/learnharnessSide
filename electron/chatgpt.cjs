@@ -282,7 +282,7 @@ function createChatGPT({ store, openExternal, fetch: request = globalThis.fetch,
 				listener.listen(0, "127.0.0.1", resolve);
 			});
 			const redirectUri = `http://127.0.0.1:${listener.address().port}/auth/callback`;
-			// Side-tutor fork (server mode): the server's paste step forwards a
+			// FORK (server mode): the server's paste step forwards a
 			// pasted callback only to this exact pending listener.
 			if (pending?.abort === abort) pending.callbackOrigin = new URL(redirectUri).origin;
 			listener.on("request", async (req, res) => {

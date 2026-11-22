@@ -16,7 +16,7 @@ import { after, beforeEach, describe, it } from "node:test";
 
 import * as acc from "../src/core/accounts.ts";
 import * as words from "../src/core/account-screens.ts";
-import { DAY, harness, ORIGIN, PASSWORD, type Harness } from "./gateway-fakes.ts";
+import { DAY, harness, ORIGIN, PASSWORD, type Harness } from "./helpers/gateway-fakes.ts";
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "lh-gateway-accounts-"));
 after(() => fs.rmSync(TMP, { recursive: true, force: true }));

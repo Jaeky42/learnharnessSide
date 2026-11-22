@@ -1,5 +1,5 @@
 /**
- * Cloud sync Phase 5, slice 2 (docs/cloud-sync.md): sessions and leases.
+ * Cloud sync Phase 5, slice 2 (docs/fork/cloud-sync.md): sessions and leases.
  *
  * Pins the owner's decisions: a session travels whole (chat record with
  * its side questions inside, notes home folder, helper jobs); only its holder may
@@ -612,7 +612,7 @@ describe("the chat record format and the sync protocol", () => {
 	});
 
 	/**
-	 * The same rule for the Flashcards file (docs/phone-plugins-plan.md):
+	 * The same rule for the Flashcards file (docs/fork/plans/phone-plugins-plan.md):
 	 * which sync protocol each format of flashcards.json needs. It first
 	 * travels with protocol 3. A build that reads a newer format must raise
 	 * SYNC_PROTOCOL_VERSION and add the row; until then the format lock

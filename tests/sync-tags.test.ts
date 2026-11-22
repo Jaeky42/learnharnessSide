@@ -1,5 +1,5 @@
 /**
- * Multi-account, slice 2a (docs/multi-account-build.md, "Tags in codes and
+ * Multi-account, slice 2a (docs/fork/plans/multi-account-build.md, "Tags in codes and
  * keys"): a copy that knows its account tag (LH_ACCOUNT_TAG) appends it to
  * its pairing codes (XXXX-XXXX-TTT) and puts it before its device keys (46
  * characters); a copy without the variable issues exactly today's 8 / 43.

@@ -62,7 +62,7 @@ export function CitationCommentEditor({ initial, onDraftChange, onSave, onCancel
 				onKeyDown={(event) => {
 					if (!isInteractionScopeEligible(areaRef.current, controller)) return;
 					const action = commentKeyAction({ ...event, isComposing: event.nativeEvent.isComposing || event.keyCode === 229 });
-					// Side-tutor fork: on a touch phone a plain Enter is a new line
+					// FORK (phone): on a touch phone a plain Enter is a new line
 					// and Save saves (components/phone/enter-key.ts).
 					if (action === null || (action === "save" && !plainEnterSends())) return;
 					event.preventDefault();

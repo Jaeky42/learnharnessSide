@@ -1,6 +1,6 @@
 "use client";
 /**
- * SEAMLESS SESSIONS (owner's decision; cloud sync, docs/cloud-sync.md): a
+ * SEAMLESS SESSIONS (owner's decision; cloud sync, docs/fork/cloud-sync.md): a
  * session looks and behaves the same whichever device holds it. Nothing is
  * greyed and nothing asks the learner to take it over: the session moves
  * here by itself.

@@ -1,5 +1,5 @@
 /**
- * Multi-account (docs/multi-account-plan.md, "Smaller rules"): accounts that
+ * Multi-account (docs/fork/plans/multi-account-plan.md, "Smaller rules"): accounts that
  * use one browser share its storage. At sign-out, Sign out everywhere and
  * Delete my account, behind the gateway, whatever holds a person's own words
  * is removed; window positions and view state stay (they say nothing about

@@ -1,6 +1,6 @@
 /**
  * Settings → Obsidian and the notes drawer on the cloud server (cloud sync
- * Phase 4; docs/cloud-sync.md). fetch is scripted; no server. The wording
+ * Phase 4; docs/fork/server.md). fetch is scripted; no server. The wording
  * here is the owner-approved wording, so a change to it is a deliberate one.
  */
 

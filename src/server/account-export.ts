@@ -1,5 +1,5 @@
 /**
- * "Download my data" (multi-account slice 5c; docs/multi-account-plan.md,
+ * "Download my data" (multi-account slice 5c; docs/fork/plans/multi-account-plan.md,
  * "In each person's Settings → Account"): one .zip of this copy's data
  * folder, in the folder's own layout, so it can be put into a desktop app's
  * data folder.

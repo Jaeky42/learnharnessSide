@@ -1,5 +1,5 @@
 /**
- * The gateway's side of the maker's API (gateway/maker.ts; docs/multi-account-build.md
+ * The gateway's side of the maker's API (gateway/maker.ts; docs/fork/plans/multi-account-build.md
  * "The maker's API"). Bearer LH_MAKER_TOKEN, plain fetch, a timeout on every call.
  *
  * Outcomes the callers act on:

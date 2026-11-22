@@ -1,5 +1,5 @@
 /**
- * Cloud sync Phase 2 (side-tutor fork; docs/cloud-sync.md): signing in to
+ * Cloud sync Phase 2 (side-tutor fork; docs/fork/server.md): signing in to
  * ChatGPT and Claude from the server's Settings.
  *
  *  - ChatGPT paste step: only the pending sign-in's own 127.0.0.1 callback

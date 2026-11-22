@@ -85,7 +85,7 @@ export function isTouchPointer(event: { pointerType?: string }): boolean {
 
 /** The touch path is for a browser only, never the desktop app (also on a
  *  PC with a touch screen: there every gesture keeps upstream's behaviour,
- *  docs/cloud-sync.md "Still as on a computer"). The same rule as
+ *  docs/fork/phone-and-tablet.md "Still as on a computer"). The same rule as
  *  isBrowserNow (use-phone.ts), asked of the page's own window. */
 export function touchSelectionHere(view: { navigator?: { userAgent?: string } }): boolean {
 	return !(view.navigator?.userAgent ?? "").includes("Electron");

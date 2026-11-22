@@ -1,14 +1,14 @@
 "use client";
 /**
  * Settings → Account (side-tutor fork, cloud sync Phase 1). Shown only on a
- * server-mode LearnHarness (docs/cloud-sync.md): GET /api/server-auth/account
+ * server-mode LearnHarness (docs/fork/server.md): GET /api/server-auth/account
  * answers 404 everywhere else, and the tab stays hidden.
  *
  * Change password (signs out every other device), the signed-in devices
  * list, Sign out (this device), and Sign out everywhere (this device included). No browser
  * confirm(): the destructive button asks once more inline.
  *
- * Behind the multi-account gateway (docs/multi-account-plan.md) the answer
+ * Behind the multi-account gateway (docs/fork/plans/multi-account-plan.md) the answer
  * also carries `name`, and the screen gains "Signed in as", Recovery codes,
  * Your data (a real download from the copy) and Delete my account (not for
  * the owner), with the approved words from src/core/account-screens.ts. A

@@ -1,5 +1,5 @@
 /**
- * Multi-account, slices 1b and 2b (docs/multi-account-build.md "What /gate
+ * Multi-account, slices 1b and 2b (docs/fork/plans/multi-account-build.md "What /gate
  * decides"): the gateway's `/gate` decision, a pure function, in its six
  * steps and every branch. The point of it all: one person's cookie or key
  * never yields another person's copy or secret, and nothing a client sends

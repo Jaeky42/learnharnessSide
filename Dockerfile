@@ -1,5 +1,5 @@
 # LearnHarness server image (side-tutor fork, cloud sync Phase 1;
-# docs/cloud-sync.md). Builds the same standalone server the desktop app
+# docs/fork/server.md). Builds the same standalone server the desktop app
 # runs, then runs it in server mode: password login gate on, data in the
 # /data volume. Deploy with deploy/compose.yaml (Caddy in front for HTTPS).
 
@@ -8,7 +8,7 @@ FROM node:26-bookworm-slim AS build
 WORKDIR /src
 ENV NEXT_TELEMETRY_DISABLED=1 \
     ELECTRON_SKIP_BINARY_DOWNLOAD=1
-# The fork's lockfile is written by npm 11 (docs/side-tutor.md).
+# The fork's lockfile is written by npm 11 (docs/fork/development.md).
 RUN npm install -g npm@11
 COPY package.json package-lock.json ./
 RUN npm ci
@@ -20,7 +20,7 @@ ENV LH_BUILD_VERSION=${LH_BUILD_VERSION} LH_BUILD_HOMEPAGE=${LH_BUILD_HOMEPAGE}
 # (their own dependencies first), and build-server.mjs refuses without them.
 RUN npm run plugins:setup && npm run build && node scripts/smoke-provider-runtime.mjs && node scripts/build-server.mjs
 # Multi-account: the gateway and the maker, two single-file bundles
-# (docs/multi-account-build.md). Not part of the standalone server.
+# (docs/fork/plans/multi-account-build.md). Not part of the standalone server.
 RUN node scripts/build-gateway.mjs
 
 # ── run ──────────────────────────────────────────────────────────────────

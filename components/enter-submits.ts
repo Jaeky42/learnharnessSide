@@ -72,7 +72,7 @@ export function useEnterSubmits(submit: () => void, scopeRef?: RefObject<HTMLEle
 			if (e.key !== "Enter" || e.defaultPrevented || pluginQuestionKeySuppressed(e) || composingQuestionKey(e)) return;
 			if (!isInteractionScopeEligible(scopeRef ? scopeRef.current : document.body, controller)) return;
 			if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
-			// Side-tutor fork: on a touch phone Enter never sends; the button
+			// FORK (phone): on a touch phone Enter never sends; the button
 			// does (components/phone/enter-key.ts).
 			if (!plainEnterSends()) return;
 			if (isTypingSurface(e)) return;

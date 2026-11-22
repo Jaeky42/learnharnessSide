@@ -10,16 +10,16 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import * as path from "node:path";
 
-import * as acc from "../src/core/accounts.ts";
-import * as core from "../src/core/server-auth.ts";
-import type { AccountDeps } from "../gateway/account-routes.ts";
-import type { GatewayConfig } from "../gateway/config.ts";
-import { createUnpairer, type RelayRequest } from "../gateway/copies.ts";
-import { createLifecycle } from "../gateway/lifecycle.ts";
-import { ALL_ROUTES, announceSetupCode } from "../gateway/main.ts";
-import { createMakerClient } from "../gateway/maker-client.ts";
-import { handleRequest } from "../gateway/routes.ts";
-import { createStore, readStateFile } from "../gateway/state.ts";
+import * as acc from "../../src/core/accounts.ts";
+import * as core from "../../src/core/server-auth.ts";
+import type { AccountDeps } from "../../gateway/account-routes.ts";
+import type { GatewayConfig } from "../../gateway/config.ts";
+import { createUnpairer, type RelayRequest } from "../../gateway/copies.ts";
+import { createLifecycle } from "../../gateway/lifecycle.ts";
+import { ALL_ROUTES, announceSetupCode } from "../../gateway/main.ts";
+import { createMakerClient } from "../../gateway/maker-client.ts";
+import { handleRequest } from "../../gateway/routes.ts";
+import { createStore, readStateFile } from "../../gateway/state.ts";
 
 export const MIN = 60 * 1000;
 export const DAY = 24 * 60 * MIN;

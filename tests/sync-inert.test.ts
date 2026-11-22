@@ -1,5 +1,5 @@
 /**
- * Cloud sync Phase 5: THE rule every slice had to keep (docs/cloud-sync.md).
+ * Cloud sync Phase 5: THE rule every slice had to keep (docs/fork/cloud-sync.md).
  * Where nothing is paired, the sync engine does nothing: an app that was
  * never paired, and a server with no paired desktop, make no request, set
  * no timer, and leave the data folder exactly as the app itself leaves it.
@@ -7,7 +7,7 @@
  * This process is first an unpaired desktop app, then a server nobody has
  * paired with. Everything is driven through the real composition root.
  *
- * Flashcards sync (docs/phone-plugins-plan.md) keeps the rule: no request,
+ * Flashcards sync (docs/fork/plans/phone-plugins-plan.md) keeps the rule: no request,
  * no timer, no file, a library left as it is, and the process's time zone
  * untouched.
  */

@@ -1,6 +1,6 @@
 # Crossing tests
 
-`crossing.mjs` checks, against a running multi-account stack (`deploy/compose.yaml`: Caddy, gateway, maker, the owner's copy), that no account can reach another account's copy, the owner's copy, the gateway, the maker or Caddy's internal relay (docs/multi-account-build.md, slice 6). It uses Node's own modules only (Node 22 or later) and runs `docker` / `docker compose` for the checks made from inside containers.
+`crossing.mjs` checks, against a running multi-account stack (`deploy/compose.yaml`: Caddy, gateway, maker, the owner's copy), that no account can reach another account's copy, the owner's copy, the gateway, the maker or Caddy's internal relay (docs/fork/plans/multi-account-build.md, slice 6). It uses Node's own modules only (Node 22 or later) and runs `docker` / `docker compose` for the checks made from inside containers.
 
 ```
 node deploy/test/crossing.mjs --list          # what it tries and what counts as refused; touches nothing

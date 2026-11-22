@@ -63,7 +63,7 @@ export function createPluginTransport(deps: { getHost(): Promise<PluginTransport
  * Preserve the identical mode-aware API policy before ANY params/body/host
  * work, including unsupported methods and framework-style OPTIONS responses. */
 export function createPluginDocumentRoute(transport: Pick<ReturnType<typeof createPluginTransport>, "convertDocument">) {
-	// Side-tutor fork: the cloud server's login gate, upstream's policy elsewhere.
+	// FORK (server mode): the cloud server's login gate, upstream's policy elsewhere.
 	const refusal = (request: Request) => apiGate(request);
 	const unsupported = (request: Request) => refusal(request) ?? new Response(null, { status: 405 });
 	return {

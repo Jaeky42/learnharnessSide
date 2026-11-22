@@ -1,5 +1,5 @@
 /**
- * The gateway's settings, from the environment (docs/multi-account-build.md
+ * The gateway's settings, from the environment (docs/fork/plans/multi-account-build.md
  * "Environment variables"). Refuses to start without the ones it can't work
  * without; a refusal names the variable, never its value.
  */

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * build-gateway.mjs: bundle the multi-account gateway and maker
- * (docs/multi-account-build.md, slice 1d) into two single ESM files that the
+ * (docs/fork/plans/multi-account-build.md, slice 1d) into two single ESM files that the
  * server image runs with plain Node:
  *
  *   gateway/main.ts  -> gateway-dist/gateway.mjs   (`lh-gateway`)

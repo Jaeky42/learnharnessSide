@@ -293,7 +293,7 @@ describe("desktop packaging policy", () => {
 	});
 });
 
-// Side-tutor fork: upstream's ci.yml and release.yml are deleted here (owner's
+// FORK (release): upstream's ci.yml and release.yml are deleted here (owner's
 // decision at the 0.6.0 merge; the fork builds with side-tutor-windows.yml and
 // server-image.yml). The suites that pin those two files are skipped while the
 // files are absent; tests/side-tutor-install.test.ts pins the fork's own.

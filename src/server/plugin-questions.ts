@@ -227,7 +227,7 @@ export function pluginQuestionCompatibilityAppends(record: { messages: LhMessage
 
 /** Re-read after startup awaits; never write over an active native turn. No migration or wake. */
 export async function reconcilePluginQuestionCompatibility(chatStore: ChatStore, chatId: string): Promise<void> {
-	// Side-tutor fork (cloud sync): a session another device holds is read-only
+	// FORK (cloud sync): a session another device holds is read-only
 	// here; its holder reconciles its own record. Checked again after the await
 	// (a take-over can land meanwhile). Without this, the guarded store drops
 	// the write but record-changed still fires, and the open page's reload GET

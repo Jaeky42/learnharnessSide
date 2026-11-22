@@ -25,7 +25,7 @@ import { createMakerClient, MakerUnavailable, TagTaken } from "../gateway/maker-
 import { ALL_ROUTES } from "../gateway/main.ts";
 import { handleRequest } from "../gateway/routes.ts";
 import { readStateFile, writeStateFile } from "../gateway/state.ts";
-import { DAY, harness, MAKER_TOKEN, PASSWORD, RELAY_TOKEN, SAM_PASSWORD, type Harness } from "./gateway-fakes.ts";
+import { DAY, harness, MAKER_TOKEN, PASSWORD, RELAY_TOKEN, SAM_PASSWORD, type Harness } from "./helpers/gateway-fakes.ts";
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "lh-gateway-lifecycle-"));
 after(() => fs.rmSync(TMP, { recursive: true, force: true }));

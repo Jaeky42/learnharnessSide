@@ -48,7 +48,7 @@ const Context = createContext({
 export function ChatGPTUIProvider({ children }: { children: React.ReactNode }) {
 	const bridge = useChatGPTBridge();
 	const web = typeof window !== "undefined" && bridge !== window.lh?.chatgpt;
-	// Side-tutor fork: on the cloud server the redirect can't finish by itself (chatgpt-paste.tsx).
+	// FORK (server mode): on the cloud server the redirect can't finish by itself (chatgpt-paste.tsx).
 	const server = useServerMode() === true && web;
 	const [pendingSince, setPendingSince] = useState<number | null>(null);
 	const [status, setStatus] = useState<ChatGPTStatus>(empty);

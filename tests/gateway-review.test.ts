@@ -27,7 +27,7 @@ import * as control from "../gateway/control.ts";
 import * as gatewayMain from "../gateway/main.ts";
 import type { MakerClient } from "../gateway/maker-client.ts";
 import * as stateFile from "../gateway/state.ts";
-import { ADDR, config, DAY, harness, PASSWORD, SAM_PASSWORD, type Harness } from "./gateway-fakes.ts";
+import { ADDR, config, DAY, harness, PASSWORD, SAM_PASSWORD, type Harness } from "./helpers/gateway-fakes.ts";
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "lh-gateway-review-"));
 after(() => fs.rmSync(TMP, { recursive: true, force: true }));

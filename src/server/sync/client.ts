@@ -1,5 +1,5 @@
 /**
- * Cloud sync (Phase 5, docs/cloud-sync.md): the DESKTOP's side. This module
+ * Cloud sync (Phase 5, docs/fork/cloud-sync.md): the DESKTOP's side. This module
  * talks to the server the app is paired with, and keeps the facts the
  * Phase 6 screens will show (paired or not, last contact, why sync paused).
  *

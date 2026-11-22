@@ -1,5 +1,5 @@
 /**
- * Flashcards sync (docs/phone-plugins-plan.md): THE WIRING. The pure rules
+ * Flashcards sync (docs/fork/plans/phone-plugins-plan.md): THE WIRING. The pure rules
  * (sync-flashcards.test.ts) run here through the real per-item exchange
  * (maps-sync.ts, the second instance), the real files (flashcards-files.ts,
  * the library under each side's data folder, the memory beside the sync
@@ -29,7 +29,7 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "lh-fc-exchange-"));
 process.env.LH_AUTH_FILE = path.join(TMP, "prod", "secrets", "auth.json");
 process.env.LH_DATA_DIR = path.join(TMP, "prod", "data");
 
-const { clock, DAY, Device, MINUTE, scheduler, graphNode } = await import("./sync-flashcards-harness.ts");
+const { clock, DAY, Device, MINUTE, scheduler, graphNode } = await import("./helpers/sync-flashcards-harness.ts");
 const { stateFile } = await import("../src/store/sync/state-file.ts");
 const { makeFlashcardsBackup } = await import("../src/store/sync/backup.ts");
 const { createMapsAuthority, createMapsDesktop, isAuthorityMapsState, isDesktopMapsState } = await import("../src/server/sync/maps-sync.ts");

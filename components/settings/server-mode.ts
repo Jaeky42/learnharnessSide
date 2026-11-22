@@ -1,6 +1,6 @@
 "use client";
 /**
- * Is this LearnHarness the cloud server (server mode, docs/cloud-sync.md)?
+ * Is this LearnHarness the cloud server (server mode, docs/fork/server.md)?
  * Side-tutor fork. The server's proxy sets a plain `lh_server=1` marker
  * cookie (proxy.ts); nothing else does, so the desktop app and local use
  * read false without making any request. undefined until mounted.

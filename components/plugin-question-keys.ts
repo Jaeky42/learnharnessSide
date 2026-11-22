@@ -43,7 +43,7 @@ export function capturePluginQuestionKey(event: KeyboardEvent): void {
 	if (key === "Tab" || key === "Escape") { claim(); current.cycle(key); }
 	// A missing hook or "pass" delegates to native host defaults: Enter
 	// submits, Shift+Enter keeps native editing without a second host submit.
-	// Side-tutor fork: on a touch phone Enter belongs to the editor (a new
+	// FORK (phone): on a touch phone Enter belongs to the editor (a new
 	// line) and the button sends (components/phone/enter-key.ts).
 	if (key === "Enter" && plainEnterSends()) { claim(); current.submit(); }
 	if (key === "Shift+Enter") claimed.add(event);

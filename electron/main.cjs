@@ -297,7 +297,7 @@ function killServer() {
  *  file:, search-ms:, any app's custom handler) are dropped, and only the
  *  scheme is logged. */
 const EXTERNAL_LINK_SCHEMES = new Set(["http:", "https:", "mailto:"]);
-/** Side-tutor fork: the notes drawer hands "Open in Obsidian" (and a link to a
+/** FORK (notes): the notes drawer hands "Open in Obsidian" (and a link to a
  *  note outside LearnHarness/) to the OS as obsidian://open?vault=…&file=…
  *  (obsidianUrl in src/core/notes.ts). That one Obsidian action passes; every
  *  other obsidian: address, and every other scheme, stays blocked. */

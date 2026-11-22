@@ -1288,7 +1288,7 @@ export function Chat({
 	// Figure focus (2026-10-07): the figure card's fullscreen button — same
 	// overlay shell as mermaid, but carrying the raw svg + the card's invert
 	// state so the fullscreen view stays faithful to the toggled card.
-	// Side-tutor fork (phone): `{ drawing }` is a Rich code blocks drawing opened
+	// FORK (phone): `{ drawing }` is a Rich code blocks drawing opened
 	// by its enlarge button (components/phone/rich-drawing-frame.tsx).
 	const [figureFocus, setFigureFocus] = useState<{ svg: string; inverted: boolean } | { image: SessionImage } | { drawing: string } | null>(null);
 
@@ -1701,7 +1701,7 @@ export function Chat({
 				openMermaid: setMermaidFocus,
 				openFigure: (svg, inverted) => setFigureFocus({ svg, inverted }),
 				openImage: image => setFigureFocus({ image }),
-				// Side-tutor fork (phone): Rich code blocks' enlarge button (components/phone/rich-drawing-frame.tsx).
+				// FORK (phone): Rich code blocks' enlarge button (components/phone/rich-drawing-frame.tsx).
 				openDrawing: drawing => setFigureFocus({ drawing }),
 			}}
 		>

@@ -1,5 +1,5 @@
 /**
- * The gateway's routes (docs/multi-account-build.md "The gateway's own
+ * The gateway's routes (docs/fork/plans/multi-account-build.md "The gateway's own
  * routes"): each one `(Request, deps) => Promise<Response>`, so tests drive
  * them with a stand-in store, clock and relay. Shapes, statuses and refusal
  * texts follow today's single-copy routes (src/server/server-auth.ts), so

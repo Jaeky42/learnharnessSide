@@ -7,7 +7,7 @@
  * resize, a new press and scrolling dismiss; with restoreAfterScroll the
  * toolbar comes back once scrolling settles.
  *
- * Side-tutor fork: a touch or pen gesture (pointerType, per gesture) reports
+ * FORK (touch): a touch or pen gesture (pointerType, per gesture) reports
  * once the selection has rested for TOUCH_SETTLE_MS with no finger down; iOS
  * sends no mouseup after a press-and-hold selection, and its handles send
  * only selectionchange. Once shown, the toolbar follows the selection: a
@@ -61,7 +61,7 @@ export function observeSelectionActions({ element, getActionElement, restoreAfte
 	element: HTMLElement;
 	getActionElement: () => HTMLElement | null;
 	restoreAfterScroll: boolean;
-	/** Side-tutor fork: `touch` is true when a touch or pen gesture made the
+	/** FORK (touch): `touch` is true when a touch or pen gesture made the
 	 *  selection (the toolbar is then placed by touch rules). */
 	onSelection: (pointer: SelectionActionPoint | null, touch?: boolean) => void;
 	onDismiss: (reason: SelectionDismissReason) => void;
@@ -74,7 +74,7 @@ export function observeSelectionActions({ element, getActionElement, restoreAfte
 	let timer: number | undefined;
 	let frame: number | undefined;
 	let scrollTimer: number | undefined;
-	// Side-tutor fork (touch): the last gesture was a touch or pen; the
+	// FORK (touch): the last gesture was a touch or pen; the
 	// fingers down (not on the toolbar) and when the last went down; a press
 	// on the toolbar, and whether the selection changed under it.
 	let touch = false;
@@ -107,7 +107,7 @@ export function observeSelectionActions({ element, getActionElement, restoreAfte
 			});
 		}, delay);
 	};
-	// Side-tutor fork (touch): show once the selection has rested and no
+	// FORK (touch): show once the selection has rested and no
 	// finger is down (a finger that never reported lifting holds it back at
 	// most TOUCH_FINGER_WAIT_MS).
 	const settleTouch = () => {
@@ -125,7 +125,7 @@ export function observeSelectionActions({ element, getActionElement, restoreAfte
 		};
 		timer = view.setTimeout(check, TOUCH_SETTLE_MS);
 	};
-	// Side-tutor fork (touch): placed again for the selection as it is now, at
+	// FORK (touch): placed again for the selection as it is now, at
 	// the next frame (at most once a frame), without hiding it first.
 	const followTouch = () => {
 		clearPending();
@@ -147,7 +147,7 @@ export function observeSelectionActions({ element, getActionElement, restoreAfte
 		if (shown) dismiss("cancel");
 		settleTouch();
 	};
-	// Side-tutor fork (touch): end the following also while a scroll has the
+	// FORK (touch): end the following also while a scroll has the
 	// toolbar hidden (shown and the timers are then off, so the dismissals
 	// below don't run); the scroll's restore then doesn't show it.
 	const stopFollowing = () => {
@@ -170,13 +170,13 @@ export function observeSelectionActions({ element, getActionElement, restoreAfte
 	const pointerDownCapture = (event: PointerEvent) => {
 		if (onAction(event.target)) {
 			clearPending();
-			// Side-tutor fork (touch): hold the toolbar through this press.
+			// FORK (touch): hold the toolbar through this press.
 			if (isTouchPointer(event)) { endActionPress(); actionPress = event.pointerId; changedInPress = false; }
 			return;
 		}
 		if (shown || timer !== undefined) dismiss("interaction");
 		stopFollowing();
-		// Side-tutor fork (touch): a touch or pen never sets pointerDown; it
+		// FORK (touch): a touch or pen never sets pointerDown; it
 		// is never cleared on iOS (no mouseup) and blocked the toolbar for good.
 		touch = isTouchPointer(event);
 		if (touch) { fingers.add(event.pointerId); fingerAt = Date.now(); gesture = false; return; }
@@ -190,7 +190,7 @@ export function observeSelectionActions({ element, getActionElement, restoreAfte
 		gesture = false;
 		schedule(event.detail >= 2 ? MULTI_CLICK_SETTLE_MS : 0, { x: event.clientX, y: event.clientY });
 	};
-	// Side-tutor fork (touch): a finger lifting, or the system taking it (a
+	// FORK (touch): a finger lifting, or the system taking it (a
 	// press-and-hold selection, a scroll).
 	const pointerUp = (event: PointerEvent) => {
 		if (!isTouchPointer(event)) return;
@@ -209,10 +209,10 @@ export function observeSelectionActions({ element, getActionElement, restoreAfte
 	const keyDown = (event: KeyboardEvent) => {
 		if (event.key === "Escape") { if (shown || timer !== undefined) dismiss("cancel"); stopFollowing(); return; }
 		pointerDown = false;
-		touch = false; // Side-tutor fork: keyboard selection reports as upstream's
+		touch = false; // FORK (touch): keyboard selection reports as upstream's
 	};
 	const cancel = () => { if (shown || timer !== undefined) dismiss("cancel"); stopFollowing(); };
-	// Side-tutor fork (touch): the system taking a touch (a press-and-hold
+	// FORK (touch): the system taking a touch (a press-and-hold
 	// selection) must not drop a selection that is settling.
 	const pointerCancel = (event: PointerEvent) => {
 		if (!isTouchPointer(event)) { cancel(); return; }
@@ -221,7 +221,7 @@ export function observeSelectionActions({ element, getActionElement, restoreAfte
 		if (shown) dismiss("cancel");
 		if (again) settleTouch();
 	};
-	// Side-tutor fork (touch): Android fires contextmenu on a long press,
+	// FORK (touch): Android fires contextmenu on a long press,
 	// then selects; look again once the selection rests.
 	const contextMenu = () => { dismiss("interaction"); if (touch) settleTouch(); };
 	const focusIn = (event: FocusEvent) => {
@@ -231,7 +231,7 @@ export function observeSelectionActions({ element, getActionElement, restoreAfte
 	};
 	const scroll = () => {
 		if (pointerDown) return; // autoscroll while dragging keeps the gesture
-		// Side-tutor fork (touch): a touch selection still settling (a scroll
+		// FORK (touch): a touch selection still settling (a scroll
 		// cancelled its touch first) comes back too.
 		// A toolbar that was following (a handle dragged to the lesson's edge
 		// autoscrolls) is hidden while the lesson moves and placed again as soon
@@ -257,7 +257,7 @@ export function observeSelectionActions({ element, getActionElement, restoreAfte
 
 	return {
 		selectionChanged() {
-			// Side-tutor fork (touch): a press on the toolbar keeps it; once
+			// FORK (touch): a press on the toolbar keeps it; once
 			// shown it follows a handle drag (hidden while the lesson scrolls);
 			// before that, the selection must rest first.
 			if (actionPress !== null) { changedInPress = true; return; }

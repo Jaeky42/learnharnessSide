@@ -1,5 +1,5 @@
 /**
- * Accounts on one server (docs/multi-account-plan.md, docs/multi-account-build.md
+ * Accounts on one server (docs/fork/plans/multi-account-plan.md, docs/fork/plans/multi-account-build.md
  * "Slice 1a"): the pure rules the gateway uses. No file I/O, no environment,
  * no clock reads: every function takes `now` (ms). Randomness comes from
  * node:crypto, as in ./server-auth, whose password hashing, code alphabet and

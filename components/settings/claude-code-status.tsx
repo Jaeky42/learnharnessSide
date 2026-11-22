@@ -23,7 +23,7 @@ export function ClaudeCodeInstallationStatus() {
 	const [error, setError] = useState<string | null>(null);
 	const [status, setStatus] = useState<ClaudeCodeStatus | null>(null);
 	const [busy, setBusy] = useState(false);
-	// Side-tutor fork: on the cloud server, sign in from here (claude-server-sign-in.tsx).
+	// FORK (server mode): on the cloud server, sign in from here (claude-server-sign-in.tsx).
 	const server = useServerMode() === true;
 	const request = useRef<AbortController | null>(null);
 	const settingsRead = useRef<AbortController | null>(null);

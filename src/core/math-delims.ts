@@ -6,7 +6,7 @@ import {
 } from "./content-reader.ts";
 export { isMoneyPair } from "./content-reader.ts";
 
-/** Side-tutor fork (performance): a bounded string-keyed memo for the two
+/** FORK (performance): a bounded string-keyed memo for the two
  * pure text functions below, so an unchanged string isn't parsed again on a
  * remount or re-render. Oldest entries go first, by entry count and by the
  * characters held. A string that only extends the previous input is a

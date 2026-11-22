@@ -52,7 +52,7 @@ const defaults = () => ({ retention: 0.9, learningSteps: [1, 10], relearningStep
 function openStore(directory) {
   fs.mkdirSync(directory, { recursive: true });
   const file = path.join(directory, 'flashcards.json');
-  // Side-tutor fork (Flashcards sync): read the file again whenever it changed on disk.
+  // FORK (Flashcards sync): read the file again whenever it changed on disk.
   const stamp = () => { try { const s = fs.statSync(file); return `${s.ino}:${s.size}:${s.mtimeMs}:${s.ctimeMs}`; } catch { return null; } };
   const load = () => {
   let state;

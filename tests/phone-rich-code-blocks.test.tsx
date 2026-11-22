@@ -1,5 +1,5 @@
 /**
- * RICH CODE BLOCKS ON A PHONE (fork; docs/phone-plugins-plan.md, decisions
+ * RICH CODE BLOCKS ON A PHONE (fork; docs/fork/plans/phone-plugins-plan.md, decisions
  * 7 and 8; app/phone-rich-code-blocks.css and
  * components/phone/rich-drawing-frame.tsx).
  *

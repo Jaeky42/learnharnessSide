@@ -1,5 +1,5 @@
 /**
- * Cloud sync (Phase 5, docs/cloud-sync.md): sessions and leases, the pure
+ * Cloud sync (Phase 5, docs/fork/cloud-sync.md): sessions and leases, the pure
  * part. A session travels WHOLE: its chat record (with its side questions
  * inside it, since upstream 0.6.0), its notes home-folder record and its
  * helper job files. Only the device that holds the session's lease may

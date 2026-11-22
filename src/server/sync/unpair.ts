@@ -1,5 +1,5 @@
 /**
- * Cloud sync (Phase 6, docs/cloud-sync.md): "Unpair this PC", the desktop's
+ * Cloud sync (Phase 6, docs/fork/cloud-sync.md): "Unpair this PC", the desktop's
  * own way out (owner's decisions).
  *
  *  1. If the server can be reached, this PC first sends everything it has

@@ -1,5 +1,5 @@
 /**
- * Flashcards sync, decision S2 (docs/phone-plugins-plan.md): THE SERVER
+ * Flashcards sync, decision S2 (docs/fork/plans/phone-plugins-plan.md): THE SERVER
  * FOLLOWS THE PC's TIME ZONE. Flashcards works out study days, due dates and
  * daily limits in the local time of the process it runs in (its scheduler
  * uses Date's local getters; its review tickets check the Intl zone). The

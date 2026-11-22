@@ -1,7 +1,7 @@
 "use client";
 /**
  * Settings → Cloud on the DESKTOP app (side-tutor fork, cloud sync Phase 6;
- * docs/cloud-sync.md). The server's site shows cloud-server-section.tsx
+ * docs/fork/cloud-sync.md). The server's site shows cloud-server-section.tsx
  * under the same row instead.
  *
  * Not paired: a short pairing form (server address, pairing code, this

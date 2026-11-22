@@ -38,7 +38,7 @@ export function deleteSources(raw: unknown): SourceDirectory & { graphRevision: 
 	}
 	// Clear the whole selected batch in one graph rewrite. Kept chats lose
 	// coverage/checkpoints too, so their unchanged messages can be re-extracted.
-	// Side-tutor fork (cloud sync): logged as what it is, so other devices repeat it.
+	// FORK (cloud sync): logged as what it is, so other devices repeat it.
 	const traceIds = targets.map((s) => s.id);
 	if (traceIds.length > 0) recordGraphAction({ kind: "delete-sources", ids: traceIds, mode: "delete-nodes" }, () => deleteSourcesTraces(stores.graphStore, new Set(traceIds), "delete-nodes"));
 	stores.graphStore.deleteSources(new Set(targets.filter((s) => s.kind === "notes").map((s) => s.id)));

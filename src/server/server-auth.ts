@@ -1,5 +1,5 @@
 /**
- * Server-mode login: the HTTP side (cloud sync Phase 1, docs/cloud-sync.md).
+ * Server-mode login: the HTTP side (cloud sync Phase 1, docs/fork/server.md).
  *
  * Active only with LH_SERVER_MODE=1 (the Docker image sets it). Without it,
  * every export here is inert: the gate allows everything and the routes
@@ -19,7 +19,7 @@
  * deploy/compose.yaml, where Caddy is the only way in) the LAST
  * X-Forwarded-For entry, which Caddy writes; otherwise one shared bucket.
  *
- * Behind a gateway (multi-account, docs/multi-account-plan.md "A copy behind
+ * Behind a gateway (multi-account, docs/fork/plans/multi-account-plan.md "A copy behind
  * the gateway"): server mode plus a non-empty LH_GATE_SECRET. The gateway
  * owns the login; this copy only checks that every request carries its
  * secret in X-LH-Gate (constant time) and that the path fits the scope the
@@ -119,7 +119,7 @@ export function isGatewayPublic(pathname: string): boolean {
 		(GATEWAY_PUBLIC_FILES.includes(pathname) || GATEWAY_PUBLIC_PREFIXES.some((prefix) => pathname.startsWith(prefix)));
 }
 
-/** The copy's internal routes, for the gateway only (docs/multi-account-build.md). */
+/** The copy's internal routes, for the gateway only (docs/fork/plans/multi-account-build.md). */
 export function isInternalPath(pathname: string): boolean {
 	return pathname === "/api/internal" || pathname.startsWith("/api/internal/");
 }

@@ -1,6 +1,6 @@
 /**
  * Multi-account slice 5a: each person's Settings → Account, the new parts
- * (docs/multi-account-plan.md, "In each person's Settings → Account"). fetch
+ * (docs/fork/plans/multi-account-plan.md, "In each person's Settings → Account"). fetch
  * is scripted; no server. On a single-copy server the screen is exactly what
  * it was: the baseline below is the markup before this change, and the
  * request list is the one it always made (none from the section itself).
