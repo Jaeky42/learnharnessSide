@@ -1,0 +1,236 @@
+# Upstream 0.6.0 in the fork: decisions, what was built, and the fork's edits to upstream files
+
+## The owner's decisions at the 0.6.0 merge
+
+The fork is now based on upstream amosblomqvist/learnharness **v0.6.0** (tag commit `a6366476`), merged with `git merge v0.6.0` into the fork's history. It is **not a 1:1 copy**: where upstream and the fork did the same job differently, the owner chose. This file records those choices and where each lives in the code. Change one only with the owner's approval.
+
+Upstream 0.6.0 brought: plugins (core and community), themes, side conversations ("side chats", stored in the chat record), a highlight toolbar (Cite, Ask), a dialog system (HostDialog), a Host-header check on the API, a link allow-list in the desktop shell, and chat record format 2.
+
+| # | About | Decision |
+|---|---|---|
+| 1 | Side tutor | **Mix.** It works like upstream's side conversations (the teacher sees them, they count in the cost, no Clear, highlight then Ask) and keeps the fork's window, bubble, phone sheet and design. Details: "The Tutor on upstream's side conversations" in `docs/side-tutor.md`. |
+| 1b | Conversations | Upstream keeps one per teaching step. The window shows all of them in one scroll, in order. |
+| 1c | Ways in | The bubble, and highlight then Ask. No "?" marker at each step and no Ctrl+J. |
+| 1d | Conversations from before the update | Deleted, once. |
+| 1e | Practice sessions | The Tutor is there too. |
+| 1f | Thinking | The session's thinking level, as upstream. |
+| 1g | Dividers | Each step's conversation starts with that step's first words, greyed. |
+| 6 | Sync | Protocol 2, plus a second lock: a side never accepts or sends a session newer than it can read. No message on screen. |
+| 7 | Settings list | **The fork's.** Obsidian, Cloud and Account sit above the divider, with icons; plugins below. On a phone the closing fade stays. **Since then, on a phone** (owner's ask, "very cramped"): no Obsidian row (it is a group inside Cloud) and no plugin page rows; see "Settings" below. |
+| 8 | Themes | Everything of the fork's follows the chosen theme, including the login pages and the home-screen app's colours. |
+| 9 | Themes and devices | The theme, colour overrides, code ligatures and custom themes sync. "Reasoning in summaries" syncs; "helpers at once" stays per device. **Since then** (owner's change): everything on Settings → Appearance is per device; custom theme files still sync. See "Appearance is per device" in `docs/cloud-sync.md`. |
+| 10 | Phone | The Enter rule applies to upstream's new text boxes. Under 640 px no plugin is offered (Drawing Pad never will be), and a plugin's question is parked with a note. Phone layouts for Flashcards, Coding questions, Rich code blocks, the theme picker and plugin settings pages are a later round. **Since the phone plugins round**: Flashcards and Rich code blocks are offered on a phone, with Settings → Core plugins and their own pages; everything else stays as here. See "Phone" below. |
+| 11 | Held sessions | Upstream's new controls are refused by the server and greyed out, like Rename and Delete. A Tutor answer in progress finishes before the session moves. |
+| 12 | The server's front door | **The fork's.** Its login and device-key gates on the server; upstream's new check only on the desktop app and local use. |
+| 13 | Large uploads | **Mix.** Upstream's exemption for document uploads, with the fork's login checked inside it. |
+| 14 | Shortcuts | **Upstream's.** Drawing Pad keeps Ctrl+Shift+E. Ctrl+Shift+N opens the notes drawer with the cursor in the note's editor, and closes it again. The fork's "jump into the editor" shortcut is gone. |
+| 15 | Pop-up boxes | **Upstream's.** All of the fork's move onto HostDialog, keeping their look and words. |
+| 16 | Plugins | **Upstream's.** Every plugin is offered on the PC and on the server, off until switched on. |
+| 17 | Plugin data | Per device for now. The sync backup also covers plugin and theme data. Syncing Flashcards is a later phase. **Since the phone plugins round**: Flashcards' library syncs (its model choice, batches and uploaded files' text stay per device); every other plugin's data and which plugins are on stay per device. See "Plugin data is per device" below. |
+| 18 | Upstream's workflows | Deleted from the fork (`ci.yml`, `release.yml`, `notify-website.yml`). |
+| 19 | Pictures in messages | The "sent once" rule is extended to them. |
+| — | Server feed | Two branches stay: the server follows its own branch, the PC follows `side-tutor`. |
+| — | The official app | It is installed on the owner's PC. The update steps account for it. |
+
+(Numbers 2, 4 and 5 of the first round were settled by decision 1.)
+
+## What was built at the merge, by area
+
+### The Tutor
+
+See `docs/side-tutor.md`. In short: the fork's engine (store, route, agent, prompt, sync guard, bundle file) is gone; the window reads upstream's side conversations through upstream's hook `useSideThread`, and nothing in upstream's engine is changed.
+
+### Sync (protocol 2)
+
+(Protocol 3 since Flashcards sync: "Flashcards sync" in `docs/cloud-sync.md`. Everything below still holds.)
+
+- **`SYNC_PROTOCOL_VERSION` is 2** (`src/core/sync/protocol.ts`). Upstream raised the chat record format from 1 to 2 (`CURRENT_CHAT_VERSION`), and a format-1 build refuses a format-2 file, so a protocol-1 side must never receive one. The session bundle also changed shape.
+  - A test (`PROTOCOL_FOR_CHAT_FORMAT` in `tests/sync-sessions.test.ts`) lists which protocol each chat format needs and fails when the format rises without a new row. It runs in both workflows, so the rule "a release that changes a data format is marked" is enforced.
+- **The second lock** (owner's decision 6): beside the protocol number, a side neither takes nor sends a chat file stamped with a newer `version` than it reads (`chatFormatTooNew`, `checkBundle` in `src/core/sync/sessions.ts`; the server answers 409 `newer_format`). Nothing shows on screen. It covers the case the number can't: two builds with the same protocol, one of which already writes a newer chat format.
+  - **Known limit:** a hand-over can stall when the holder's chat file is newer than its own build can read (a downgraded app). The asker keeps seeing the waiting strip.
+- **A session is three kinds of file now**: the chat record (its side conversations are inside it, `sideChats`), the notes home-folder record, and the helper job files. `side-tutor/<chatId>.json` is gone from the bundle. The bundle's fingerprint keeps a constant "no side-tutor file" part, so the fingerprints both sides saved before the update still match and nothing is re-sent in bulk.
+- **Pictures inside messages travel once** (decision 19; `src/core/sync/pictures.ts`). Since 0.6.0 a picture the learner attached or a tool returned is an image block inside the message (`{ type: "image", mimeType, data }`), outside `imageSnapshots`. Each one of at least 1,024 base64 characters is named by the SHA-256 of its bytes and travels like a snapshot (`PictureList.inline`: the path to the block, and the id). The file is still put back together byte for byte; a chat that can't be (odd formatting, non-canonical base64) travels whole.
+- **More settings sync** (decision 9; `SYNCED_SETTINGS` in `src/core/sync/maps.ts`): `appearance.theme`, the nine `appearance.colors.*` overrides, `appearance.codeLigatures` and `compaction.includeReasoning`. `appearance.mode` stays on the list: upstream no longer reads it, but an older record that still carries it must not stall a round.
+  - **Since then** (owner's change): no appearance setting syncs. They are "retired": still accepted on the wire, never read or written, and both sides forgot what they had noted about them ("Appearance is per device" in `docs/cloud-sync.md`). `compaction.includeReasoning` still syncs.
+  - **Per device, never synced:** `agent.workerRequestConcurrency` ("helpers at once"), the side-question model slot (`agent.models.sideQuestion`), and everything that was per device before.
+- **Custom theme files sync** as their own map kind, `t|<theme id>` (`themes/<id>.json`, read and written through upstream's `themeStore`; `src/server/sync/map-views.ts`). Built-in themes never travel. A theme file that is there but can't be read is left alone, like the other files.
+- **Held sessions and upstream's new writes:**
+  - `sessionWritePath` (`src/server/sync/engine.ts`) matches a write at any depth under `/api/chats/<id>` (a side question's `PATCH /side-chats/<thread>` and `POST …/stop` are two levels down). The notes home folder is still left to its own route.
+  - `guardChatStore` covers upstream's new store method, `updateSideChats`: on a held session it changes nothing and returns the threads as they are. The fork's `guardSideTutorStore` is gone with the store it guarded.
+  - `handleChatInput` checks the lease in its first statement (`heldElsewhereResponse`), ahead of upstream's new tidy-up of plugin questions.
+  - `reconcilePluginQuestionCompatibility` (run by `GET /api/chats/<id>`) leaves a held session alone. Without that, a held session whose plugin was off on this device reloaded in a loop.
+- **A Tutor answer syncs at once.** The loop runs a round immediately on `side-chats-changed` (`src/server/sync/loop.ts`), which upstream announces when a side answer starts (the question is in the record by then) and when it ends. So the server hears "busy" as it does for a reply, and the question isn't left unsent while the answer is written. Found by the reviewer: without it the server heard of a Tutor answer only at the next 10-second round.
+- **A Tutor answer counts as a reply being written** at a hand-over (decision 11; `src/server/sync/local-work.ts`): the holder finishes it, then hands over; the asking device shows the existing strip, "Desktop is finishing a reply. This session moves here when it's done." When a session goes anyway (lost to a take-over, or taken from the cloud), a side answer still running for it is stopped with the other work (`sideChats.stopAll`).
+- **Backups** (decision 17; `src/store/sync/backup.ts`): the once-per-side backup also copies `themes/`, `plugins-state.json` and `core-plugin-data/`, and no longer `side-tutor/`. Not the code of community plugins. With Flashcards sync each side also copies Flashcards' folder aside once more, right before its first Flashcards exchange (`backups/before-first-flashcards-sync <date>/`, `makeFlashcardsBackup`); both backups also keep Flashcards sync's own files under `sync/` when they exist. Putting either back deletes nothing on the other side ("Restoring a backup" under "Flashcards sync" in `docs/cloud-sync.md`).
+- **A bug fixed on the way:** a round whose fetch of one session failed still moved its place in the server's list forward, so that session was never fetched again. The place now moves only past what was fetched (`src/server/sync/desktop-sync.ts`).
+- **Plugin data is per device** (decision 17): which plugins are on, their settings and their data (Flashcards' history) don't sync. Consequences the owner has been told:
+  - a plugin's pending question is cancelled by upstream's own rule after a take-over to a device where that plugin is off;
+  - a plugin's background job that was running when its session moved fails on the new holder, and says so, instead of restarting;
+  - a plugin's own operations (its data, its pages) aren't session writes and aren't refused on a held session.
+  - **Since Flashcards sync**: Flashcards' library is the exception. Its decks, facts, cards, deck memberships, reviews, synced settings and uploaded-file records travel item by item, with no lease, and each schedule is worked out again from the combined reviews; its model choice, batches and uploaded files' text stay per device. Which plugins are on, and every other plugin's data, are still per device, and the three consequences above still hold. See "Flashcards sync" in `docs/cloud-sync.md`.
+- **An app that isn't paired** still makes no sync request and writes no sync file. Upstream's plugin start-up does create an empty `plugins/` folder in the data folder; `tests/sync-inert.test.ts` allows exactly that.
+
+### The server's front door
+
+- **`proxy.ts`:** in server mode the fork's `serverGate` (login, device keys, the `Origin` rule) decides, as before. Outside server mode (the desktop app, local use) upstream's `apiRequestRefusal` runs for `/api` paths (its Host allow-list). The held-session check and the two marker cookies are unchanged.
+- **Document uploads** (decision 13): upstream takes `POST /api/plugins/<id>/documents/markdown` out of the proxy, because a proxy would buffer the whole upload. The fork keeps that exemption and runs its own gate inside the route: `apiGate(request)` in `src/server/api-gate.ts`, called by `createPluginDocumentRoute` (`src/server/plugin-transport.ts`). Server mode: `serverGate`. Elsewhere: upstream's refusal.
+- **Start-up** (`instrumentation.ts`): upstream's plugin start-up runs first, inside a try/catch, so a broken plugin can't keep the setup code from being printed or Obsidian sync from starting. Then the one-time removal of the old Tutor files (every start), then the server-only steps.
+- **The desktop shell's link allow-list** (upstream: http, https and mailto only) gets one narrow exception, `obsidian://open` links (`isObsidianOpenLink` in `electron/main.cjs`), which the notes drawer uses for notes outside the notes folder and "Open in Obsidian".
+- **Build:** `npm run plugins:setup` after `npm ci` in `Dockerfile`, `.github/workflows/side-tutor-windows.yml` and `.github/workflows/server-image.yml`. `npm run build` then builds the core plugins into `core-plugins/`, which `scripts/build-server.mjs` requires.
+- **Upstream's workflows are deleted** (decision 18). Two of upstream's test files read them and now skip when they are absent (`tests/desktop-platform.test.ts`, `tests/verify-release.test.ts`); `tests/plugin-setup.test.ts` checks the fork's two workflows instead.
+
+### Held sessions and upstream's new controls
+
+**Since seamless sessions (shipped):** nothing is greyed any more. The `blocked` props stay on upstream's components and are passed nothing; Cite, Ask and the plugin buttons move the session to this device when pressed. The server's refusals below are unchanged. See "Seamless sessions" in `docs/cloud-sync.md`.
+
+- **Greyed, with the fork's tooltip** "Take this session over first" (`HELD_TEXT.blocked`): the plugin buttons in the lesson's top bar and their overflow menu (`blocked` on `PluginTopBarActions`, `components/plugin-chrome.tsx`), and Cite and Ask in the highlight toolbar (`blocked` on `SelectionToolbar`, `components/selection-toolbar.tsx`). They keep their name and icon and do nothing.
+- **Refused by the server** (409 `session_held_elsewhere`): answering or dismissing a plugin question, submitting a plugin problem, steering, and a side question. A plugin worker whose session moved away writes nothing and delivers nothing.
+- **Not covered:** a plugin's keyboard shortcut still runs its action on a held lesson (the server refuses whatever would change the session).
+- Tests: `tests/sync-plugins-gate.test.ts`, `tests/cloud-held-plugins-ui.test.tsx`.
+
+### Themes on the fork's screens
+
+- **Colours are theme tokens now.** The fork's hard-coded colours (emerald, red-400, amber and so on) became upstream's tokens (`text-success`, `text-error`, `text-warning`, `--lh-error`), in the Tutor, the notes drawer, the sync chip and strips, Settings → Obsidian / Cloud / Account, and the sign-in controls. On the default dark theme a few shades moved slightly (success green, error red).
+- **The notes editor** (CodeMirror) follows the theme's light or dark mode live (`editorTheme(mode)` in `components/notes/note-editor.tsx`).
+- **The login and setup pages** take the server's saved theme (`authPagePalette()` in `src/server/server-auth-theme.ts`): the theme's colours, and nothing else, are shown to someone who isn't signed in. Only plain hex colours reach the page; the pages keep their one inline `<style>` under their CSP.
+- **The home-screen app:** `app/manifest.ts` takes its background and theme colours from the saved theme, read per request (`force-dynamic`). The browser bar's colour (`themeColor` in `generateViewport`, `app/layout.tsx`) is the theme's background.
+- **The iPhone status bar style is unchanged** (`black-translucent`): see "Asked after it was built".
+- Tests: `tests/themed-pages.test.ts`.
+
+### Pop-up boxes on HostDialog
+
+- The notes drawer's Move to, Split, Delete and name boxes (`components/notes/notes-dialogs.tsx`), its row menu (`PointMenu` in `notes-tree.tsx`), the take-over warning (`components/cloud/take-over-dialog.tsx`) and the discard notice (`components/cloud/discard-notice.tsx`) are built on upstream's HostDialog and interaction layers. Same look, words and buttons.
+- **The discard notice still closes only with OK:** its `onClose` answers `"blocked"`. It is mounted inside `<AppShell>` (`app/layout.tsx`), where the dialog system lives.
+- Read while building: the discard box's role is `dialog` now (it was `alertdialog`); the notes Delete box can be closed while a delete is under way (the delete still completes).
+- **A circular import fixed on the way:** `components/notes/note-read-view.tsx` reads the lesson's Markdown components lazily (`readComponents()`), because upstream's plugin renderers now import the lesson screen, which imports the notes drawer.
+
+### Settings
+
+- **Rows, in order:** Providers, Agent, Appearance, Graph, Keyboard, General, Obsidian (server only), Cloud, Account (server only); a divider; Core plugins, Community plugins; a divider; one row per plugin that has settings. Icons for the fork's rows: a notebook with a pen (Obsidian), a cloud (Cloud), a person (Account). (`components/settings/settings-dialog.tsx`)
+- **On a phone:** the list has no icons, no Keyboard row and no plugin rows; a link to a plugin's section lands on the list. (Since the phone plugins round: Core plugins is listed after Account, with no dividers, and the pages of Flashcards and Rich code blocks open from their ⚙ there, their back arrow returning to Core plugins; Coding questions and Drawing Pad read "Disabled" there, their switch off and greyed; on the server's site Obsidian is a group inside Cloud, under "Desktop apps", with no row of its own, so the list has eight rows. The pages' own rows and the Obsidian row were taken out at the owner's ask, "very cramped": "Settings on a phone" and "A less cramped list" under "Plugins on a phone" in `docs/cloud-sync.md`. Shipped with the second touch batch.) The closing fade is kept by fading a copy of the panel's contents (`fadeOutCopy`), because upstream's dialog removes the panel at once.
+
+### Phone
+
+- **The Enter rule** (Enter is a new line on a touch phone; the button sends) also applies to upstream's new text boxes: a plugin question's box and its key handling (`components/plugin-question-dock.tsx`, `plugin-question-keys.ts`), upstream's "Enter from anywhere" (`components/enter-submits.ts`) and the citation comment (`components/citation-comment-editor.tsx`; ⌘/Ctrl+Enter still saves and sends).
+- **Plugins are hidden under 640 px** (`components/phone/phone-plugins.ts` lists the rules). **Since the phone plugins round** this holds for every plugin but Flashcards and Rich code blocks: Flashcards' session-list entry shows, a phone-ready plugin's page renders, and rich drawings get a phone layout ("Plugins on a phone" in `docs/cloud-sync.md`). As built at the merge:
+  - the ways in are hidden by `app/phone.css`: the lesson's top-bar plugin buttons, the session list's plugin entries, the graph's plugin buttons;
+  - a plugin page opened directly shows "Open this on a computer." under a top bar that has only the session-list button (`components/phone/phone-plugin-page.tsx`);
+  - a plugin's question is parked: "This question needs a bigger screen. Open this session on a computer to answer it.", with the button "Dismiss question" under it; a plugin's practice problem is parked with "This problem needs a bigger screen. Open this session on a computer to answer it." (`components/phone/parked-plugin-question.tsx`; "Asked after it was built" below);
+  - rich diagrams inside a lesson still draw.
+- **HostDialog on a phone** is sized to the visible height (`--lh-vvh`), so the keyboard doesn't cover it; theme cards are one column.
+- Tests: `tests/phone-plugins-ui.test.tsx`, and the phone-only rule for every `phone.css` rule in `tests/phone-layout.test.ts`.
+
+### Notes shortcut
+
+- **Ctrl+Shift+N** opens the drawer with the cursor in the open note's editor (the note switches to its edit view), and closes the drawer again. With no note open, the cursor lands in the notes search box. (The search box exists only once the list has loaded, so the drawer waits for that; a browser run found the cursor going nowhere before.) Opening with the Notes chip doesn't move the cursor. (`landInEditor` on `NotesDrawer`, set by the `toggle-notes` shortcut in `components/chat.tsx`.)
+- **Ctrl+Shift+E is upstream's** (Drawing Pad). The fork's `focus-notes` shortcut is removed.
+
+### Rulings, limits and open items
+
+#### Not checked at the merge
+
+- **Not checked here:** a real iPhone; Obsidian's real servers; a real model; the packaged Windows app by hand.
+
+## Asked after it was built (owner's answers)
+
+Five things the plan had left open, or that came out differently than the plan said. The owner chose from pictures.
+
+1. **The Tutor's middle on a light theme: the theme's background at 62% with 10% of its text colour mixed in** (the owner's pick of three; the others were the background at 60% and the theme's soft grey at 78%). Black at 60% is unreadable over a light lesson. Dark themes keep black at 60%. (`BODY_BG` in `components/side-tutor.tsx`.)
+2. **A parked plugin question gets "Dismiss question".** The plan said the message box stays usable under the note. It can't: upstream's server takes no typed message while a plugin question waits ("Answer or dismiss the pending plugin question first"), on any device. The owner chose upstream's own button and words over the sentence alone and over changing upstream's rule. It is upstream's silent dismissal: the question is marked dismissed, the message box comes back, and the teacher learns of it with the learner's next message.
+3. **A plugin's practice problem is parked too**, with new wording the owner approved: "This problem needs a bigger screen. Open this session on a computer to answer it." No button; upstream has no dismissal for a problem. It can only be met by opening, on a phone, a practice session started on a computer.
+4. **The iPhone status bar is left as it is for now** (`black-translucent`). The plan said dark clock text on a light theme. An iPhone offers no style with dark text that also lets the app draw under the clock, which the full-height session list and the tuned top spacing rely on. So on a light theme the home-screen app's clock is white and hard to read; a Safari tab isn't affected. To be decided in the phone-layout round, on the owner's real phone. The two other options shown: a dark strip behind the clock on light themes, or the iPhone's standard bar on light themes (the icon must be added again and the top spacing re-checked).
+5. **The icons for the fork's Settings rows stay** as picked: a cloud (Cloud), a notebook with a pen (Obsidian), a person (Account).
+
+## Asked for with the results (owner)
+
+- **The Tutor starts minimized** on a computer whenever a session opens, and **comes out of its bubble with a morph** when opened and closed. Computer only; the phone's animation is not to be changed yet. Details in `docs/side-tutor.md`.
+
+- **The Tutor stays above the Drawing Pad**, window and bubble. Details in `docs/side-tutor.md`.
+
+- **A tablet in the browser no longer has its page pulled down by a finger**, with the computer layout kept ("Phone layouts", under "When it applies", in `docs/cloud-sync.md`).
+- **Three iPad fixes** (owner's iPad): in the home-screen app the top edges sit below iOS's blur (a Safari tab is unchanged); Apple Pencil taps click the first time; and palm rejection on the Drawing Pad. All three are in the fork's own touch files, change nothing in the Windows app, and were shipped to both branches at the owner's word. Not yet confirmed on the owner's iPad. Details under "When it applies" in `docs/cloud-sync.md`.
+- **Demos work on the server:** the image now carries Chromium, which the demo agent needs to test-run a demo ("Hosting" in `docs/cloud-sync.md`). Not an 0.6.0 matter: it was so since server mode was built.
+
+## Not in the merge
+
+- Phone layouts for Flashcards, Coding questions, Rich code blocks, the theme picker and plugin settings pages. Until then plugins are computer-only.
+- Syncing plugin data (Flashcards' review history first).
+- Phase 7 of cloud sync, and a tablet layout.
+
+**Since then** (the phone plugins round): Flashcards and Rich code blocks have phone layouts, Settings on a phone lists Core plugins and their pages, and Flashcards' library syncs. Still not done: phone layouts for Coding questions, the Drawing Pad, the theme picker and community plugins; syncing any other plugin's data or which plugins are on; Phase 7 and a tablet layout.
+
+## At the next upstream release: the fork's edits to upstream files
+
+- **At the next upstream release:** the fork's edits to upstream files are the lesson screen (`components/chat.tsx`: the Tutor's mount, upstream's card and markers left out, the `blocked` props, the parked question and problem), `components/settings/settings-dialog.tsx`, `proxy.ts`, `instrumentation.ts`, `app/layout.tsx`, the `blocked` props in `plugin-chrome.tsx` and `selection-toolbar.tsx`, and the phone Enter rule in the three text-box files. Everything else is in the fork's own files.
+- **Added by the phone plugins round**:
+  - `app/layout.tsx`: imports `phone-flashcards.css` and `phone-rich-code-blocks.css`; awaits `richCodeBlocksBoot()` and sets `data-lh-rich-code-blocks` on `<body>`;
+  - `app/plugins/[pluginId]/[viewId]/page.tsx`: passes `pluginId` to `PhonePluginPage` (the wrapper itself dates from the merge);
+  - `components/settings/settings-dialog.tsx`: the phone's rows (Core plugins, the phone-ready plugins' pages) and `isPhoneHiddenSettingsSection`;
+  - `components/settings/plugins-section.tsx` (`PluginRow`): the switch pulled into a variable, disabled and wrapped in `data-phone="plugin-locked"` when locked on a phone; the ⚙ hidden when locked, and marked `data-phone="plugin-settings-link"`;
+- **Added by the less cramped phone Settings** (owner's ask; "A less cramped list" under "Plugins on a phone" in `docs/cloud-sync.md`):
+  - `components/settings/settings-dialog.tsx`: no plugin page rows and no Obsidian row on a phone; Obsidian shown as Cloud there (`phoneSettingsSection`, an effect that moves to Cloud, and `selected` instead of `active` for the Obsidian and Cloud pages), with `CloudObsidianGroup` under the server's Cloud; the header's name taken from the plugin when no row has it; the back arrow from a plugin's page to Core plugins (`phoneSettingsBack`);
+  - `components/settings/plugins-section.tsx` (`PluginRow`): a locked plugin's switch shows off and its hint reads "Disabled" on a phone.
+  - `components/md-blocks.tsx`: the phone frame around a smiles, abc or tikz block, and `data-lh-rich-fence` on its code fallback;
+  - `components/session-overlay.tsx`: an optional `openDrawing` in the viewer's context and a `drawing` prop;
+  - `components/chat.tsx`: `figureFocus` takes `{ drawing }`, and `openDrawing`;
+  - `instrumentation.ts`: on the server, the saved time zone set before the plugins start;
+  - `src/server/index.ts`: the barrel exports `richCodeBlocksBoot` and `flashcardsExchangeResponse`;
+  - `plugins/flashcards/src/store.cjs`: reads its file again when it changed on disk (Flashcards sync), and one line of `plugins/flashcards/tests/store.test.cjs` with it.
+- **Added by the folded-question tap on touch** ("A tap on the folded question ends at the bottom, open" in `docs/cloud-sync.md`):
+  - `components/chat.tsx`: `openDock` (every way of opening a folded or waiting question: on a touch screen it glides to the bottom first, through `components/phone/use-dock-touch-scroll.ts`), `arriveAtBottom` (the fold machine's "reached the bottom again", factored out so the glide's end can call it too), `openOnArrivalRef` (a teach check opened by a tap reveals on arrival) and `openAtOnce` (upstream's opening, also the net when a glide gives up). `suppressFoldDuringReveal` is upstream's again.
+- **Added by scrolling into a check** ("Scrolling into a check: the blank space" under "Asked for with the results"):
+  - `components/chat.tsx` (`DockOverlay`): `blankSpace`, `checkSpaceRef`, `lookAtCheckRef`, `noteCheckOfferRef`, `endCheckSpace` and the two ResizeObservers; `offer()` reserves the open check's height; the context's `targetScrollTop`; `openDock` glides from the resting point; `arriveAtBottom` takes `intoCheck`; the scroll listener's look and its recheck after a mute;
+  - `components/question-dock.tsx`: `data-dock-open-form` on the hidden open form's wrapper.
+- **Added by the session list's swipe** ("Session list" under "Phone layouts" in `docs/cloud-sync.md`):
+  - `components/sidebar.tsx` (`SessionsSidebar`): the import, a ref on the drawer and on its dim, and one `useSidebarSwipe` call (`components/phone/sidebar-swipe.ts`).
+- **Added by the touch selection fix** (Highlight, then Ask on a phone and a tablet; `docs/side-tutor.md`):
+  - `components/selection-actions.ts`: a touch or pen gesture no longer sets the "press under way" flag (iOS sends no `mouseup` after a press-and-hold selection, and the flag stuck); it reports once the selection has rested with no finger down, re-checks after a touch is cancelled, a tap and Android's `contextmenu`, and holds the toolbar through a press on it until its click; once shown it follows the selection (placed again at the next frame for each change, never hidden; hidden while the lesson scrolls and placed again once scrolling settles, with no settle wait); `onSelection` gets a second argument, `touch`. Mouse timing unchanged. All of it in a browser only (`touchSelectionHere`): in the desktop app every gesture is upstream's;
+  - `components/selection-toolbar.tsx`: a touch selection is placed by `resolveTouchSelectionPosition` (`components/phone/touch-selection.ts`), opposite the system's Copy / Look Up box, inside the part of the lesson the top bar and the dock leave visible, with the bigger touch buttons (a `touch` prop on `SelectionToolbarButtons`), and measured from the shifted body while the iPhone keyboard is up (the layout effect's clamp too; unchanged for a mouse); on touch, finding no selection to show also stops the observer's following (`observer.cancel()`).
+- **Added by demos and figures following the theme** ("Asked for with the results"): `components/artifacts/steer-card.tsx` (passes `savedInverted`), `demo-card.tsx` and `visual-card.tsx` (`savedInverted`, the theme fallback).
+- **Added by the performance round** (long sessions; `docs/performance.md`):
+  - `src/core/compaction.ts`: `serializeForSummary` reads a learner message's text whatever its shape and writes `[drawing attached]` per picture, there and for a picture in a tool result (`DRAWING_MARKER`, `imageMarkers`); it imports `userFacingTextOf`;
+  - `src/server/compaction.ts`: preparing the summary moved inside `compact()`'s try; a catch on `kickCompaction`;
+  - `app/api/chats/[id]/route.ts`: `?only=coverage|settings|turns|stamp`, the record read once and handed to the helpers, `stamp` in the full answer, signatures left out of `messages`;
+  - `app/chat/[id]/page.tsx`: `initialStamp`, and `initialMessages` without signatures;
+  - `src/server/chats.ts`: re-exports `chatStamp`; `sessionCoverage` takes an already-read record; `src/server/index.ts` and `src/core/index.ts`: one export line each;
+  - `src/store/chats.ts`: `chatStamp`, and the stat-keyed summary cache in `listChats`;
+  - `src/store/jobs.ts`: the job-file-to-session map in `listJobs`; `src/server/jobs.ts`: the sweep's per-job `getChat` removed;
+  - `src/core/native-messages.ts`: the problem fold reads a per-history index (`ProblemIndex`, `problemIndexOf`); `src/core/math-delims.ts`: bounded caches around `transformMathDelimiters` and `repairMathForDisplay`;
+  - `components/chat.tsx`: `useSessionHeld`; the `initialStamp` prop; no state set for the same jobs, turns or pricing; `syncTurns` reads `?only=turns`; the catch-up asks for the stamp first; the growth-mute observer reads the entry's own size;
+  - `components/session-core.ts`, `session.ts`: `stamp` on the record, `rememberStamp`, `knownStamp`, `recordUnchanged`, `readUsage`, `canonicalNow`, `sameJsonValue`;
+  - `components/use-side-thread.ts`, `sidebar.tsx`: an equal list sets no state; `components/extraction-coverage.tsx`, `model-picker.tsx`: read their one field;
+  - `app/layout.tsx`: imports `offscreen.css` (the trial's `?offscreen=off` in the head script is removed again; the script is upstream's line);
+  - `components/session-navigation.tsx`: `scrollSessionTarget` hands its measuring and scrolling (now `placeSessionTarget`) to `revealOffscreenTarget` (`components/offscreen-target.ts`), so a jump into a message the off-screen rule skipped lands;
+  - upstream's tests whose scripted server now answers `?only=settings`: `tests/stats-cache-interaction.test.tsx`, `stats-meter-interaction.test.tsx`, `model-catalog-setup.test.tsx`, `claude-code-context-ui.test.tsx`.
+  - The off-screen rule hangs on upstream's markup (`data-session-find-root`, `data-testid="user-message"`, the `is-assistant` class); `tests/offscreen-rule.test.ts` pins the rule.
+- **Added by accounts on one server** (built on `claude/dazzling-maxwell-j6mfy1` and shipped to both branches; "Accounts on one server" under "Hosting" in `docs/cloud-sync.md`). Most of it is new, fork-owned files (`gateway/`, `src/core/accounts.ts`, `src/core/account-screens.ts`, `src/server/account-export.ts`, `src/server/zip-writer.ts`, `app/api/internal/unpair-all/route.ts`, `app/api/account/export/route.ts`, `components/settings/accounts-section.tsx`, `account-accounts-group.tsx`, `owner-mode.ts`, `sign-out-storage.ts`, `scripts/build-gateway.mjs`, `deploy/make-secrets.sh`, `deploy/test/`). The edits to files upstream has, or that the fork had already edited:
+  - `components/settings/settings-dialog.tsx` (each edit marked "Side-tutor fork"): imports `UsersIcon`, `AccountsSection`, `AccountAccountsGroup` and `isOwnerMode`; one more `SECTIONS` row, `accounts`, listed only when `!phone && isServerMode() && isOwnerMode()`; its section; on a phone the Account section ends with `AccountAccountsGroup` and there is no Accounts row; `phoneSection` (account-accounts-group.tsx; it wraps `phoneSettingsSection`) replaces `phoneSettingsSection` in the places that fold a section into another on a phone, and `scrollToAccounts` beside `scrollToObsidian` keeps the group in view. `phoneSettingsSection` is no longer imported there.
+  - `src/core/index.ts`: two lines, `export * from "./account-screens.ts"` and `export type { AccountsView } from "./accounts.ts"`.
+  - `src/server/index.ts`: `unpairAllResponse` added to the `server-auth.ts` export list, and `export { accountExportResponse } from "./account-export.ts"`.
+  - `package.json` and `package-lock.json`: `esbuild` 0.28.2 as a dev dependency and the `gateway:build` script (the build already had esbuild through `tsx`).
+  - `.gitignore` and `.dockerignore`: `gateway-dist`.
+  - The fork's own files, edited: `src/server/server-auth.ts` (`behindGateway`, `gatePasses`, `gateScopeOf`, `gatewayGate`, `unpairAllResponse`; `signedIn` returns a boolean and, behind a gateway, means the secret with scope `session`; the account routes and pages answer 404 behind a gateway), `src/core/sync/devices.ts` and `src/server/sync/http.ts` (a tag in pairing codes and device keys; `accountTag`), `components/settings/account-section.tsx` (the new parts, shown only when the gateway's answer has a `name`), `Dockerfile` (the two bundles, the `lh-gateway` and `lh-maker` wrappers, the `reset-password` wrapper's choice, `/gateway`), `deploy/compose.yaml`, `Caddyfile`, `update.sh`, `docker-entrypoint.sh` (the seed of "helpers at once"), `.env.example`, and both workflows (`server-image.yml`: the stack and crossing tests step; `side-tutor-windows.yml`: four more test files in the cloud-sync test step).
+  - Not edited: `proxy.ts`, `components/chat.tsx`, `src/server/api-gate.ts`, `scripts/server-reset-password.mjs`, `scripts/build-server.mjs`. The desktop app's bundle carries the gateway's source files unused (Next's standalone output includes the source tree); nothing in it reads them.
+- **Added by the research wrap-up** ("A research job that ends without a brief gets one wrap-up request" under "Asked for with the results"; each edit marked `FORK (research wrap-up)`):
+  - `src/agent/subagents/pi-run.ts`: the optional `wrapUp` on `runSubagent` (one more request when the run ended on a tool call or with no text; tool calls refused during it);
+  - `src/agent/subagents/researcher.ts`: `maxTurns` 16 (upstream: 12), `RESEARCH_WRAP_UP_MESSAGE`, and `wrapUp` passed to `runSubagent`.
+- **Added by seamless sessions** ("Seamless sessions" under "Handoff" in `docs/cloud-sync.md`; each edit marked `FORK (seamless sessions)`):
+  - `components/session-core.ts`: the optional `moveGate` before `send`, `steer` and the three dismissals; a 409 with `session_held_elsewhere` is told apart from "a reply is being written", moves the session and retries once (about 120 lines);
+  - `components/chat.tsx`: the move gate and the arrival handler wired in, `useSessionMoveTriggers`, the held gating removed (the dock's wrapper, the title's lock, F2, the Tutor's `held`, the `blocked` props passed nothing), rename through `fetchHere` (about 40 lines);
+  - `components/sidebar.tsx`: no "Held by" line, Rename and Delete enabled, rename through `fetchHere`;
+  - `components/use-side-thread.ts`, `model-picker.tsx`, `delete-session-dialog.tsx`, `extraction-coverage.tsx`, `artifacts/demo-card.tsx`, `artifacts/visual-card.tsx`: their one write goes through `fetchHere` (2 to 4 lines each).
+- **Added by the GPT-6.2 models** ("OpenAI and ChatGPT: GPT-6.2 in the model list" in `docs/side-tutor.md`; marked `FORK (GPT-6.2 models)`):
+  - `src/agent/models.ts`: an import, and the `openai` provider wrapped with `withExtraOpenAIModels` in `piModels()`. Both go, with `src/agent/extra-models.ts`, once the library knows the models.
+- **Added by the money bullet** ("Money amounts no longer turn into a formula" under "Asked for with the results"):
+  - `src/agent/prompts/shared/40-formatting.md`: one bullet, "Money: …", after the Math bullet. A prompt fragment can carry no marker comment (its whole text reaches the model); `tests/prompt-money.test.tsx` fails if a merge drops it.
+- **Added by money is not math** ("Money is not math: the renderer's own rule" under "Asked for with the results"; each edit marked `FORK (money is not math)`):
+  - `src/core/content-reader.ts`: `isMoneyPair`; `readContentSpans` takes an optional `money` list, and a single-dollar pair that is money gives up its opening dollar as prose;
+  - `src/core/math-delims.ts`: `transformMathDelimiters` escapes the money dollars inside prose spans; re-exports `isMoneyPair`;
+  - `tests/render-markdown.test.tsx`: two cases that pinned bare currency as untouched now expect the opening dollar escaped.
+- **Added by dictation in Firefox** ("Dictation in Firefox" under "Footer row" in `docs/cloud-sync.md`; each edit marked `FORK (Firefox sample rate)`):
+  - `components/dictation.tsx`: `needsNativeRate`, `dropAudioGraph`, `isGraphRateError`, `__resetAudioGraphForTests`; `ensureAudioGraph` builds a default-rate context once the 16 kHz one was refused; in `start`, the graph is built by `buildGraph` and retried once on that refusal;
+  - `public/worklets/pcm-capture.js`: `processorOptions.targetRate` and the two conversions; without it the loop is upstream's.
+- **Added by the phone's dictation reason** ("A Dictate that fails shows its reason" there; each edit marked `FORK (phone dictation error)`):
+  - `components/dictation.tsx` (`DictationBar`): `data-dictation-error` on the errored idle button;
+  - `components/chat.tsx`: a `dictationError` prop on the dock, and `DictationErrorLine` inside the `data-phone="dock"` block; `components/home.tsx` and `components/new-session.tsx`: the same line above their bottom block (new-session's block made `relative`).
+- The phone styling of Flashcards and Rich code blocks hangs on upstream's class names and markup from the fork's own stylesheets; `tests/phone-flashcards.test.ts`, `tests/phone-flashcards-structure.test.tsx` and `tests/phone-rich-code-blocks.test.tsx` fail when one of those names or structures changes upstream.

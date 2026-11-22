@@ -1,24 +1,33 @@
 # LearnHarness — Side Tutor fork
 
-This is a fork of amosblomqvist/learnharness. All fork work lives on the `side-tutor` branch and ships as a separate Windows app, "LearnHarness Side Tutor".
+This is a fork of amosblomqvist/learnharness. It ships as a separate Windows app, "LearnHarness Side Tutor", released from the `side-tutor` branch, and as a server image the owner hosts. The fork's own docs are in `docs/fork/`; everything else under `docs/` is the upstream project's.
 
 @AGENTS.md
-@docs/side-tutor.md
-@docs/cloud-sync.md
-@docs/upstream-0.6.0.md
-@docs/performance.md
+@docs/fork/README.md
+@docs/fork/status.md
+@docs/fork/releases.md
+@docs/fork/side-tutor.md
+@docs/fork/notes.md
+@docs/fork/lesson.md
+@docs/fork/cloud-sync.md
+@docs/fork/server.md
+@docs/fork/phone-and-tablet.md
+@docs/fork/models-and-agents.md
+@docs/fork/plugins.md
+@docs/fork/upstream.md
+@docs/fork/performance.md
 
 ## Working here
 
 - Follow AGENTS.md: investigate, ask about design decisions, and get the plan approved before implementing.
 - After `npm ci`, run `npm run plugins:setup` (upstream 0.6.0's core plugins); the build and several tests need it.
-- Tests: `npm test` (all), or `NODE_ENV=test npx tsx --test tests/<file>.test.ts`. Also `npm run typecheck` and `npm run lint`.
+- Tests: `npm test` (all), or `NODE_ENV=test npx tsx --test tests/<file>.test.ts`. Also `npm run typecheck` and `npm run lint`. Known test failures in the development sandbox, and every other recipe, are in `docs/fork/development.md`.
 - **Every push to `side-tutor` publishes a release** that installed apps download automatically, and needs the owner's approval every time. Pushes that only change `CLAUDE.md` or `docs/` don't build. Any other push builds, `.claude/` included, unless its commit message carries `[skip ci]`.
-- **Two branches feed two things:** `side-tutor` feeds the Windows app (and the server image `:latest`); the owner's server follows the image `:dev`, built from `claude/pensive-goldberg-7dty2m`. A change both should get goes to both branches, kept at the same commit. See "After the merge" under "Handoff" in `docs/cloud-sync.md`.
+- **Two branches feed two things:** `side-tutor` feeds the Windows app (and the server image `:latest`); the owner's server follows the image `:dev`, built from `claude/pensive-goldberg-7dty2m`. A change both should get goes to both branches, kept at the same commit. See "Which branch feeds what" in `docs/fork/releases.md`.
 - **The desktop app and the server must speak the same sync protocol version** (3 now). A change that raises it has to reach both, the server first, or sync pauses.
-- What is built, the owner's decisions and what is still open are in the docs, not here: `docs/side-tutor.md` (the Tutor, the notes drawer, the Windows app), `docs/cloud-sync.md` (the server, phone and tablet layouts, sync), `docs/upstream-0.6.0.md` (the 0.6.0 merge and what came after it) and `docs/performance.md` (the long-session audit and what was built from it). Change a recorded decision only with the owner's approval.
-- **Several accounts on one server is shipped to both branches** (one address, invite codes, a gateway, a container per account made by a maker; built on `claude/dazzling-maxwell-j6mfy1`). **The owner's server is switched over** (the owner followed the guide and reported "everything works great"), so it now runs the gateway, the maker and the owner's copy as the owner's account. One decision is still open for the owner (a password box on Reset, Remove and Delete now). **A host firewall was built and checked, and then declined by the owner**: it is in no branch that ships, and its record is "The host firewall: built and checked, then declined" in `docs/cloud-sync.md`. The owner's decisions and the approved words are in `docs/multi-account-plan.md`; what was built, the builder's rulings for the owner to review, what is open and the development notes are in "Accounts on one server" under "Hosting" in `docs/cloud-sync.md`; the build guide, with its contracts as built, is `docs/multi-account-build.md`.
-- Keep this file, `docs/side-tutor.md`, `docs/cloud-sync.md`, `docs/upstream-0.6.0.md` and `docs/performance.md` technical. The fork is public: no personal information.
+- **What is built, the owner's decisions and what is still open are in the docs, not here.** The map is `docs/fork/README.md`; what shipped and what is open for the owner is `docs/fork/status.md`. The topic files are loaded above. Not loaded, to be read when the work needs them: `docs/fork/development.md` (dev notes and recipes), `docs/fork/history/` (build history, test records and the ship log), `docs/fork/plans/` (the approved plans and one draft) and `docs/fork/review-policy.md`. Change a recorded decision only with the owner's approval.
+- **Several accounts on one server is shipped, and the owner's server runs it** (one address, invite codes, a gateway, a container per account made by a maker). What was built and what is open is "Accounts on one server" in `docs/fork/server.md`; the owner's decisions and the approved words are in `docs/fork/plans/multi-account-plan.md`; the build guide, with its contracts as built, is `docs/fork/plans/multi-account-build.md`.
+- Keep this file and everything under `docs/fork/` technical. The fork is public: no personal information.
 
 ## Fable orchestration policy — Option B (selective reviews)
 
@@ -74,7 +83,7 @@ Each worker's reply should be at most ~300 words unless requested otherwise:
 
 Fable MUST perform a concise integration assessment at each major milestone. A source-level Fable review is **conditional**: inspect focused actual diffs and evidence when the approved architecture or contract changed, cross-component integration is insufficiently tested, independent reviewers disagree about a material defect, or a security/data-integrity/irreversible decision needs lead-architect sign-off. Fable must not rubber-stamp worker summaries; verify the underlying evidence for important claims.
 
-**Usage guardrail:** normally at most one Fable focused code review per milestone. A second review is allowed only if remediation introduces new material architecture risk or unresolved critical findings. Do not spend Fable tokens rereading the entire implementation after passing independent reviews. See `REVIEW_POLICY_OPTION_B.md` for triggers and the evidence handoff format.
+**Usage guardrail:** normally at most one Fable focused code review per milestone. A second review is allowed only if remediation introduces new material architecture risk or unresolved critical findings. Do not spend Fable tokens rereading the entire implementation after passing independent reviews. See `docs/fork/review-policy.md` for triggers and the evidence handoff format.
 
 ### Review gates
 
