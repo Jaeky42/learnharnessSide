@@ -294,7 +294,7 @@ export function installTutorSheetSwipe(sheet: HTMLElement, options: SheetSwipeOp
 }
 
 /** The swipe on the open sheet, while `enabled` (the phone layout, the sheet
- *  open, the session not held). The callbacks are read when they run. */
+ *  open). The callbacks are read when they run. */
 export function useTutorSheetSwipe(sheetRef: RefObject<HTMLElement | null>, dimRef: RefObject<HTMLElement | null>, enabled: boolean, onSwipeClose: () => void, onGone: () => void): RefObject<SheetSwipe | null> {
 	const swipe = useRef<SheetSwipe | null>(null);
 	const calls = useRef({ onSwipeClose, onGone });
