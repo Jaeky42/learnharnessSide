@@ -63,7 +63,7 @@ Retired by seamless sessions ("Removed from the page" under "What was built: the
 - **The session list** (`components/sidebar.tsx`): a held session's second line reads "Held by Desktop" in place of the time. In its menu, Rename and Delete are greyed out with the tooltip; the other items work.
 - **The strip** (`components/cloud/session-strip.tsx`, mounted under the top bar in `components/chat.tsx`): always in the page, closed and `inert` while there is nothing to say, so opening and closing can be animated. Its states: held (with **Take over**), asking, waiting for a reply or a hand-over (with **Cancel**), failed.
   - Take over sends `POST /api/cloud {op:"take-over", chatId, force:false}`; while the answer is `waiting` it asks again every 2 seconds; `warning` opens the box; `moved` or `yours` re-reads the state, and the strip goes when the session is no longer in `held`.
-  - **The warning box** is `components/cloud/take-over-dialog.tsx`. **Take over anyway** sends the same request with `force: true`.
+  - **The warning box** is `components/cloud/take-over-dialog.tsx` (removed with seamless sessions). **Take over anyway** sends the same request with `force: true`.
   - On a PC that can't ask the server, Take over is off and a second line says why.
 - **The motion** is in `app/cloud.css` (fork-owned, like `phone.css`): the strip's row opens from 0 to its height with a fade over 200 ms, its words fade in over 150 ms when they change, and the message box's block (`.lh-held-dock`) fades over 150 ms and is `inert` while hidden. All at once with reduced motion.
 - **In the lesson** (`components/chat.tsx`): the whole dock (message box, an open question, model and thinking pickers) goes on a held session. The title can't be clicked to rename, and F2 does nothing; its tooltip reads "Take this session over first".
@@ -79,6 +79,28 @@ Retired by seamless sessions ("Removed from the page" under "What was built: the
 - **Tests:** `tests/cloud-held-ui.test.tsx` (the words, the provider asking nothing where sync isn't in use, the list line, every state of the strip, the warning box, Cancel), a held session in `tests/side-tutor-ui.test.tsx`, and a removed PC keeping its name in `tests/sync-unpair.test.ts`.
 - **Run between two built copies** with the loop on, at computer and phone size: the list lines and the strip on the server's site; the greyed bubble and menu items; a rename refused; a hand-over from the online PC (6.6 s: the PC hears of it at its next 10-second check); the PC showing "Held by the web app" and taking it back (0.3 s); the PC stopped, "offline since …" after 30 seconds, the warning box, Take over anyway, and the PC showing the server's version when it came back.
 
+### Phase 6 words and rules retired by seamless sessions
+
+Retired by seamless sessions: no screen shows "Held by", offers Take over or warns, and the heads-up is a floating box. The words now on screen are "The approved words" under "Seamless sessions" in `docs/fork/cloud-sync.md`, and the Settings → Cloud words that stayed are in Phase 6's "The approved words" there.
+
+**The approved words, as approved in Phase 6**
+
+- **Slice 2, the strip.** "Held by Desktop" (the server's site and phone add " · online" or " · offline since today, 14:02"; a desktop app knows only the name). Waiting: "Asking Desktop to hand it over…" and "Desktop is finishing a reply. This session moves here when it's done." (with "the web app" as the holder: "Asking the web app to hand it over…", "The web app is finishing a reply. …"). A failure: "Couldn't take it over. Try again." On a PC that can't reach the server, Take over is off and the strip adds "This PC can't reach the server, so it can't be taken over right now."
+- **Slice 2, the warning box.** Title `Take over “Circuits”?` / "Desktop has been offline since today, 14:02, and may have turns that never reached the server. If you take over, those turns are discarded when Desktop is back online." / Cancel, **Take over anyway**.
+- **Slice 3, the offline strip.** "This PC can't reach the server. If this session is taken over on another device before it reconnects, what you add here now is discarded." Paused: "Sync is paused. If this session is taken over on another device before sync is back, what you add here now is discarded." Removed by the server: "This PC isn't paired any more. If this session is taken over on another device before you pair again, what you add here now is discarded." (The owner changed the Settings line to "is no longer paired" and has been told this strip still reads "isn't paired any more"; they haven't asked for it to match.)
+- **Slice 3, the discard box.** Title `“Circuits” was taken over` / "It was taken over on another device while this PC was offline. 3 messages you sent here never reached the server and were discarded. The session now shows the server's version." / OK. One message: "1 message you sent here never reached the server and was discarded." None, but another change: "Changes made here that hadn't reached the server were discarded." Several sessions: one box titled "Sessions were taken over", one line each.
+
+**The smaller rules about held sessions**
+
+- **After a take-over** the strip goes, the message box and the greyed controls come back, and nothing else is announced.
+- **If the side tutor's window is open** when a session becomes held, it closes to its greyed bubble.
+- **An open question's box** goes away with the message box on a held session, and so do the model and thinking pickers.
+- **Take over** asks again every 2 seconds while it waits; Cancel stops asking and the holder keeps the session.
+
+**A ruling of slice 1** (the hint under the name box no longer follows what is typed: `NAME_HELP_TEXT` since seamless sessions)
+
+- **Read while building:** the line under the name box follows what is typed ("Held by Laptop"), where the plan's drawing showed it with the suggested name only.
+
 ### Phase 6, slice 3: run between two built copies
 
 - **Run between two built copies** with the loop on:
@@ -91,6 +113,8 @@ Retired by seamless sessions ("Removed from the page" under "What was built: the
   - Remove on the server's site: NOT PAIRED within 10 s;
   - the learner's own Unpair: no chip and no strip.
 ### The wrap-up run
+
+(Run before seamless sessions: the Take over, "Held by" and strip steps below describe screens since removed.)
 
 One run between two built copies with the loop on, through the real screens, nobody pressing "Sync now", with a computer-size page of each copy and a phone-size page of the server:
 
@@ -145,6 +169,11 @@ Before the review's fixes. Two built copies with the loop on, the server in UTC 
 
 **Measured after the fixes** (a 25 MB library, 20,000 reviews): the server's idle exchange 25 ms; a first sync 6.5 s. **After the second pass's fixes:** the idle exchange 23 ms; a first exchange 2.2 s. The steps that still hold the server's process are under "Known limits".
 
+**The tests after each pass of fixes**
+
+- **After the first pass's fixes:** all sync tests, 300 of 300; typecheck clean.
+- **After the second pass's fixes:** all sync tests, 309 of 309.
+
 ## The phases
 
 0. **Checks.**
@@ -156,11 +185,11 @@ Before the review's fixes. Two built copies with the loop on, the server in UTC 
 2. ✅ **Sign-in on the server.** The ChatGPT paste box, plus the Claude sign-in button and Disconnect. Verified on the VPS: Claude Code installed itself onto the volume, and both ChatGPT and Claude connected from Settings.
 3. ✅ **Phone layouts.** Every view, the side tutor bubble and sheet, the full-screen notes drawer, Settings, press and hold, and the home-screen app. Two real-phone rounds; the owner declared Phase 3 complete.
 4. ✅ **Vault on the server.** Settings → Obsidian, the sync manager around `ob`, folders left out automatically, the safety check and Disconnect. Verified by the owner on the server with their real Obsidian account.
-5. ✅ **Sync engine.** Pairing and device keys, the lease API, session sync with take-over (no copies: unsent turns are discarded), graph line and operation sync, per-key settings merges, and the sync protocol version check. Run between two built copies; not yet between the owner's real PC and server, which needs Phase 6's screens.
+5. ✅ **Sync engine.** Pairing and device keys, the lease API, session sync with take-over (no copies: unsent turns are discarded), graph line and operation sync, per-key settings merges, and the sync protocol version check. Run between two built copies; not yet between the owner's real PC and server, which needs Phase 6's screens. (Since then: after the merge the owner paired the real PC with the real server and reported "everything works!".)
    - Built as wrapper stores at the composition root (`src/server/stores.ts`) over the `core/ports.ts` interfaces, so upstream store code stays untouched and rebasing onto upstream stays cheap.
 6. ✅ **Sync screens** (desktop app, server's site and phone). Plan approved by the owner and built; see "Phase 6, the sync screens".
    - ✅ Slice 1: Settings → Cloud on both sides (pairing, sync state, Sync now, Unpair this PC; paired desktop apps and pairing codes on the server), with four engine changes.
-   - ✅ Slice 2: a held session (the list line, the strip, Take over, the warning box, greyed controls).
+   - ✅ Slice 2: a held session (the list line, the strip, Take over, the warning box, greyed controls). (Retired by seamless sessions.)
    - ✅ Slice 3: the desktop's own notices (the sync chip, the offline strip, the discard box).
 7. **Tests and docs** (not done; the owner merged without it). Lease, take-over and graph operation tests; an end-to-end test with two servers and one cloud; and an update of this file from "planned" to built.
 
