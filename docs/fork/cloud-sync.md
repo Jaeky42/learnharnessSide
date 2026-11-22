@@ -36,8 +36,8 @@ A teaching transcript can't be merged, because two teachers built on the same tu
 
 - Only the device holding a session's **lease** may continue it. The VPS is the lease authority.
 - **A lease never runs out on its own.** Other devices show "Held by Desktop (offline since …)" with a **Take over** button. (Retired by seamless sessions: nothing shows "Held by" or Take over; the lease itself still never runs out.)
-- **Take over warns first** when there is evidence that the holder has turns that haven't synced (see "Phase 5 decisions"). (Retired by seamless sessions: nothing warns.)
-- **Since seamless sessions (built and shipped):** the lease stays, but nothing shows it. A session moves to the device you start typing on, with no button and no warning, and a PC cut off from the server carries on. See "Seamless sessions" under "Handoff"; it replaces the two bullets above.
+- **Take over warns first** when there is evidence that the holder has turns that haven't synced (see "Phase 5 decisions (owner, asked one at a time)" below). (Retired by seamless sessions: nothing warns.)
+- **Since seamless sessions (built and shipped):** the lease stays, but nothing shows it. A session moves to the device you start typing on, with no button and no warning, and a PC cut off from the server carries on. See "Seamless sessions" below; it replaces the two bullets above.
 - **No copies** (owner's change during Phase 5 planning; it replaces the earlier "Title (desktop copy)" rule). A device that lost a session to a take-over discards its unsent turns for that session when it reconnects and shows the server's version. The loss isn't silent: the desktop shows a heads-up while it works offline, and a notice after a discard.
 - An offline desktop can only continue sessions it held before it went offline. (Since seamless sessions a PC cut off from its server carries on with any session, and it is settled at reconnect.)
 - A session's notes home folder (`notes/sessions/<chatId>.json`) follows its lease. Its Tutor conversations are inside the chat record since the upstream 0.6.0 merge (`sideChats`), so they travel with it; the separate `side-tutor/<chatId>.json` file is gone.
@@ -56,8 +56,8 @@ Graph extraction, research, compaction and visuals run on **whichever device hol
 | `graph/*.jsonl` | Mostly appends, with some rewrites (see below) | Appends as lines; rewrites as replayed operations |
 | `sources.json`, positions, `settings.json` | Read-modify-write maps | Last writer wins per key; device-specific keys excluded |
 | `prompts/**` (prompt override texts), `graph/render-settings.json` (the graph view's sliders), `graph/source-organization.json` (chains-view folders) | Files and maps | Item by item, latest change wins (slice 5) |
-| `themes/<id>.json` (imported themes; never the built-in ones) | Whole file per theme | Item by item, one theme each, latest change wins; removing one removes it on both ("Appearance is per device") |
-| `core-plugin-data/flashcards/flashcards.json` (Flashcards' library; since Flashcards sync) | Whole-file rewrite by the plugin | Item by item, latest change wins per item; schedules never travel and are worked out again from the combined reviews (see "Flashcards sync") |
+| `themes/<id>.json` (imported themes; never the built-in ones) | Whole file per theme | Item by item, one theme each, latest change wins; removing one removes it on both ("Appearance is per device" below) |
+| `core-plugin-data/flashcards/flashcards.json` (Flashcards' library; since Flashcards sync) | Whole-file rewrite by the plugin | Item by item, latest change wins per item; schedules never travel and are worked out again from the combined reviews (see "Flashcards sync" below) |
 | The other plugins' data, which plugins are on, Flashcards' model choice and its uploaded files' text | Per device | Never synced |
 | `notes/settings.json` (vault path), `notes/pending/` | Per device | Never synced |
 | `obsidian-sync.json` (the server's Obsidian sync record) | Per device | Never synced |
@@ -84,7 +84,7 @@ Graph extraction, research, compaction and visuals run on **whichever device hol
 4. **First sync: combine both libraries.** Pairing deletes nothing. Desktop sessions go up and cloud sessions come down, each still held by the side it came from. The graphs are joined; a concept learned on both sides before pairing shows twice (the known limit).
 5. **A backup once per side**, right before that side's first sync: a dated folder under `backups/` beside the data folder (sessions, graph, side-tutor threads, jobs, settings; no credentials, not the vault). Restored by hand with a guide. (Since the upstream 0.6.0 merge no side-tutor threads, which are inside the sessions; see "Backup contents" below.)
 6. **Take over warns only on evidence** (retired by "Seamless sessions": the page always asks with `force`, and nothing warns; the server's rule itself is unchanged). The server keeps, per session, when the holder last checked in and its last word. Warn when that was "busy" or "unsent", or the holder went silent in the middle of a reply. If it was "all sent", no warning, even if the holder has been offline since. An online holder is asked to hand over and no warning is needed.
-7. **No copies** (see "Sessions" at the top).
+7. **No copies** (see "Sessions: leases instead of merging" above).
 8. **The gap that leaves** (a desktop that said "all sent", went offline and was then used offline): while it can't reach the server, the desktop shows a heads-up in a session being continued; after a discard it shows a notice naming the session and the number of turns. Both screens are Phase 6; Phase 5 supplies the facts.
 9. **A busy online holder at take-over:** the reply being written finishes and is sent. Background helpers (research, demo, visual, PDF) stop there and start again from the beginning on the new holder. Extraction stops and the new holder redoes it later.
 10. **A held session is read-only until taken over** (retired by "Seamless sessions": every action moves the session here first; the server still refuses a write from a device that doesn't hold it). Reading it, the notes drawer and moving it between folders work. Sending a message, the side tutor, renaming, changing its model and deleting wait for Take over.
@@ -92,7 +92,7 @@ Graph extraction, research, compaction and visuals run on **whichever device hol
 12. **Settings split.**
     - Synced, latest change wins per setting: dictation language, graph (extraction on/off, rendering on/off, chunk size, the graph view sliders), compaction threshold, agent (tool switches, search engine, prober graph tools), and prompt overrides (the texts and their switches).
     - Per device, never synced: model slots and per-role model overrides, the custom provider, the Claude Code switch, file-access folders, the reading font, automatic updates, keyboard shortcuts, keys and sign-ins.
-    - **Appearance is per device** (owner's change, after the phone plugins round; it synced until then): everything on Settings → Appearance. The theme, the colour overrides, the background, the reading font size, code ligatures, serif session names, heading weight, and the bold and italic colours. Imported theme files still sync. See "Appearance is per device" under slice 5.
+    - **Appearance is per device** (owner's change, after the phone plugins round; it synced until then): everything on Settings → Appearance. The theme, the colour overrides, the background, the reading font size, code ligatures, serif session names, heading weight, and the bold and italic colours. Imported theme files still sync. See "Appearance is per device" under "Settings and the other small files" below.
     - The chains-view folders (`source-organization.json`) always sync.
     - At the first pairing, where the two sides differ, the desktop's value is kept.
     - A session's own model travels with the session; if it isn't set up on the other device, the learner picks one there.
@@ -113,7 +113,7 @@ Graph extraction, research, compaction and visuals run on **whichever device hol
 - **Pictures in a session** are sent once, not with every send of the session.
 - **Clock differences:** the server corrects for a PC clock that is off before deciding which settings change is the latest.
 - **Imported-file records and graph positions** sync one item at a time, latest wins. An imported file's path stays the path on the device that imported it.
-- **Backup contents:** sessions, graph, side-tutor threads, helper jobs, settings, prompt overrides and the notes home-folder records. (Since the upstream 0.6.0 merge: custom themes, the plugins' on/off record and the core plugins' data too, and no side-tutor threads, which are inside the sessions now. With Flashcards sync, a second backup of Flashcards' folder alone, right before each side's first Flashcards exchange: "Flashcards sync".)
+- **Backup contents:** sessions, graph, side-tutor threads, helper jobs, settings, prompt overrides and the notes home-folder records. (Since the upstream 0.6.0 merge: custom themes, the plugins' on/off record and the core plugins' data too, and no side-tutor threads, which are inside the sessions now. With Flashcards sync, a second backup of Flashcards' folder alone, right before each side's first Flashcards exchange: "Flashcards sync" below.)
 - **While sync is paused** (versions differ, or unpaired) nothing is discarded; it resumes where it stopped.
 - **Device names and the wording of every message** ("Held by Desktop", the warning, the heads-up, the notice) are asked in Phase 6 with the screens. Phase 5 stores a name per device and the facts each message needs. (Asked and approved in Phase 6; seamless sessions later retired "Held by Desktop" and the warning.)
 
@@ -121,7 +121,7 @@ Graph extraction, research, compaction and visuals run on **whichever device hol
 
 #### After the merge
 
-- **Restoring a first-sync backup** (`%APPDATA%\LearnHarness\backups` on the PC, `/data/backups` on the server) has no written guide. Putting old files back while paired would sync the old state everywhere: unpair first, and write the steps for the situation at hand. (With Flashcards sync, Flashcards' library put back deletes nothing anywhere; "Restoring a backup" under "Flashcards sync".)
+- **Restoring a first-sync backup** (`%APPDATA%\LearnHarness\backups` on the PC, `/data/backups` on the server) has no written guide. Putting old files back while paired would sync the old state everywhere: unpair first, and write the steps for the situation at hand. (With Flashcards sync, Flashcards' library put back deletes nothing anywhere; "Restoring a backup" under "Flashcards sync" below.)
 - **Not done:** Phase 7 (one automated test with two desktops and a server syncing everything together; a tidy of this file). The owner chose to merge without it.
 
 ## Pairing, device keys and the version check
@@ -146,7 +146,7 @@ Graph extraction, research, compaction and visuals run on **whichever device hol
 ### Engine changes made for Phase 6 (the owner was told before each)
 
 1. **A PC can remove itself.** `POST /api/sync/unpair` (a paired desktop's key): the server removes the device and takes the sessions it held as its own (`releaseDevice` in `authority.ts`). No protocol check, so a PC can leave a server it no longer speaks to.
-2. **Only the first PC brings its settings** ("Slice 5" below; `later` in `maps-sync.ts`).
+2. **Only the first PC brings its settings** ("Settings and the other small files" below; `later` in `maps-sync.ts`).
 3. **A marker that sync is in use.** The proxy sets a plain `lh_cloud=1` cookie (`SYNC_MARKER_COOKIE`) when `syncInUse()` says so, and takes it away when not:
    - a PC: it has a pairing file and the learner didn't unpair it here;
    - the server: a desktop is paired, or one has ever synced (a removed PC can still hold sessions).
@@ -187,13 +187,13 @@ The sync protocol version stayed at 1 for these changes: nothing had been paired
 - **Routes for a paired desktop:** `POST /api/sync/sessions` (what changed since `cursor`; also carries the holder's reports), and `GET | PUT | DELETE /api/sync/sessions/<id>`.
 - **The first sync is nothing special:** every session here that the server doesn't know is new and goes up, held by this desktop; every session there comes down, held by whoever holds it. The backup is made first, once per side (`src/store/sync/backup.ts`); if it can't be made, the sync doesn't start.
   - The same id on both sides before they ever synced (possible only if one side's data was copied from the other): identical files are one session; different files are left alone on both sides and never sent over each other.
-- **Read-only until taken over** is enforced in three layers (since seamless sessions no screen offers Take over: the page moves the session to this device first, and these refusals are the net under it; "Seamless sessions"):
+- **Read-only until taken over** is enforced in three layers (since seamless sessions no screen offers Take over: the page moves the session to this device first, and these refusals are the net under it; "Seamless sessions" below):
   1. `proxy.ts`: every write under `/api/chats/<id>` answers 409 `session_held_elsewhere` with the holder (`sessionWritePath` in `src/server/sync/engine.ts`).
   2. Where the session id is in the body: the top of `handleChatInput` (before compaction, any write or any model call), the manual extraction route, and `runningWorkBlocker` (deleting through the sources view).
   3. The stores (`src/server/sync/guarded-stores.ts`, wired in `src/server/stores.ts`): a write that still arrives, for example from background work that was running when a session moved, is dropped, never saved.
   - The notes home folder: its route leaves the record as it is on a held session and answers normally, so the drawer keeps working.
   - `recoverStaleJobs` skips sessions this copy doesn't hold, so fetching a session whose helper is still running elsewhere doesn't start it here.
-- **While paused, or unpaired by the server,** the desktop still knows which sessions are held elsewhere (its identity is kept in `cloud-sync.json`), so they stay read-only and nothing is discarded. (Since seamless sessions a PC that can't ask the server carries on with one when the learner acts in it, settled at reconnect: "Carrying on" under "Seamless sessions".) After the learner's own **Unpair this PC** every session can be continued there (Phase 6, engine change 4).
+- **While paused, or unpaired by the server,** the desktop still knows which sessions are held elsewhere (its identity is kept in `cloud-sync.json`), so they stay read-only and nothing is discarded. (Since seamless sessions a PC that can't ask the server carries on with one when the learner acts in it, settled at reconnect: "Carrying on" under "Seamless sessions" below.) After the learner's own **Unpair this PC** every session can be continued there (Phase 6, engine change 4).
 - **Deleting:** the holder's delete removes the session's files on the server and on every other device at their next round; a deleted id is never accepted again. The graph side of a deletion comes with slice 4.
 - **The store wrappers call the inner store's method as it is at that moment**, never a reference taken at wiring time: upstream's tests replace methods on the inner store object.
 
@@ -225,7 +225,7 @@ The sync protocol version stayed at 1 for these changes: nothing had been paired
 ## Seamless sessions
 
 - **Why:** the owner asked what removing "Held by …" would mean, "so that they can seamlessly be continued on another device", and chose to keep the lease underneath and hide it. The lease is still what keeps a session from splitting in two; nothing on screen shows it any more.
-- **It replaces** these recorded decisions: "A lease never runs out … with a Take over button" and "Take over warns first" (under "Sessions: leases instead of merging"), Phase 5 decisions 6 (the warning) and 10 (read-only until taken over), and Phase 6 decisions 8, 9, 10 and 13 (the held strip, the waiting strip, the warning box, the greyed controls) with their approved words. Where the text above describes those, this section is newer.
+- **It replaces** these recorded decisions: "A lease never runs out … with a Take over button" and "Take over warns first" (under "Sessions: leases instead of merging" above), Phase 5 decisions 6 (the warning) and 10 (read-only until taken over), and Phase 6 decisions 8, 9, 10 and 13 (the held strip, the waiting strip, the warning box, the greyed controls) with their approved words. Where the text above describes those, this section is newer.
 - **The sync protocol stays 3 and no synced format changed**, so the server and a PC can be updated in either order. An older PC with a newer server, or the other way round, behaves as each build did.
 
 ### What was built: the page
@@ -313,7 +313,7 @@ In `src/core/sync/screens.ts`. Change them only with the owner's approval.
 - **The ✕'s "until the trouble next starts"** is noticed by a mounted box: a pause that ends and starts again while no lesson is open stays hidden.
 - **Two devices that are both typing** pass the session back and forth; each hand-over carries the other's turns, and the "turns this page had not shown" rule holds the send back.
 
-**From "What was checked"**
+**From "What was checked" in `docs/fork/history/cloud-sync.md`**
 
 - **Not run:** the phone's session-list drawer, and the offline box at phone size (it only shows in the desktop app).
 - **Not checked at all:** the real Windows app, the real server over the internet, a real model, a real iPhone or iPad, and two real people's timing (both devices typing at once).
@@ -337,12 +337,12 @@ In `src/core/sync/screens.ts`. Change them only with the owner's approval.
 - **A server that was reset or restored** has a log with a new name (`graph-log-id`). A desktop that sees another name treats everything it has as unsent again and combines afresh.
 - **Nothing is recorded before the first graph sync:** no log on the server until a paired desktop first asks, no files on a desktop until its first round.
 - **Routes for a paired desktop:** `GET /api/sync/graph?after=<seq>&log=<name>` and `POST /api/sync/graph {after, log, entries}`.
-- **`POST /api/cloud {op:"sync"}`** now answers `{round: {sessions, graph}}` (`src/server/sync/round.ts`); since slice 5 and Flashcards sync also `maps` and `flashcards` ("A round" under slice 5).
+- **`POST /api/cloud {op:"sync"}`** now answers `{round: {sessions, graph}}` (`src/server/sync/round.ts`); since slice 5 and Flashcards sync also `maps` and `flashcards` ("A round" under "Settings and the other small files" below).
 
 ### Rulings, limits and open items
 
 - **Known limits:**
-  - The same concept learned separately on two devices before they synced is two nodes (accepted for v1; see "Graph sync").
+  - The same concept learned separately on two devices before they synced is two nodes (accepted for v1; see "Graph sync" above).
   - A crash in the instant between writing an entry down and making the change leaves that one change in the log but not in the ledger. There is no repair pass.
 
 ### Code and tests
@@ -384,7 +384,7 @@ In `src/core/sync/screens.ts`. Change them only with the owner's approval.
 - **An open page** shows a setting that arrived by sync the next time it loads its settings; the chains view updates at once (`sources-changed`).
 - **The vault's folder names** (decision 15): with a round, when the list changed, the desktop sends the names of its vault's top-level folders (`desktopVaultFolders`; names only, nothing inside them is opened; nothing is said while the vault is offline). The server keeps them in `<data>/sync/vault-folders.json`, and the Obsidian sync manager leaves them out like folders found on disk: at every start of `ob` (so before a first download), and at once if `ob` is running when a new name arrives (`foldersAnnounced`, one restart). The notes folder and dot-folders are never left out, whatever is sent.
 - **State:** `<data>/sync/maps.json` on the server (per item: a fingerprint, the time, the counter; never a value), `<data>/sync/maps-desktop.json` on a desktop. Neither exists before a desktop's first round.
-- **A round** is now sessions, then the graph, then these files: `{round: {sessions, graph, maps}}`. (With Flashcards sync, the Flashcards library comes last: `{sessions, graph, maps, flashcards}`; "Flashcards sync".)
+- **A round** is now sessions, then the graph, then these files: `{round: {sessions, graph, maps}}`. (With Flashcards sync, the Flashcards library comes last: `{sessions, graph, maps, flashcards}`; "Flashcards sync" below.)
 
 **Appearance is per device** (owner's change, after the phone plugins round)
 - **At the switch nothing changes on screen:** each side keeps the values in its own `settings.json`.
@@ -447,7 +447,7 @@ In `src/core/sync/screens.ts`. Change them only with the owner's approval.
   - On the desktop this is one wrapper around the request function (`pictures-transport.ts`); the rest of the sync code still sees whole files.
 - **A server that lost its sync records** (its `sync/` folder deleted, or the data restored from a backup):
   - the graph and the small files notice (the log's name; `send_all`) and are combined afresh;
-  - sessions: the server takes every session it has as its own again. A desktop that held one is refused at its next send, takes the server's version, and shows the discard notice if its own differed. Nothing is lost silently, and the session moves back to the desktop when it is continued there ("Seamless sessions").
+  - sessions: the server takes every session it has as its own again. A desktop that held one is refused at its next send, takes the server's version, and shows the discard notice if its own differed. Nothing is lost silently, and the session moves back to the desktop when it is continued there ("Seamless sessions" above).
 
 ### Rulings, limits and open items
 
@@ -474,7 +474,7 @@ In `src/core/sync/screens.ts`. Change them only with the owner's approval.
 
 - **What is off** (`syncTroubleDueIn` and `syncTrouble` in `src/core/sync/screens.ts`, `useSyncTrouble()` in `cloud-state.tsx`): `offline`, `paused` or `needs-pairing`; nothing for `ok`, `starting`, `unpaired` and `off`, and nothing on the server's site. Paused and removed show at once. Offline shows 30 seconds after the first failed attempt (`OFFLINE_QUIET_MS`), or at once when the app hasn't reached the server since it started. The hook sets one timer for the moment the 30 seconds are up.
 - **The sync chip** (`components/cloud/sync-chip.tsx`, mounted in `components/sidebar.tsx` between Background agents and Settings): an outline ring (lucide's `CircleIcon`, the Settings gear's weight) and the word, both `text-amber-500`, in the Settings row's own type. A click opens Settings → Cloud. It goes the moment a round reaches the server again.
-- **The offline heads-up** is one of the floating box's texts (`session-strip.tsx`, `data-box="sync-offline"`, `sync-paused` or `sync-needs-pairing`): the approved sentence and its ✕, in every lesson. The message box stays. (Until seamless sessions it was a state of the strip, with no button, and a held session kept its own strip: "Seamless sessions".)
+- **The offline heads-up** is one of the floating box's texts (`session-strip.tsx`, `data-box="sync-offline"`, `sync-paused` or `sync-needs-pairing`): the approved sentence and its ✕, in every lesson. The message box stays. (Until seamless sessions it was a state of the strip, with no button, and a held session kept its own strip: "Seamless sessions" above.)
 - **The side tutor's window may cover the strip** (owner's decision). The tutor's window opens at the lesson's top right by default, 12 px under the top bar, which is the height of the floating box (centred, drawn under the Tutor: `z-20` against `z-30`), so at its default place it can cover the end of the heads-up. (Since the upstream 0.6.0 merge the tutor starts minimized; this is about the window once opened.) A version that moved the window below an open strip was built and removed at the owner's word: "it's fine for the tutor window to be able to cover the strip".
 - **The discard box** (`components/cloud/discard-notice.tsx`, mounted once in the root layout): reads `notices`, so it shows on any screen as soon as a round discards something, or at the next app start. **Only OK closes it**: Esc and a click outside do nothing, so it can't be lost by accident. OK sends `dismiss-notice` for every notice shown; they stay away at once and don't come back.
 - **A lesson opened in the same moment as the app's first round** (found in the browser run): the page is rendered from the session as it was, the round then replaces it, and the page isn't listening yet when that is announced. The live channel also has no first frame, so its "open" can come late. Where sync is in use, `components/chat.tsx` checks the record a second after a lesson opens (`SYNC_CATCH_UP_MS`) and after every reconnect of the channel, unless a reply is being written: first its stamp (`?only=stamp`), and the whole record only when the stamp differs, is unknown or the check fails (`catchUpRead`; "The sync catch-up read" in `docs/fork/performance.md`). An app that isn't paired asks nothing more than before.
@@ -502,7 +502,7 @@ In `src/core/sync/screens.ts`. Change them only with the owner's approval.
 11. **The offline heads-up** (slice 3): the same strip under the top bar, for as long as it lasts; the message box stays. (Replaced by seamless sessions, decision 5: the heads-up is a floating box at the top of the lesson, with a ✕; the message box still stays.)
 12. **The discard notice** (slice 3): a box over the app, once, with OK.
 13. **Controls that can't work on a held session** (slice 2) are shown greyed out, not hidden: the side tutor's bubble, Rename and Delete in the session's menu, the title's click-to-rename. Tooltip on a computer: "Take this session over first".
-14. **How a strip appears and goes:** it fades and slides open from under the top bar over 200 ms (`cubic-bezier(0.2, 0.8, 0.2, 1)`, the message box's own easing), and closes the same way, so the lesson glides and nothing jumps. The message box fades over 150 ms. When a strip's words change in place they cross-fade over 150 ms. With reduced motion, at once. The owner chose it from three live demos. (Replaced by seamless sessions: the floating box fades in and out over 200 ms with a 6 px slide, at once with reduced motion, and the message box is never hidden; "The floating box" under "Seamless sessions".)
+14. **How a strip appears and goes:** it fades and slides open from under the top bar over 200 ms (`cubic-bezier(0.2, 0.8, 0.2, 1)`, the message box's own easing), and closes the same way, so the lesson glides and nothing jumps. The message box fades over 150 ms. When a strip's words change in place they cross-fade over 150 ms. With reduced motion, at once. The owner chose it from three live demos. (Replaced by seamless sessions: the floating box fades in and out over 200 ms with a 6 px slide, at once with reduced motion, and the message box is never hidden; "The floating box" under "Seamless sessions" above.)
 15. **A second PC paired later** takes the server's settings (engine change 2).
 16. **A prompt text only the server has** keeps its text with the switch off (as Phase 5 built it).
 17. **After the learner's own Unpair** the PC may continue every session (engine change 4), and nothing reminds them to pair again.
@@ -511,20 +511,20 @@ In `src/core/sync/screens.ts`. Change them only with the owner's approval.
 
 Kept in one place: `src/core/sync/screens.ts`. Change them only with the owner's approval. Quoted names take curly quotes, as in the notes drawer.
 
-- **Desktop, Settings → Cloud, not paired.** Group "Cloud sync". "Keep this PC's sessions, graph and settings in step with your LearnHarness server." / "Server address" / "Pairing code" with "On the server's site: Settings → Cloud → Add a desktop app." / "This PC's name" (filled in: Desktop) with "The server lists this PC by this name: Settings → Cloud." (since seamless sessions: "The approved words" under "Seamless sessions") / "Pairing combines this PC's sessions with the server's. Nothing is deleted, and a backup is made first." / button **Pair** ("Pairing…" while it works). A refusal shows as a red line under the button, in the server's words (the Phase 5 list under slice 1).
+- **Desktop, Settings → Cloud, not paired.** Group "Cloud sync". "Keep this PC's sessions, graph and settings in step with your LearnHarness server." / "Server address" / "Pairing code" with "On the server's site: Settings → Cloud → Add a desktop app." / "This PC's name" (filled in: Desktop) with "The server lists this PC by this name: Settings → Cloud." (since seamless sessions: "The approved words" under "Seamless sessions" above) / "Pairing combines this PC's sessions with the server's. Nothing is deleted, and a backup is made first." / button **Pair** ("Pairing…" while it works). A refusal shows as a red line under the button, in the server's words (the Phase 5 list under slice 1).
 - **Pairing again with the same server** replaces the "Nothing is deleted" sentence with: "This PC was paired with this server before. Where a session was continued on both sides since, the server's version is kept and what this PC added is discarded. A backup is made first."
 - **Desktop, paired.** "Up to date" / "Starting…" / "Syncing…" (during Sync now) / "Can't reach the server. Trying again." / "Update the server to continue syncing" / "Update LearnHarness to continue syncing". "Last synced just now", "… 2 minutes ago", then "… today, 14:02" or "… 9 Nov, 18:20". Rows "Server" and "This PC". Buttons **Sync now** and **Unpair this PC**; the confirm line: "Syncing stops. Nothing on this PC is deleted, and every session can be continued here." with **Unpair this PC** (red) and Cancel.
 - **Removed by the server:** "This PC is no longer paired." above the pairing form, which has the address and the name filled in.
 - **Unpaired without a connection:** `The server couldn't be told. Remove “Desktop” there too: Settings → Cloud.`
 - **Server, Settings → Cloud.** Group "Desktop apps". Each PC: its name, "Paired 12 Nov · online now" or "Paired 3 Nov · last seen 9 Nov, 18:20", **Remove**. Remove's confirm line: `“Desktop” stops syncing. Nothing on that PC is deleted.` with **Remove** (red) and Cancel. "No desktop app is paired." / **Add a desktop app** / "Pairing code" with "Works once, for 9:41" / "Server address" / "In the desktop app, open Settings → Cloud and enter both." / **New code**, **Done** / "This code has run out."
 - **Slice 3, the discard box**, with the words of seamless sessions (`discardBox`, `discardedText`). Title `“Circuits” was continued on another device` / "It was continued on another device while this PC was offline. 3 messages you sent here never reached the server and were discarded. The session now shows the server's version." / OK. One message: "1 message you sent here never reached the server and was discarded." None, but another change: "Changes made here that hadn't reached the server were discarded." Several sessions: one box titled "Sessions were continued on another device", one line each.
-- **Retired:** the words of slice 2's strip and warning box, and of slice 3's offline strip and discard box as first approved ("taken over", "what you add here now is discarded"): `docs/fork/history/cloud-sync.md`, "Phase 6 words and rules retired by seamless sessions". Seamless sessions replaced them ("The approved words" under "Seamless sessions").
+- **Retired:** the words of slice 2's strip and warning box, and of slice 3's offline strip and discard box as first approved ("taken over", "what you add here now is discarded"): `docs/fork/history/cloud-sync.md`, "Phase 6 words and rules retired by seamless sessions". Seamless sessions replaced them ("The approved words" under "Seamless sessions" above).
 
 #### Smaller rules (proposed in the plan page, approved with it)
 
 - **After the learner's own Unpair, nothing nags:** no chip, no "no longer paired" strip. Both appear only when the PC was removed from the server's side.
 - **Quiet for short blips** (slice 3): the chip and the offline strip appear once the PC has failed to reach the server for 30 seconds; at once if the app starts with no connection.
-- **The offline strip shows in every session the PC can continue** (slice 3), also one created while offline that nobody could take over. Telling those apart needs one more fact from the engine; the owner was told and hasn't asked for it. (Since seamless sessions the heads-up shows in every lesson, since every session can be continued: "The rules approved with the plan" under "Seamless sessions".)
+- **The offline strip shows in every session the PC can continue** (slice 3), also one created while offline that nobody could take over. Telling those apart needs one more fact from the engine; the owner was told and hasn't asked for it. (Since seamless sessions the heads-up shows in every lesson, since every session can be continued: "The rules approved with the plan" under "Seamless sessions" above.)
 - **Practice sessions** get the same strips as teaching sessions. (Since seamless sessions: the same floating box.)
 - **A PC removed on the server's site** that still holds sessions: they stay "Held by Desktop", offline, and can be taken over from the phone. The server remembers the name of every PC it heard from (`names` in `<data>/sync/authority.json`), because the login file forgets a removed PC. (Retired by seamless sessions in part: no screen shows "Held by" or Take over, and such a session moves to whichever device it is continued on; the names are still kept.)
 - **How the pages stay current:** the app's live channel (`/api/events`), plus one check every 10 seconds, only where the marker says sync is in use.
@@ -555,7 +555,7 @@ Kept in one place: `src/core/sync/screens.ts`. Change them only with the owner's
 ## Flashcards sync
 
 - **Why:** the owner added it while answering the phone plan's questions: decks made in the Windows app should be on the phone, so **sync Flashcards between the Windows app and the server in this round**.
-- **The plan** is `docs/phone-plugins-plan.md` ("Flashcards sync": decisions S1–S6 and the smaller rules), approved by the owner. Change a decision only with the owner's approval.
+- **The plan** is `docs/fork/plans/phone-plugins-plan.md` ("Flashcards sync": decisions S1–S6 and the smaller rules), approved by the owner. Change a decision only with the owner's approval.
 - It replaces decision 17 of the 0.6.0 merge ("plugin data is per device") for Flashcards' library only. Every other plugin's data, and which plugins are on, stay per device.
 - **The sessions' rules don't apply here:** no lease, no Take over, no held state, nothing discarded.
 
@@ -577,7 +577,7 @@ Kept in one place: `src/core/sync/screens.ts`. Change them only with the owner's
   - `c|<card>` a card `{p, q, a, s}`; `k|<card>` a card was deleted; `u|<fact>` the order of a fact's cards;
   - `r|<review>` one review, never changed: `{p, c, rating, at, deckIds, settings}`;
   - `f|<file>` an uploaded file's record `{name, fingerprint, deckId}`.
-- **Nothing is deleted by a missing item.** Deletions are items of their own (`x`, `k`, `e`), so latest-change-wins only ever chooses between two values. A per-device memory tells "deleted here" from "never had it": the plugin's file keeps no record of what it deleted ("The memory" under "The wiring").
+- **Nothing is deleted by a missing item.** Deletions are items of their own (`x`, `k`, `e`), so latest-change-wins only ever chooses between two values. A per-device memory tells "deleted here" from "never had it": the plugin's file keeps no record of what it deleted ("The memory" under "The wiring" below).
 - **A card's deletion is final:** `k` is never taken back, whatever was edited later.
 - **A fact deleted and made again starts fresh:** `e` says from when its reviews count. A fact is alive while it has a card. Its moment of making (`created`) travels, so a fact nobody has reviewed yet has the same schedule everywhere.
   - **An inferred `e`:** only for a fact this device's sync has never seen (no memory, or no `p|<fact>` in it), and only from what the file itself counted: just before its first counted review (`firstReviewedAt − 1`), or the latest review's time when it counted none. Never from `created`: a fact made on both devices keeps one `created`, and the other device's earlier reviews must still count.
@@ -638,13 +638,13 @@ Kept in one place: `src/core/sync/screens.ts`. Change them only with the owner's
 
 - `SYNC_PROTOCOL_VERSION` is **3** (`src/core/sync/protocol.ts`): the library travels on a route a protocol-2 build doesn't have, and a PC sends its time zone.
 - `tests/sync-sessions.test.ts` pins which protocol each Flashcards file format needs (`PROTOCOL_FOR_FLASHCARDS_FORMAT = {1: 3}`), beside the chat format's table: a new format with no row fails it.
-- As with protocol 2, both sides must be updated, the server first; until both are, all sync pauses and nothing is discarded. The steps are "Updating the server and the PC together" in `docs/upstream-0.6.0.md`.
+- As with protocol 2, both sides must be updated, the server first; until both are, all sync pauses and nothing is discarded. The steps are "Updating the server and the PC together" in `docs/fork/releases.md`.
 
 ### The plugin's store (the one edit to Flashcards' code)
 
 - `plugins/flashcards/src/store.cjs`: `get()` and `change()` compare the file's stamp (inode, size, mtime, ctime) with what they last read or wrote, and read the file again when it changed on disk. A file that went missing keeps what is in memory; the next change writes it back whole.
 - So the plugin, running in the same process, sees what sync wrote without a restart, and its next write can't put back what sync replaced.
-- One line of `plugins/flashcards/tests/store.test.cjs` changed with it. Both are listed under "At the next upstream release" in `docs/upstream-0.6.0.md`.
+- One line of `plugins/flashcards/tests/store.test.cjs` changed with it. Both are listed under "At the next upstream release: the fork's edits to upstream files" in `docs/fork/upstream.md`.
 - The Windows workflow runs the plugin's store and back-end tests on Windows in a step of their own; its `tests/sync-*.test.ts` glob picks up the new sync tests.
 
 ### Log lines and API texts
@@ -677,12 +677,12 @@ The smaller rules approved with them (what travels, schedules never travel, orde
 - **How "a delete always wins" reads for decks and facts:**
   - a fact deleted on one device while the other added a new card to it survives, with the new card;
   - a deck deleted on one device but given a card on the other is a normal deck again;
-  - which decks a fact is in combines (one item per fact and deck, since the review's fixes; "The items" above). The first ruling here, "one item per fact, the later change wins whole", is replaced;
+  - which decks a fact is in combines (one item per fact and deck, since the review's fixes; "The items (`src/core/sync/flashcards-items.ts`)" above). The first ruling here, "one item per fact, the later change wins whole", is replaced;
   - a joined twin deck can undercount that day's new cards (reviews keep the deck id they were recorded under).
 - **Schedules are worked out again when the zone changes.** When the server takes a zone it didn't keep or run in, it rebuilds every schedule in that zone; the PC does the same when it sends its zone (its first exchange, or after it moved). Without that, a review made in the old zone kept that zone's due date on one side only (found in the two-copy run). The cost: at the first sync, due dates of facts reviewed in the other zone can move by up to a day. With two PCs in different zones, the one not counted keeps its own zone's schedules. The owner has been told.
 - **A side with no Flashcards folder** makes no backup folder and counts as backed up.
 - **Made while fixing the review's findings** (for the owner's review; the owner was told in chat):
-  - **the same-question rule** reads as "only a pair that meets from two devices": two cards with the same question on one fact, one from each device, lose the later one; two cards one device made are both kept ("The items" above);
+  - **the same-question rule** reads as "only a pair that meets from two devices": two cards with the same question on one fact, one from each device, lose the later one; two cards one device made are both kept ("The items (`src/core/sync/flashcards-items.ts`)" above);
   - **a fact taken out of every deck stays in the deck it was put in last** that isn't deleted; **if every one of its decks is deleted, the last one stays as a deck** (a fact is never left in no deck, and is never dropped);
   - **a generation that shows no progress for 15 minutes holds the exchange no longer.**
 - **Made while fixing the second pass's findings** (for the owner's review):

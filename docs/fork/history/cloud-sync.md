@@ -57,7 +57,7 @@
 
 ### Phase 6, slice 2: retired by seamless sessions
 
-Retired by seamless sessions ("Removed from the page" under "What was built: the page" in "Seamless sessions"). What is still built of this slice (`CloudProvider`, `cloud-changed`) is in `docs/fork/cloud-sync.md`.
+Retired by seamless sessions ("Removed from the page" under "What was built: the page" in `docs/fork/cloud-sync.md`). What is still built of this slice (`CloudProvider`, `cloud-changed`) is in `docs/fork/cloud-sync.md`.
 
 #### Slice 2: what is built
 - **The session list** (`components/sidebar.tsx`): a held session's second line reads "Held by Desktop" in place of the time. In its menu, Rename and Delete are greyed out with the tooltip; the other items work.
@@ -132,7 +132,7 @@ One run between two built copies with the loop on, through the real screens, nob
 
 A reviewer read the sync part. It found six serious issues, each reproduced by a script, all fixed before anything shipped (`97fe7ee`); lower ones were fixed too. A second and a third pass by the same reviewer followed (below).
 
-1. **Putting the first-sync backup back** made sync read the missing cards as deletions and delete them everywhere. Now a library that doesn't follow its memory counts as "records lost", and nothing missing counts as deleted ("The memory" above).
+1. **Putting the first-sync backup back** made sync read the missing cards as deletions and delete them everywhere. Now a library that doesn't follow its memory counts as "records lost", and nothing missing counts as deleted ("The memory" under "The wiring" in `docs/fork/cloud-sync.md`).
 2. **A fact deleted and generated again before a device's first sync** had its schedule rebuilt from the old reviews. Now an `e` is set at the first read.
 3. **A library that can't be read** (the format lock, damaged) made the PC download everything every round and the server back up every round. Now: no request, nothing written, no cursor moved, `locked` and a probe.
 4. **Seconds-long stalls of the server's process** with a 25 MB library. Now tables are copied only on the first change, an idle exchange skips the walk of its table, an apply starts from the last read and leaves its own result as the next read, and fingerprints are kept while a value is the same (a review's for good).
@@ -167,7 +167,7 @@ Before the review's fixes. Two built copies with the loop on, the server in UTC 
 - 2,000 facts and 20,000 reviews (a 20.3 MB file): first-synced in 10.7 s, in 7 pages up and 3 down;
 - unpair and pair again: carried on with 1 change and no second backup.
 
-**Measured after the fixes** (a 25 MB library, 20,000 reviews): the server's idle exchange 25 ms; a first sync 6.5 s. **After the second pass's fixes:** the idle exchange 23 ms; a first exchange 2.2 s. The steps that still hold the server's process are under "Known limits".
+**Measured after the fixes** (a 25 MB library, 20,000 reviews): the server's idle exchange 25 ms; a first sync 6.5 s. **After the second pass's fixes:** the idle exchange 23 ms; a first exchange 2.2 s. The steps that still hold the server's process are under "Known limits" under "Flashcards sync" in `docs/fork/cloud-sync.md`.
 
 **The tests after each pass of fixes**
 
@@ -178,7 +178,7 @@ Before the review's fixes. Two built copies with the loop on, the server in UTC 
 
 0. **Checks.**
    - ✅ ChatGPT sign-in and model calls from a VPS (callback replayed by hand).
-   - ✅ Graph id and rewrite analysis (above).
+   - ✅ Graph id and rewrite analysis ("Graph sync" in `docs/fork/cloud-sync.md`).
    - ✅ `claude auth login` works on a headless VPS. It prints the link as plain text (`If the browser didn't open, visit: https://claude.com/cai/oauth/authorize?...`). Claude's own page shows a code after the learner authorizes. A plain prompt (`Paste code here if prompted >`) takes it, then the CLI prints `Login successful.` The Sign in button drives this command; Disconnect runs `claude auth logout`. The native installer puts `claude` in `~/.local/bin`.
    - ✅ `ob sync-config` has `--excluded-folders` (comma-separated, empty to clear). It also has `--configs` (which `.obsidian` setting categories sync; may close the `.obsidian` gap), `--conflict-strategy merge|conflict` (an owner decision for Phase 4), `--file-types` and `--device-name`.
 1. ✅ **Server mode.** Dockerfile, the `LH_DATA_DIR` volume, the password login gate in `proxy.ts`, Caddy (HTTPS), the server image workflow, and automatic server updates. Running on the permanent VPS: HTTPS via Caddy, setup and password, locked from outside, and the nightly timer installed.
@@ -187,7 +187,7 @@ Before the review's fixes. Two built copies with the loop on, the server in UTC 
 4. ✅ **Vault on the server.** Settings → Obsidian, the sync manager around `ob`, folders left out automatically, the safety check and Disconnect. Verified by the owner on the server with their real Obsidian account.
 5. ✅ **Sync engine.** Pairing and device keys, the lease API, session sync with take-over (no copies: unsent turns are discarded), graph line and operation sync, per-key settings merges, and the sync protocol version check. Run between two built copies; not yet between the owner's real PC and server, which needs Phase 6's screens. (Since then: after the merge the owner paired the real PC with the real server and reported "everything works!".)
    - Built as wrapper stores at the composition root (`src/server/stores.ts`) over the `core/ports.ts` interfaces, so upstream store code stays untouched and rebasing onto upstream stays cheap.
-6. ✅ **Sync screens** (desktop app, server's site and phone). Plan approved by the owner and built; see "Phase 6, the sync screens".
+6. ✅ **Sync screens** (desktop app, server's site and phone). Plan approved by the owner and built; see "The sync screens" in `docs/fork/cloud-sync.md`.
    - ✅ Slice 1: Settings → Cloud on both sides (pairing, sync state, Sync now, Unpair this PC; paired desktop apps and pairing codes on the server), with four engine changes.
    - ✅ Slice 2: a held session (the list line, the strip, Take over, the warning box, greyed controls). (Retired by seamless sessions.)
    - ✅ Slice 3: the desktop's own notices (the sync chip, the offline strip, the discard box).
@@ -207,7 +207,7 @@ Before the review's fixes. Two built copies with the loop on, the server in UTC 
 - **The login file parser drops unknown fields** (`parseServerAuthState`), and `reset-password` writes a fresh state. Paired devices stored there are cleared by a reset for free; stored anywhere else, the script must clear them.
 - **Desktop shell:** quitting kills the local server at once (`killServer` in `electron/main.cjs`); there is no secure store in use (credentials are 0600 JSON files, and a test forbids `safeStorage`); a build opts out of updates with `lhAutoUpdate: false` in its packaged `package.json`.
 
-- The open questions that were listed here are answered above.
+- The open questions that were listed here are answered in `docs/fork/cloud-sync.md`.
 - **Which branch builds the server image:** `.github/workflows/server-image.yml` lists the branches that build (`side-tutor` → `:latest`; `claude/pensive-goldberg-7dty2m` → `:dev`). A push to any other branch builds nothing, and the owner's server follows `:dev`. Keep working on that branch, or add the new branch's name to that list in the same change.
 - **Build order in the plan page, all six built** (each with its tests, a run between two copies, and a commit and push):
   1. pairing codes, device keys, the sync API behind the login gate, and the protocol version check;
@@ -227,12 +227,12 @@ Kept as written while the work was on its own branch; where it says "until the m
 - **Branch:** `claude/pensive-goldberg-7dty2m`. All cloud sync work lives here.
   - Pushes build only the server image (`:dev`), never a desktop release.
   - **Never push to `side-tutor`** until the owner approves merging the whole feature.
-- **Phase 4 (the Obsidian vault on the server) is complete.** The plan was approved by the owner beforehand (every decision is recorded under "Obsidian vault on the VPS"), and the owner confirmed on the real server that sign-in, connecting and syncing work.
+- **Phase 4 (the Obsidian vault on the server) is complete.** The plan was approved by the owner beforehand (every decision is recorded under "Obsidian vault on the VPS — built in Phase 4" in `docs/fork/server.md`), and the owner confirmed on the real server that sign-in, connecting and syncing work.
   - Tested here: the full suite, plus the manager driving the real `ob` program against a stand-in for Obsidian's servers, and a Playwright run in server mode at phone and desktop size.
   - The owner's check covered the update, the install of `ob`, sign-in and connect. The stopped states (a refused sign-in, an ended subscription, the safety pause) have only been seen against the stand-in; the texts of Obsidian's real error messages are the likeliest place for a surprise.
-- **Phase 3 (phone layouts) is complete** (the owner's call, after two real-phone rounds; see "Real-phone checks" above). The last fixes pushed before that call (the home-screen app's top inset at +26 points, phone menus pinned by their top, Fable as `fable`) weren't reported on individually; if the owner mentions one of them, start from its bullet in "Phone layouts".
+- **Phase 3 (phone layouts) is complete** (the owner's call, after two real-phone rounds; see "Real-phone checks (owner, iPhone, iOS 27), two rounds" in `docs/fork/history/phone-and-tablet.md`). The last fixes pushed before that call (the home-screen app's top inset at +26 points, phone menus pinned by their top, Fable as `fable`) weren't reported on individually; if the owner mentions one of them, start from its bullet in `docs/fork/phone-and-tablet.md`.
 - **Open by design:** the Safari-tab bleed stays marked as an experiment (it works on the owner's phone); a tablet layout is not built.
-- **Also on this branch (not phone work):** Claude Fable in the Claude Code model list and the Claude-models-last menu order (see `docs/side-tutor.md`, "Claude Code: Fable in the model list"). It reaches the desktop app only with the merge.
+- **Also on this branch (not phone work):** Claude Fable in the Claude Code model list and the Claude-models-last menu order (see "Claude Code: Fable in the model list" in `docs/fork/models-and-agents.md`). It reaches the desktop app only with the merge.
 - **Phases 0–2 are done and verified on the owner's VPS:**
   - HTTPS and the password login work;
   - the nightly update timer is installed;
@@ -242,7 +242,7 @@ Kept as written while the work was on its own branch; where it says "until the m
 
 ### Phase 5, the sync engine (built), and what comes next
 
-**The owner approved the Phase 5 plan page, and all six slices are built** ("Phase 5: what is built"). **Phase 6, the screens, is built too**, all three slices ("Phase 6, the sync screens", below). Phase 6 changed four of the engine's rules at the owner's request; they are listed there, and the Phase 5 text below is corrected where it described the old rule.
+**The owner approved the Phase 5 plan page, and all six slices are built** (`docs/fork/cloud-sync.md`). **Phase 6, the screens, is built too**, all three slices ("The sync screens" in `docs/fork/cloud-sync.md`). Phase 6 changed four of the engine's rules at the owner's request; they are listed there, and the Phase 5 text in `docs/fork/cloud-sync.md` is corrected where it described the old rule.
 
 **What the owner can and can't see now**
 
@@ -257,6 +257,6 @@ Kept as written while the work was on its own branch; where it says "until the m
 - Phase 7 (not started; the owner starts it).
 ### Later phases: decisions still open (ask when you get there)
 
-- **Phase 5 (sync engine):** answered and built. The owner confirmed the wording listed under slices 1 and 2 with the Phase 6 plan page, and settled the two readings of "the desktop's value is kept" (decisions 15 and 16 above).
-- **Phase 6 (sync screens):** answered and built; see "Phase 6, the sync screens". For the owner to review: the wording listed as added while building, under slices 1 to 3, and the lesson's one extra read of its session (slice 3).
+- **Phase 5 (sync engine):** answered and built. The owner confirmed the wording listed under slices 1 and 2 with the Phase 6 plan page, and settled the two readings of "the desktop's value is kept" (decisions 15 and 16, "Phase 6 decisions (owner)" in `docs/fork/cloud-sync.md`).
+- **Phase 6 (sync screens):** answered and built; see "The sync screens" in `docs/fork/cloud-sync.md`. For the owner to review: the wording listed as added while building, under slices 1 to 3, and the lesson's one extra read of its session (slice 3).
 - **Phase 7 and the merge:** not started. The merge into `side-tutor` needs the owner's approval and a guide for pairing the real PC with the real server.

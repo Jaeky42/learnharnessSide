@@ -4,7 +4,7 @@
 
 ### Login (VPS) — built in Phase 1
 
-This is the login of a single-copy server (no `LH_GATE_SECRET`). Behind the gateway, which is what the owner's server runs since the switch-over, the copy's own login routes and pages answer 404 and the gateway's sign-in applies ("Sign-in, sessions and the lockout" under "Accounts on one server"); there `reset-password` runs in the gateway's container.
+This is the login of a single-copy server (no `LH_GATE_SECRET`). Behind the gateway, which is what the owner's server runs since the switch-over, the copy's own login routes and pages answer 404 and the gateway's sign-in applies ("Sign-in, sessions and the lockout" under "Accounts on one server" below); there `reset-password` runs in the gateway's container.
 
 - Browser mode had no authentication (`desktopAPIAuthorized` returns `true` when it isn't the desktop server). Server mode (`LH_SERVER_MODE=1`, set by the Docker image) puts a login gate in front of **every page and API**; only `/login`, `/setup` and static build files are open.
 - **First start:** the server prints a one-time **setup code** to its log (`docker compose logs lh`). `/setup` takes the code and a new password. It works once.
@@ -66,10 +66,10 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 
 - The official headless client `obsidian-headless` (`ob`) runs **inside the LearnHarness container** as one more Obsidian Sync device, named **"LearnHarness server"** (owner's choices). The notes drawer on the phone then shows the same notes as Obsidian.
   - Notes are stored decrypted on the server's disk, the same as on any other synced device.
-- **Set up in Settings → Obsidian** (owner's choice over SSH). The section shows only on the server, just above Cloud and Account. On a phone it has no row of its own: it is a group inside Cloud, under "Desktop apps" (owner's ask; "A less cramped list" under "Plugins on a phone").
+- **Set up in Settings → Obsidian** (owner's choice over SSH). The section shows only on the server, just above Cloud and Account. On a phone it has no row of its own: it is a group inside Cloud, under "Desktop apps" (owner's ask; "A less cramped list: Obsidian inside Cloud" under "Plugins on a phone" in `docs/fork/phone-and-tablet.md`).
   1. Sign in: Obsidian email, password, and a two-step code if the account uses one.
   2. Choose the vault and give its encryption password (empty for a standard vault).
-  3. A status line: Starting… / Downloading your notes… / Up to date (with "Last synced …") / Syncing… / Can't reach Obsidian. Trying again. / the stopped states under "Keeping sync safe".
+  3. A status line: Starting… / Downloading your notes… / Up to date (with "Last synced …") / Syncing… / Can't reach Obsidian. Trying again. / the stopped states under "Keeping sync safe" below.
   - SSH still works as a backup: `docker compose exec lh ob …` uses the same files, and the page reads its state from `ob` itself.
 - **One vault, at `/data/vault`** (`LH_VAULT_DIR`), in the existing data volume (owner's choice).
   - Connecting points the notes drawer at it. Nobody types a folder path on the server: the drawer shows "Connect your Obsidian vault" with **Open Settings**, its gear opens Settings → Obsidian (on a phone: Cloud, with the Obsidian group in view), and `POST /api/notes {action:"vault"}` answers 403.
@@ -180,7 +180,7 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
   - plus a tag per commit.
   - It never creates a GitHub Release, so it can't affect desktop updates.
   - The package is **public**. GitHub creates it private, so set it to public once in the package settings.
-- Multi-user hosting is **built and shipped to both branches**: several accounts at one address, a container per account behind a gateway ("Accounts on one server" below). **The owner's server is switched over** ("State" below): it runs the gateway, the maker and the owner's copy behind Caddy, and what is said above about the single copy's own login now describes the way back, not what runs. The plan, with the owner's decisions and the approved words, is `docs/multi-account-plan.md`; the step-by-step guide it was built from is `docs/multi-account-build.md`.
+- Multi-user hosting is **built and shipped to both branches**: several accounts at one address, a container per account behind a gateway ("Accounts on one server" below). **The owner's server is switched over** ("State" below): it runs the gateway, the maker and the owner's copy behind Caddy, and what is said above about the single copy's own login now describes the way back, not what runs. The plan, with the owner's decisions and the approved words, is `docs/fork/plans/multi-account-plan.md`; the step-by-step guide it was built from is `docs/fork/plans/multi-account-build.md`.
 
 ## Accounts on one server
 
@@ -190,7 +190,7 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 - Two things the guide asked for that haven't been confirmed one by one: "Concurrent worker requests" lowered to 3 on the owner's copy, and the recovery codes kept.
 - **After `git pull` on the server, `./make-secrets.sh` must run before the next `./update.sh`:** the new compose file refuses to start without the secrets, so the nightly update would fail (and change nothing) until they exist.
 - **The sync protocol stays 3 and no stored format changed.** Nothing on the wire changed shape, so the order of updating the server and a PC doesn't matter. A desktop app and a single-copy server (no gateway) behave as before: everything new is switched by `LH_GATE_SECRET` / `LH_ACCOUNT_TAG` being set, or lives in the gateway and the maker. No existing test file was edited.
-- **Where to read:** the owner's decisions and every approved sentence are in `docs/multi-account-plan.md` (the sentences live in code in `src/core/account-screens.ts`). This part records what was built, where, and what the builder decided beyond the plan.
+- **Where to read:** the owner's decisions and every approved sentence are in `docs/fork/plans/multi-account-plan.md` (the sentences live in code in `src/core/account-screens.ts`). This part records what was built, where, and what the builder decided beyond the plan.
 
 ### What it does
 
@@ -250,7 +250,7 @@ Both controls appear **only on the cloud server**. The page knows it's on the se
 
 ### The contract as built
 
-The build guide's contract tables (`docs/multi-account-build.md`) are corrected where this differs; each change is marked there.
+The build guide's contract tables (`docs/fork/plans/multi-account-build.md`) are corrected where this differs; each change is marked there.
 
 **Headers between Caddy, the gateway and a copy:**
 
@@ -301,7 +301,7 @@ Refusals: a secret shorter than 32 characters → 503 for everything (fail close
 | `POST /api/server-auth/recovery-codes`, `/delete-account` | signed in, with the password | four new codes, once; Delete my account (not for the owner) |
 | `GET`, `POST /api/accounts` | the owner (404 to anyone else) | the list, and `invite`, `cancel-invite`, `reset`, `pause`, `resume`, `remove`, `restore`, `delete-now` |
 | `POST /api/sync/pair` | a desktop app | reads the tag from the code in the body and forwards to that copy through the relay |
-| `POST /control/reset-owner` | the gateway's own command only | loopback only, and never with a forwarding header (Caddy always adds one); see "Rulings" |
+| `POST /control/reset-owner` | the gateway's own command only | loopback only, and never with a forwarding header (Caddy always adds one); see "Rulings made while building (for the owner to review)" below |
 
 Bodies are at most 16 KB; a request has 10 s for its headers and 30 s in all.
 
@@ -415,7 +415,7 @@ Bodies are at most 16 KB; a request has 10 s for its headers and 30 s in all.
 - **`deploy/update.sh`** (the nightly timer's script) still pulls and runs `docker compose up -d --remove-orphans`. Account copies aren't in the compose file: **the maker brings each one onto the new image when it starts** (stop, re-create on the same volume with the same secret, start; one at a time) and joins Caddy to every account network. So all copies and the gateway always run the same build. `update.sh` restarts the maker itself only when `up -d` did not just re-create it, or when Caddy was re-created (a new Caddy has lost its network joins); a maker that `up -d` re-created has reconciled at its start and must not be restarted while it is swapping copies.
 - **The switch-over on the owner's server:** the existing container and volume stay and become the owner's account. After `git pull` (files in `deploy/` changed), `./make-secrets.sh` and `./update.sh`, the gateway has no owner yet and prints a one-time setup code to its log (`docker compose logs gateway`); the owner enters it and chooses a name and a password and is shown four recovery codes. Every browser signs in once more; the paired PC is untouched. A copy of the server's data by hand comes first, as for the 0.6.0 update. The step-by-step guide for the owner is an Artifact page made at the end of the build (outside the repo).
 - **The way back:** the previous `deploy/` files and image tag. The owner's copy keeps its own password login untouched (its `server-login.json` was never written), so without `LH_GATE_SECRET` its own gate works again.
-- **The owner's copy now has the same limits as an account's copy** (1 GB memory, 2 GB with swap, 512 processes, no capabilities, init) in `deploy/compose.yaml`; a test keeps those numbers equal to the maker's template. See "Rulings made while building": it ran unlimited before, with "helpers at once" at 8.
+- **The owner's copy now has the same limits as an account's copy** (1 GB memory, 2 GB with swap, 512 processes, no capabilities, init) in `deploy/compose.yaml`; a test keeps those numbers equal to the maker's template. See "Rulings made while building (for the owner to review)" below: it ran unlimited before, with "helpers at once" at 8.
 - **`reset-password`:** where the image runs a gateway (`LH_GATEWAY_FILE` set: the gateway's container) the command is `lh-gateway reset-owner`; everywhere else it is the single-copy reset as ever (`scripts/server-reset-password.mjs` is unchanged; the choice is in the image's wrapper script).
 - **The cap** is `LH_MAX_ACCOUNTS` in `deploy/.env` (4), changed by editing that line and running `./update.sh`.
 
@@ -431,7 +431,7 @@ None of these is approved item by item. Each went the way the plan or the code p
 - **Words that had no approved sentence:** "Never signed in" (an account with no last-seen time); "Signed in now" for a member (the plan's example is the owner's "Owner · signed in now"); a **Try again** button when the Accounts list fails to load; the reserved-name sentence reused on the first-start page; the lockout sentence follows today's `formatWait` output ("15 min"), where the plan quotes "15 minutes"; `ACCOUNTS_FILE_DAMAGED_PLACEHOLDER` ("The accounts file on this server is damaged. See the server guide."), marked `TODO(owner wording)` in `src/core/account-screens.ts`; the terminal lines of `reset-owner` and of a damaged accounts file. Bare `code` answers with no sentence show the app's generic line.
 - **"Signed in now"** means a session used in the last 10 minutes (`SIGNED_IN_NOW_MS`, twice the 5-minute stamp resolution).
 - **Sign-in hygiene for a shared browser:** `Clear-Site-Data: "cache"` on every answer that starts or ends a sign-in.
-- **The lockout's additions** (listed under "Sign-in, sessions and the lockout"): the plan approved one lockout per address; the builder added the rules for when a success clears failures, /64 grouping, the table's size and its 60-second full-table pause, and the per-account count for wrong codes.
+- **The lockout's additions** (listed under "Sign-in, sessions and the lockout" above): the plan approved one lockout per address; the builder added the rules for when a success clears failures, /64 grouping, the table's size and its 60-second full-table pause, and the per-account count for wrong codes.
 - **An unfinished new account** (its copy not made yet) can't sign in, isn't listed and no operation applies to it. If making the copy fails or its outcome is unknown, the reservation is abandoned **with its volume kept** (never deleted on a guess), so orphan volumes can pile up and need pruning by hand.
 - **The accounts file is backed up daily** beside itself, a missing file with a backup reads as damaged, and **while no owner exists, tagged device keys and pairing codes answer 503, never 401**, so a lost file doesn't make members' PCs drop their keys. An untagged key or code always goes to the configured owner's copy, also before the owner has claimed the gateway, so the PC paired today keeps syncing through the switch-over.
 - **Download my data limits:** refuses (413) above 3.5 GiB or 65,000 files (no Zip64); one at a time per copy (429); unsafe-for-Windows names skipped, not renamed, with a count in `skipped-files.txt`.
@@ -439,7 +439,7 @@ None of these is approved item by item. Each went the way the plan or the code p
 - **The desktop app's pairing box was widened one step** (above), which the owner allowed.
 - **Delete my account** sits at the bottom of Settings → Account as a red text button under a divider.
 - **The owner's own copy gets the account copies' limits** (1 GB, 2 GB with swap, 512 processes, no capabilities, init) in `deploy/compose.yaml`. The plan sets the ceiling per copy; the owner's copy ran unlimited before, with "helpers at once" at 8, so the switch-over guide tells the owner to lower that to 3 by hand. **For the owner to confirm.**
-- **Changes to the build guide's contract** (each is marked in `docs/multi-account-build.md`): the network layout (nothing but Caddy reaches the gateway; no copy shares a network with another); the relay; `X-LH-Scope`; Caddy stripping the session cookie, refusing `Service-Worker`, `admin off` and failing closed; the maker's `start: false` and `fresh: true`, `GET /volumes`, the swap that keeps the old container until the new one runs, waiting for work on SIGTERM, `Init`, a log bound and `User: node` in the template, Docker Engine API 1.44, and socket access through `group_add` (`LH_DOCKER_GID`); the three secrets; `update.sh`'s rule for restarting the maker.
+- **Changes to the build guide's contract** (each is marked in `docs/fork/plans/multi-account-build.md`): the network layout (nothing but Caddy reaches the gateway; no copy shares a network with another); the relay; `X-LH-Scope`; Caddy stripping the session cookie, refusing `Service-Worker`, `admin off` and failing closed; the maker's `start: false` and `fresh: true`, `GET /volumes`, the swap that keeps the old container until the new one runs, waiting for work on SIGTERM, `Init`, a log bound and `User: node` in the template, Docker Engine API 1.44, and socket access through `group_add` (`LH_DOCKER_GID`); the three secrets; `update.sh`'s rule for restarting the maker.
 - **The unpair-all rule.** The guide's contract said the gateway calls unpair-all after Pause and Remove; the plan says a paused or removed account's desktop app keeps its key and carries on after Restore. Built as the plan says (Pause and Remove end browser sessions only), and the guide's sentence is corrected.
 - **The Windows workflow's cloud-sync test step** also runs `accounts-core`, `accounts-ui`, `account-own-ui` and `sign-out-storage` (pure rules and screens the desktop app's bundle carries too; the gateway, the maker and the copy's gate are Linux-only).
 - **Seen in the run, for the owner to review:**
@@ -456,18 +456,18 @@ Not built; each is a decision for the owner.
 - **A firewall rule on the server: built, then declined** (the owner: "i dont really want the firewall"). Not open any more; the record, with the trial the owner saw first, is "The host firewall: built and checked, then declined" in `docs/fork/history/server.md`.
 - **Each password check holds the gateway's one thread briefly** (scrypt, as on a single-copy server today): a flood of sign-in tries slows the site for everyone. The lockout bounds one address, not many.
 - **The owner's Reset is, by design (plan decisions 6 and 8), the power to set a member's password.** It signs the member out and unpairs their desktop apps, which is how the member can tell. Recorded here so the owner can confirm they accept it.
-- **The four first values** (4 accounts, 1 GB per copy, 2 GB of swap, 3 helpers at once) are approved as first values to tune on the real server ("Still for the owner, after the build" in the plan).
+- **The four first values** (4 accounts, 1 GB per copy, 2 GB of swap, 3 helpers at once) are approved as first values to tune on the real server ("Still for the owner, after the build" in `docs/fork/plans/multi-account-plan.md`).
 
 #### Known limits
 
-- **All accounts share one origin.** Browser storage and cookies are shared by accounts that use one browser (hence the clearing at sign-out); no service worker is allowed; a tab left open from one account is a page on the same origin as the next ("Open for the owner").
+- **All accounts share one origin.** Browser storage and cookies are shared by accounts that use one browser (hence the clearing at sign-out); no service worker is allowed; a tab left open from one account is a page on the same origin as the next ("Open for the owner" above).
 - **Next's standalone output carries the whole source tree** (tests, docs, `deploy/`), so the gateway's source files ride along unused in the Windows app and in the server image. `next.config.ts` warns that tracing exclusions break the app in non-obvious ways, so nothing was changed.
 - **Orphan volumes** can pile up (an abandoned reservation keeps its volume) and are pruned by hand.
 - **Copies can reach the internet and the host's other services,** the provider's metadata address included; the owner's copy always could.
 - **A copy that passes its memory ceiling** should be restarted alone by its restart policy (`unless-stopped`); not seen. How four copies behave in 4 GB with real lessons is unknown.
 - **A restore of the accounts file from its backup** loses what happened since the backup (up to a day). The file is the only record of who owns which copy.
 - **The gateway is one process with one thread** (scrypt checks hold it briefly).
-- **No usage per account, no renaming, no sleeping copies, no own address per person** (the plan's "Not in the first version").
+- **No usage per account, no renaming, no sleeping copies, no own address per person** ("Not in the first version" in `docs/fork/plans/multi-account-plan.md`).
 - **A stack started from the files before the fixed network names** (`<project>_front`, only ever in the development sandbox and in CI) gets new networks at its next `up`, and its containers are re-created on them (not tried; the sandbox and CI start fresh). The owner's server goes from the single copy's default network to these names at the switch-over; its old `deploy_default` network can be left behind, unused (`docker network prune` removes it).
 
 #### What only the real server can show
@@ -495,7 +495,7 @@ Not built; each is a decision for the owner.
 | `src/server/server-auth.ts` | `behindGateway`, `gatePasses`, `gateScopeOf`, `gatewayGate`, `unpairAllResponse`, `signedIn`. |
 | `src/core/sync/devices.ts`, `src/server/sync/http.ts` | Tags in pairing codes and keys; `accountTag`. |
 | `src/server/account-export.ts`, `zip-writer.ts`, `app/api/account/export/route.ts`, `app/api/internal/unpair-all/route.ts` | Download my data; the copy's internal route. |
-| `components/settings/accounts-section.tsx`, `account-accounts-group.tsx`, `owner-mode.ts`, `account-section.tsx`, `sign-out-storage.ts`, `settings-dialog.tsx` | The screens ("The screens"); the dialog edit is marked in the file. |
+| `components/settings/accounts-section.tsx`, `account-accounts-group.tsx`, `owner-mode.ts`, `account-section.tsx`, `sign-out-storage.ts`, `settings-dialog.tsx` | The screens ("The screens" above); the dialog edit is marked in the file. |
 | `Dockerfile`, `scripts/build-gateway.mjs`, `deploy/compose.yaml`, `Caddyfile`, `make-secrets.sh`, `update.sh`, `docker-entrypoint.sh`, `.env.example` | The image's two extra programs and wrapper scripts; the stack; the seed of "helpers at once". |
 | `deploy/test/crossing.mjs`, `deploy/test/README.md` | The crossing tests against a running stack (`--list` prints what it tries and touches nothing). |
 | `.github/workflows/server-image.yml`, `side-tutor-windows.yml` | The new "Multi-account stack and crossing tests" step after the single-copy smoke test; the Windows step's wider test list. |

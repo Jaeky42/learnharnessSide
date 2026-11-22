@@ -30,7 +30,7 @@
   - a push to `side-tutor` publishes a desktop release (and builds the server image `:latest`). It still needs the owner's approval every time;
   - the owner's server follows `LH_CHANNEL=dev`, which is built from `claude/pensive-goldberg-7dty2m`. A change the server should get must be pushed there; a change both should get goes to both branches, kept at the same commit.
   - Moving the server to `latest`, so one branch feeds both, is the owner's call and hasn't been asked.
-- **The two sides must speak the same sync protocol version** (1 in release 0.5.6; **2 from the upstream 0.6.0 merge on**, see `docs/upstream-0.6.0.md`; **3 with Flashcards sync**, see "Flashcards sync"). A change that raises it has to reach the server and the desktop together, or sync pauses until both are updated.
+- **The two sides must speak the same sync protocol version** (1 in release 0.5.6; **2 from the upstream 0.6.0 merge on**, see `docs/fork/upstream.md`; **3 with Flashcards sync**, see "Flashcards sync" in `docs/fork/cloud-sync.md`). A change that raises it has to reach the server and the desktop together, or sync pauses until both are updated.
 
 ## Updating the server and the PC together
 
