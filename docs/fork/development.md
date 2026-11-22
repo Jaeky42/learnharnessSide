@@ -67,7 +67,7 @@
 ## Notes drawer and Tutor runs
 
 - Playwright hides scrollbars by default; launch with `ignoreDefaultArgs: ["--hide-scrollbars"]` to get real ones. The run of the larger zones did, and dragged the conversation's scrollbar thumb beside the right strip.
-- **A Tutor conversation for screenshots:** put threads in the chat record's `sideChats` (upstream's shape in `src/core/contracts/chat.ts`). The old `side-tutor/<chatId>.json` recipe in `docs/cloud-sync.md` no longer applies.
+- **A Tutor conversation for screenshots:** put threads in the chat record's `sideChats` (upstream's shape in `src/core/contracts/chat.ts`). The old `side-tutor/<chatId>.json` recipe ("A side tutor thread for screenshots" below) no longer applies.
 - **A side tutor thread for screenshots** (**obsolete**: before the upstream 0.6.0 merge only; now put threads in the chat record's `sideChats`, as in the bullet above; the `localStorage` tip at the end still holds): write `<data>/side-tutor/<chatId>.json` (`{ "version": 1, "chatId": …, "entries": [{ "id", "question", "answer", "status": "done", "askedAt" }] }`) before loading the page. On a computer, `localStorage["lh:side-tutor:pos"]` (`{ left, top }`) puts the window over the lesson's text, which is what shows through its middle.
 - **Browser runs of the notes drawer:**
   - A drag starts only after the pointer has moved a little (10 px after the hold on a phone, 5 px with the mouse), so the dragged row's centre isn't under the pointer. To rest the line on something, measure the row's centre and move the pointer by the difference.
@@ -95,7 +95,7 @@
 - **The crossing tests against a running stack:** `node deploy/test/crossing.mjs --list`, then `--base https://<LH_DOMAIN> --ca <root.crt> --compose-dir <the stack's deploy folder>`. They need two free slots and Docker on the same machine; they remove the two members they make ("Crossing tests" is `deploy/test/README.md`).
 - **A real Caddy with stand-in gateway and copies** (the Caddyfile unmodified, `LH_DOMAIN=localhost:<port>`) is the quick way to re-prove a Caddyfile change.
 - **The gateway's setup code** is in `docker compose logs gateway`; don't paste it anywhere.
-- **Node:** the image runs Node 26; the sandbox's tests run on Node 22. The known sandbox failures (four tests, plus one case of `tests/subscription-auth.test.ts`) are listed in "Development notes from the merge" in `docs/upstream-0.6.0.md`.
+- **Node:** the image runs Node 26; the sandbox's tests run on Node 22. The known sandbox failures (four tests, plus one case of `tests/subscription-auth.test.ts`) are listed in "Known test failures in the development sandbox" above.
   - **Check file-handling code on Node 26 before a dry run:** a file handle closed by the garbage collector is an error there and only a warning on 22. A Node 26 binary for one run: `npm install node@26` into a scratch folder, then `NODE_ENV=test <scratch>/node_modules/.bin/node --import tsx --test tests/<file>`.
   - **Start a test stack from a folder that isn't named `deploy`** (CI uses `stack`): the folder's name is the compose project's, and a fault that depended on it stayed hidden under `deploy`.
 - **`reset-password` on a server with a gateway** is `docker compose exec gateway reset-password` (the gateway's container has `LH_GATEWAY_FILE`). In the owner's copy's container the same command is still the copy's own single-copy reset of `server-login.json`, which the gateway never uses.

@@ -59,8 +59,8 @@ The learner's own notes beside the lesson, stored as Markdown in their Obsidian 
   - `notesMessageMs` in `components/notes/notes-drawer.tsx`.
 - **Editor:** CodeMirror for editing (sections fold while typing), plus a Read view with formatted math, folding, clickable links and images. The editor follows the chosen theme's light or dark mode live (`editorTheme(mode)`), and the drawer's colours are theme tokens.
 - **Where it appears:** both **teaching and practice** sessions.
-- **On a phone:** the drawer fills the screen and shows the list, then the note. Rows open their menu on press and hold; holding and then moving the finger drags the row into a folder. See "Phone layouts" in `docs/cloud-sync.md`.
-- **On the cloud server:** the vault is connected in Settings → Obsidian instead of by a folder path, and the drawer says when the notes aren't syncing with Obsidian. See "Obsidian vault on the VPS" in `docs/cloud-sync.md`. The desktop app's drawer is unchanged.
+- **On a phone:** the drawer fills the screen and shows the list, then the note. Rows open their menu on press and hold; holding and then moving the finger drags the row into a folder. See "On a phone" below.
+- **On the cloud server:** the vault is connected in Settings → Obsidian instead of by a folder path, and the drawer says when the notes aren't syncing with Obsidian. See "The Obsidian vault on the server" in `docs/fork/server.md`. The desktop app's drawer is unchanged.
 - **Extras:**
   - Math in Read view.
   - Pasted images go to Obsidian's `attachmentFolderPath`, or `LearnHarness/attachments` when that isn't set.
@@ -91,7 +91,7 @@ The learner's own notes beside the lesson, stored as Markdown in their Obsidian 
   - Home-folder records that point at or into a deleted folder are removed.
   - Refused: the notes folder itself, an item that no longer exists, and anything that resolves outside the notes folder (a folder link, for example).
   - `notesStore.contents` counts what a folder holds for the confirm box; hidden (dot) entries aren't counted, but they go with the folder.
-  - On the cloud server the route then tells the sync manager (`notesChangedHere`), so its safety check doesn't take a clear-out made in the drawer for the notes going missing. See "Keeping sync safe" in `docs/cloud-sync.md`.
+  - On the cloud server the route then tells the sync manager (`notesChangedHere`), so its safety check doesn't take a clear-out made in the drawer for the notes going missing. See "Keeping sync safe" in `docs/fork/server.md`.
 - **Agent file tools:** `privateNotesRoots()` in `src/agent/tools/fs-shared.ts` re-reads `<data>/notes/settings.json` on every resolution or walk (agents never import the notes store). Paths are compared case-insensitively, by both their named and canonical (real) path. `resolveSourcePath` refuses with a specific message, and walks skip the folder.
 
 ## On a phone
@@ -101,7 +101,7 @@ The learner's own notes beside the lesson, stored as Markdown in their Obsidian 
   - The two resize handles are hidden.
   - **Dragging: hold, then move** (owner's choice over a grip on each row; built after Phase 4, it replaced "dragging is off").
     - Press and hold opens the menu, as before. Keep the finger down and move: the menu closes and the row itself lifts and follows the finger.
-    - What moves and where it lands is the same as on a computer: "Dragging" under "Notes drawer" in `docs/side-tutor.md`.
+    - What moves and where it lands is the same as on a computer: "Dragging" above.
     - **The divider under "Topics" is the upper limit** (owner's ask). Pushing on against it puts the item above Inbox, outside every folder.
   - **The message line** ("Moved …", "Deleted …", and refusals such as a name that's already taken in that folder) also shows at the bottom of the list screen. Its usual place is in the note half, which the list screen hides, so on a phone those messages were never seen. Found in the browser run of the drag and added without being asked, for the owner to review.
   - A phone always opens the drawer closed and doesn't remember it, so the desktop's saved state is untouched.
