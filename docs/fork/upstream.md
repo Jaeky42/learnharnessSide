@@ -155,7 +155,7 @@ Five things the plan had left open, or that came out differently than the plan s
 
 Left out of the merge, and where each stands now:
 
-- Phone layouts for Flashcards, Coding questions, Rich code blocks, the theme picker and plugin settings pages. Flashcards and Rich code blocks have phone layouts since the phone plugins round, and Settings on a phone lists Core plugins and their pages. Still not done: phone layouts for Coding questions, the Drawing Pad, the theme picker and community plugins; those stay computer-only.
+- Phone layouts for Flashcards, Coding questions, Rich code blocks, the theme picker and plugin settings pages. Flashcards and Rich code blocks have phone layouts since the phone plugins round, and Settings on a phone lists Core plugins, from whose ⚙ the two plugins' own pages open. Still not done: phone layouts for Coding questions, the Drawing Pad, the theme picker and community plugins; those stay computer-only.
 - Syncing plugin data (Flashcards' review history first). Flashcards' library syncs since the phone plugins round. Still not done: syncing any other plugin's data or which plugins are on.
 - Phase 7 of cloud sync, and a tablet layout. Still not done.
 
