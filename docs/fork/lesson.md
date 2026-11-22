@@ -63,7 +63,7 @@
 
 #### Money amounts no longer turn into a formula
 
-- **The owner's choice** (of three: the instructions, the renderer, both): "a fix that won't break anything", so **the instructions only**. The renderer is unchanged, so nothing that draws correctly today can change. **Replaced since** (owner's decision): the renderer now tells money from math too; see "Money is not math" below.
+- **The owner's choice** (of three: the instructions, the renderer, both): "a fix that won't break anything", so **the instructions only**. The renderer was left unchanged then, so nothing that drew correctly could change. **Replaced since** (owner's decision): the renderer now tells money from math too, and that rule is the main fix; the bullet stays as a second net; see "Money is not math" above.
 
 ### Rulings, limits and open items
 
@@ -87,13 +87,13 @@
 
 #### Money amounts no longer turn into a formula
 
-- **Tests:** `tests/prompt-money.test.tsx` (the bullet word for word, reaching all four agents; each form rendering as the bullet says; and that two bare amounts are still read as a formula, so the bullet is revisited if upstream ever teaches the renderer to tell money from math).
+- **Tests:** `tests/prompt-money.test.tsx` (the bullet word for word, reaching all four agents; each form rendering as the bullet says; and that two bare amounts in one paragraph now stay text: this case pinned them as a formula until the renderer's own rule turned it round).
 
 ## Demos and figures follow the theme
 
 - **Demos and figures follow the theme** (owner's ask: "make it so that demos default to dark mode/light mode depending on theme").
-  - **What the learner gets:** a demo or figure never flipped shows dark on a dark theme and light on a light one, and changes at once when the theme changes. The full-screen figure view opens the way the card shows. Annotated photos never invert, as before. Unchanged: how demos are written (still built light, on white), downloads, sync, and a held session (a flip is refused there, as before).
-  - **How:** the steer card hands the saved switch through as it is (`data.ui?.inverted`, undefined when never flipped; it used to become `false`), and `DemoOutputCard` and `VisualOutputCard` take `savedInverted` and fall back to `useAppearance().resolvedMode === "dark"`. A flip saves through the artifact-ui route as before. Each edit is marked `FORK (theme default)`.
+  - **What the learner gets:** a demo or figure never flipped shows dark on a dark theme and light on a light one, and changes at once when the theme changes. The full-screen figure view opens the way the card shows. Annotated photos never invert, as before. Unchanged: how demos are written (still built light, on white), downloads and sync. On a session another device holds a flip was refused when this was built; since seamless sessions it moves the session here first, then saves (`fetchHere` in `components/artifacts/demo-card.tsx` and `visual-card.tsx`).
+  - **How:** the steer card hands the saved switch through as it is (`data.ui?.inverted`, undefined when never flipped; it used to become `false`), and `DemoOutputCard` and `VisualOutputCard` take `savedInverted` and fall back to `useAppearance().resolvedMode === "dark"`. A flip saves through the artifact-ui route as before. Each edit in the two cards is marked `FORK (theme default)`; the steer card's two changed lines carry no marker.
 
 ### The owner's decisions and approved words
 
@@ -133,7 +133,7 @@
       The box is about 43 points tall, 15 to 19 points from the selection, and up to 344 of 440 points wide. Only the iPhone's home-screen app was measured; a Safari tab and the iPad use the same rule. The switch-over (between 464 and 550 points) and the two gaps can be tuned only on the owner's devices.
   - **"No room" is judged against what is really visible** (found by a reviewer: a selection ending just above the message box put the buttons on top of it, because the lesson's box runs under the dock). On touch the lesson's box is cut at the top of the dock (`[data-phone="dock"]`: the message box, or an open question, which is taller) and at the bottom of the top bar (`[data-phone="topbar"]`) where they overlap it (`visibleLessonBounds`). So a selection ending right above the dock sends the buttons to the system box's side, beyond the box (iPhone 13 size: a selection at 530–552 with the dock at 562 put them at 570–602 over the message box; now at 428–460, above the start).
   - **While the iPhone keyboard is up** the body is shifted and is the frame for fixed elements, so the touch toolbar's position is measured from the body's top (`fixedFrameTop`, `touchToolbarTop`), as the fork's other fixed elements are. With no shift the numbers are upstream's. Not tried with a real keyboard.
-  - Scope as on a computer: the lesson's text. A held session's buttons stay greyed.
+  - Scope as on a computer: the lesson's text. A held session's buttons are not greyed (since seamless sessions `components/chat.tsx` passes nothing as `blocked`); a press on Cite or Ask starts moving the session here (`prewarmSessionMove` in `components/cloud/session-move.ts`).
 
 ### Rulings, limits and open items
 
