@@ -1,10 +1,10 @@
 # Plan: the fork's own coding questions plugin (runs in the browser, sealed)
 
-**Status: a draft for the owner to approve. Nothing is built; spikes 1 to 3 are done and passed** (`docs/spikes/sealed-box/`). Written at the end of the upstream 0.6.0 session, for the next session to pick up. That session is led by one orchestrator at high effort, with worker agents at high effort; the owner names the models when starting it. Per `AGENTS.md`: investigate, ask the owner the open decisions one at a time, get this plan approved (changed where the owner says), and only then build.
+**Status: a draft for the owner to approve. Nothing is built; spikes 1 to 3 are done and passed** (`docs/fork/spikes/sealed-box/`). Written at the end of the upstream 0.6.0 session, for the next session to pick up. That session is led by one orchestrator at high effort, with worker agents at high effort; the owner names the models when starting it. Per `AGENTS.md`: investigate, ask the owner the open decisions one at a time, get this plan approved (changed where the owner says), and only then build.
 
 ## Why
 
-- Upstream's **Coding questions** plugin runs a program the teacher model wrote, on the machine, with no sandbox, when the learner submits (`plugins/coding-questions/src/runner.ts`; its README says so). On the server that program could read `/data`: notes, sign-ins, keys. The facts are in `docs/upstream-0.6.0.md`, "Plugin security".
+- Upstream's **Coding questions** plugin runs a program the teacher model wrote, on the machine, with no sandbox, when the learner submits (`plugins/coding-questions/src/runner.ts`; its README says so). On the server that program could read `/data`: notes, sign-ins, keys. The facts are in `docs/fork/plugins.md`, "Plugin security".
 - The owner's choice: **write our own plugin so it is safe**, instead of sandboxing upstream's on the server. Languages (owner): **Python, JavaScript and SQL**.
 - Safe means: the learner's code and the teacher's tests run **in the learner's browser, inside a sealed frame**. Nothing runs on the server or in the desktop app's server process. That is safe on the Windows PC too, where no sandbox for programs is practical.
 
@@ -90,7 +90,7 @@ Read from the code on the shipped commit. Lines marked *(not verified)* were not
 
 ## Spikes
 
-**Spikes 1 to 3 are done and passed**, in Chromium and on the owner's iPad. The page, the worker's source, the numbers and the recipe that worked are in `docs/spikes/sealed-box/`. Read its README before building the runner: it is the starting point for work packages B and C.
+**Spikes 1 to 3 are done and passed**, in Chromium and on the owner's iPad. The page, the worker's source, the numbers and the recipe that worked are in `docs/fork/spikes/sealed-box/`. Read its README before building the runner: it is the starting point for work packages B and C.
 
 1. ✅ **A worker inside a sealed frame.** A classic `blob:` worker starts in an opaque-origin `srcdoc` frame under a strict policy, and from the frame and from the worker the page, storage and the network are refused. Chromium and the iPad's WebKit (inside the Claude app's web view).
    - **Left to check:** Safari itself on the iPad (same engine), the packaged desktop app, and the frame fed from the plugin's real asset route.

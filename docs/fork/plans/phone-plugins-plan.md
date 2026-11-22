@@ -1,10 +1,10 @@
 # Plan: Flashcards and Rich code blocks on a phone, and Flashcards sync
 
-**Status: approved by the owner ("Approved, build it"). Built on `claude/upstream-0.6.0` (packages A–E; "Where they stand" under "Work packages"); shipped:** the same commit is on `side-tutor` and on the server's branch (both fast-forwards), after both workflow dry runs passed and three passes of the sync review. The owner hasn't updated the server or the PC yet, and the owner's iPhone hasn't seen it. Per `AGENTS.md`, building is mechanical: anything this plan leaves open goes back to the owner. Change a decision here only with the owner's approval. What was built is recorded in `docs/cloud-sync.md`; see "What happened after approval" at the end.
+**Status: approved by the owner ("Approved, build it"). Built on `claude/upstream-0.6.0` (packages A–E; "Where they stand" under "Work packages"); shipped:** the same commit is on `side-tutor` and on the server's branch (both fast-forwards), after both workflow dry runs passed and three passes of the sync review. The owner hasn't updated the server or the PC yet, and the owner's iPhone hasn't seen it. Per `AGENTS.md`, building is mechanical: anything this plan leaves open goes back to the owner. Change a decision here only with the owner's approval. What was built is recorded in `docs/fork/phone-and-tablet.md` and `docs/fork/cloud-sync.md`; see "What happened after approval" at the end.
 
 ## What the owner asked
 
-"How do I get rich code blocks and flashcards working on my phone web app and browser?" The phone is an iPhone; "web app" is the home-screen app and "browser" is a Safari tab. Both get the phone layout (under 640 px, in a browser only; `docs/cloud-sync.md`, "Phone layouts"). While answering the plan's questions the owner added: **sync Flashcards between the Windows app and the server in this round.**
+"How do I get rich code blocks and flashcards working on my phone web app and browser?" The phone is an iPhone; "web app" is the home-screen app and "browser" is a Safari tab. Both get the phone layout (under 640 px, in a browser only; `docs/fork/phone-and-tablet.md`, "When it applies, and tablets"). While answering the plan's questions the owner added: **sync Flashcards between the Windows app and the server in this round.**
 
 ## The look (done)
 
@@ -102,7 +102,7 @@ One worker per package, each owning its files, each in its own worktree. Workers
 
 - **A–E: done**, built on `claude/upstream-0.6.0`.
 - **F: done**: a fresh reviewer read the phone diff, and its findings are fixed. The sync part was reviewed too, in three passes: six serious findings and lower ones, then six more, then one narrow gap, all fixed.
-- **G:** done: the tests, typecheck and lint, the browser run at iPhone size with every screen shot again, Flashcards with the stand-in provider, the computer comparison, the run between two built copies, and the docs (`docs/cloud-sync.md`, `docs/upstream-0.6.0.md`, `CLAUDE.md`). Both workflow dry runs are started and not yet in. Still to come: the "what to try on your iPhone" page.
+- **G:** done: the tests, typecheck and lint, the browser run at iPhone size with every screen shot again, Flashcards with the stand-in provider, the computer comparison, the run between two built copies, and the docs (`docs/fork/phone-and-tablet.md`, `docs/fork/cloud-sync.md`, `docs/fork/upstream.md`, `CLAUDE.md`). Both workflow dry runs are started and not yet in. Still to come: the "what to try on your iPhone" page.
 
 | # | Package | Owns | After |
 |---|---|---|---|
@@ -111,7 +111,7 @@ One worker per package, each owning its files, each in its own worktree. Workers
 | C | **Rich code blocks on a phone.** Shrink to fit, the enlarge button on all three kinds, the spinner box. | a new `app/phone-rich-code-blocks.css`, a small fork component for the enlarge button and the spinner, the smallest hook in the plugin or the host's code-block mount | A |
 | D | **Sync, the rules.** Pure code: the items, combining, delete-wins, joining twin decks, rebuilding schedules by replay with the plugin's own scheduler. Tests against the plugin's scheduler and fixtures. | `src/core/sync/flashcards*.ts`, its tests | — |
 | E | **Sync, the wiring.** The store's re-read; reading and writing the library through the exchange; its own route and state; the round and the 2-second trigger; protocol 3 and the format lock; the backup; the time zone; the do-nothing test; a run between two built copies. | `src/server/sync/flashcards*.ts`, `app/api/sync/flashcards`, small additions in `round.ts`, `loop.ts`, `protocol.ts`, `backup.ts`, `instrumentation.ts`, `plugins/flashcards/src/store.cjs`, the workflows' test lists | D |
-| F | **A fresh reviewer** (the diff and "Phone layouts" only): computer layout and desktop app unchanged; every phone rule phone-only and browser-only; edits to upstream's files minimal and listed; no earlier phone behaviour lost; an unpaired app inert. | reads and reports | A–E |
+| F | **A fresh reviewer** (the diff and `docs/fork/phone-and-tablet.md` only): computer layout and desktop app unchanged; every phone rule phone-only and browser-only; edits to upstream's files minimal and listed; no earlier phone behaviour lost; an unpaired app inert. | reads and reports | A–E |
 | G | **Checks and docs.** Below. | docs | all |
 
 ## Checks
@@ -126,8 +126,8 @@ One worker per package, each owning its files, each in its own worktree. Workers
 
 ## Shipping
 
-- The same commit to the server's branch and to `side-tutor`, each with the owner's approval, the server's first, after both dry runs. **Protocol 3:** the steps of "Updating the server and the PC together" in `docs/upstream-0.6.0.md` apply again.
-- Update `docs/cloud-sync.md` ("Phone layouts", and a Flashcards part under the sync engine), `docs/upstream-0.6.0.md` (decisions 10 and 17, "Not in this merge", "At the next upstream release") and `CLAUDE.md`.
+- The same commit to the server's branch and to `side-tutor`, each with the owner's approval, the server's first, after both dry runs. **Protocol 3:** the steps of "Updating the server and the PC together" in `docs/fork/releases.md` apply again.
+- Update `docs/fork/phone-and-tablet.md` ("Plugins on a phone") and `docs/fork/cloud-sync.md` ("Flashcards sync"), `docs/fork/upstream.md` (decisions 10 and 17, "Not in the merge", "At the next upstream release: the fork's edits to upstream files") and `CLAUDE.md`.
 
 ## Risks
 
@@ -142,7 +142,7 @@ One worker per package, each owning its files, each in its own worktree. Workers
 - Phone layouts for Coding questions, Drawing Pad, the theme picker and community plugins.
 - Syncing any other plugin's data, or which plugins are switched on.
 - The iPhone status bar on light themes (still open from the 0.6.0 merge).
-- The fork's own coding questions plugin: `docs/own-coding-plugin-plan.md`.
+- The fork's own coding questions plugin: `docs/fork/plans/own-coding-plugin-plan.md`.
 
 ## What happened after approval
 
@@ -159,11 +159,11 @@ Three answers given after the plan was approved:
 ### Reviews, and what the runs found
 
 - **Package F, the phone part:** a fresh reviewer read the phone diff and found two real bugs (the rename box stuck open after a hold on, or a slide off, its ✕; a hold inside the rename box opening the menu and saving) and smaller items. All are fixed.
-- **The sync part:** the reviewer found six serious issues, each reproduced by a script, and all were fixed before anything shipped: a first-sync backup put back deleted cards everywhere; a fact deleted and generated again before a device's first sync was rebuilt from its old reviews; a library that can't be read made the PC download everything and the server back up every round; seconds-long stalls of the server with a 25 MB library; the server timed its own changes when a PC next asked; two PCs whose first exchanges overlapped were both "first". Lower ones were fixed too. The fixes and three rulings made with them (for the owner's review) are in "Flashcards sync" in `docs/cloud-sync.md`. A second pass found six more and a third one narrow gap; all are fixed, and the reviewer's last word was to ship.
-- **Found in the run between two built copies:** a review the server made while it still ran in the zone it was started with kept that zone's due date there, while the PC worked it out in its own zone. Now each side works every schedule out again when the zone changes (a ruling for the owner's review; "Flashcards sync" in `docs/cloud-sync.md`).
+- **The sync part:** the reviewer found six serious issues, each reproduced by a script, and all were fixed before anything shipped: a first-sync backup put back deleted cards everywhere; a fact deleted and generated again before a device's first sync was rebuilt from its old reviews; a library that can't be read made the PC download everything and the server back up every round; seconds-long stalls of the server with a 25 MB library; the server timed its own changes when a PC next asked; two PCs whose first exchanges overlapped were both "first". Lower ones were fixed too. The fixes and three rulings made with them (for the owner's review) are in "The review of the wiring, and its fixes" in `docs/fork/history/cloud-sync.md` and "Rulings made while building (for the owner to review)" under "Flashcards sync" in `docs/fork/cloud-sync.md`. A second pass found six more and a third one narrow gap; all are fixed, and the reviewer's last word was to ship.
+- **Found in the run between two built copies:** a review the server made while it still ran in the zone it was started with kept that zone's due date there, while the PC worked it out in its own zone. Now each side works every schedule out again when the zone changes (a ruling for the owner's review; "Flashcards sync" in `docs/fork/cloud-sync.md`).
 
 ### Where the built facts live
 
-- **The phone:** `docs/cloud-sync.md`, "Phone layouts" → "Plugins on a phone": what was built for each decision, the code, the tests, what was checked, what only the iPhone can show, and the list built beyond this plan's letter for the owner to review.
-- **Flashcards sync:** `docs/cloud-sync.md`, "Flashcards sync": the decisions S1–S6, the rulings made while building (for the owner to review), the items, the replay, the wiring, the review and its fixes, protocol 3, known limits, tests and the run between two copies.
-- **What changed against the 0.6.0 merge** (decisions 10 and 17, "Not in this merge", the upstream files edited, the update steps for protocol 3): `docs/upstream-0.6.0.md`.
+- **The phone:** `docs/fork/phone-and-tablet.md` and `docs/fork/history/phone-and-tablet.md`, "Plugins on a phone": what was built for each decision, the code, the tests, what was checked, what only the iPhone can show, and the list built beyond this plan's letter for the owner to review.
+- **Flashcards sync:** `docs/fork/cloud-sync.md` and `docs/fork/history/cloud-sync.md`, "Flashcards sync": the decisions S1–S6, the rulings made while building (for the owner to review), the items, the replay, the wiring, the review and its fixes, protocol 3, known limits, tests and the run between two copies.
+- **What changed against the 0.6.0 merge** (decisions 10 and 17, "Not in the merge", the upstream files edited, the update steps for protocol 3): `docs/fork/upstream.md` and `docs/fork/releases.md`.

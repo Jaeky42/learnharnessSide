@@ -1,4 +1,4 @@
-# Sealed box test (spikes 1 to 3 of `docs/own-coding-plugin-plan.md`)
+# Sealed box test (spikes 1 to 3 of `docs/fork/plans/own-coding-plugin-plan.md`)
 
 A throwaway test page, kept so the result can be reproduced and the working recipe isn't lost. It is not part of the app and nothing imports it.
 
