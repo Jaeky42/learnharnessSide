@@ -31,7 +31,7 @@ function priceLabel(cost: ModelCatalogEntry["cost"]): string {
 	return `${fmt(cost.input)}/${fmt(cost.output)}`;
 }
 
-/** Fork (owner's ask): the Claude Code (CLI billing) models stay together at
+/** FORK (owner's ask): the Claude Code (CLI billing) models stay together at
  *  the bottom, alphabetically (fable, haiku, opus, sonnet). Everything else
  *  keeps the alphabetical-by-id order. Exported for tests. */
 export function compareModels(a: { provider: string; id: string }, b: { provider: string; id: string }): number {

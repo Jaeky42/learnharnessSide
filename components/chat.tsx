@@ -310,7 +310,7 @@ export function Chat({
 	 *  it (BYOK, owner 2026-09-22). The server gate stays the truth; this
 	 *  only decides whether the pill rides the composer. */
 	initialConfigured?: boolean;
-	/** Fork (performance): the stamp of the record the page was rendered from;
+	/** FORK (performance): the stamp of the record the page was rendered from;
 	 *  the cloud catch-up skips its full read while the record still has it. */
 	initialStamp?: string | null;
 }) {
@@ -1135,7 +1135,7 @@ export function Chat({
 	 * when nothing is active; the two never overlap). */
 	useEnterSubmits(sendNext, sessionFindScopeRef);
 
-	// Fork (performance): the usage state as last set, so a read that brings the
+	// FORK (performance): the usage state as last set, so a read that brings the
 	// same turns or pricing sets no state (an equal value re-rendered the whole
 	// lesson). usageReadRef: a read has set them at least once.
 	const turnsShownRef = useRef<TurnUsage[]>([]);
@@ -1154,7 +1154,7 @@ export function Chat({
 	}, []);
 
 	const syncFromServer = useCallback(async () => {
-		// Fork (performance): rememberStamp, because this read also adopts the
+		// FORK (performance): rememberStamp, because this read also adopts the
 		// record's usage below, so the page then shows that record whole.
 		const record = await readRecord({ rememberStamp: true }).catch(() => undefined);
 		if (!record) return;
@@ -1327,7 +1327,7 @@ export function Chat({
 	// guess so the static paint has a sane tail. The first layout effect
 	// replaces it with the measured truth before paint.
 	const [dockReserve, setDockReserve] = useState(208);
-	// Fork (performance): the newest usage read still under way, so the catch-up
+	// FORK (performance): the newest usage read still under way, so the catch-up
 	// can wait for the one the page started at mount instead of asking again.
 	// syncTurns itself always starts a fresh read: the one after a turn settles
 	// must not be answered by a read that began before the turn's entry was saved.
@@ -1335,7 +1335,7 @@ export function Chat({
 	const syncTurns = useCallback((): Promise<void> => {
 		const run: Promise<void> = (async () => {
 			try {
-				// Fork (performance): the usage fields alone (`?only=turns`), not the
+				// FORK (performance): the usage fields alone (`?only=turns`), not the
 				// whole record; the same staleness rule as the read it replaces.
 				const usage = await readUsage();
 				if (!usage) return;
@@ -1439,7 +1439,7 @@ export function Chat({
 	// (duplicate message ids). So: a settle during a busy turn defers the
 	// sync; the next idle fetch adopts the finished record.
 	const [jobs, setJobs] = useState<JobRecord[]>([]);
-	// Fork (performance): the list as last set; an equal refetch sets no state.
+	// FORK (performance): the list as last set; an equal refetch sets no state.
 	const jobsShownRef = useRef<JobRecord[]>([]);
 	const localStreamRef = useRef(false);
 	localStreamRef.current = localStream;
@@ -1493,7 +1493,7 @@ export function Chat({
 				pendingSyncRef.current = false;
 				void syncFromServer();
 			}
-			// Fork (performance): only a list that changed is set (the settle
+			// FORK (performance): only a list that changed is set (the settle
 			// detection above runs either way).
 			if (!sameJsonValue(jobsShownRef.current, list)) {
 				jobsShownRef.current = list;
@@ -1614,7 +1614,7 @@ export function Chat({
 	// the live channel is surely attached, and after every reconnect of it.
 	// An app that isn't paired asks nothing more than before.
 	//
-	// Fork (performance): the read is first a stamp check (`?only=stamp`). When
+	// FORK (performance): the read is first a stamp check (`?only=stamp`). When
 	// the record still has the stamp of the one this page shows, nothing is
 	// downloaded (usage not yet read is read through `?only=turns`) and nothing
 	// re-renders; only the owed-continuation check of the full read runs, on the same messages. A
@@ -2847,7 +2847,7 @@ export function DockOverlay({
 		const content = el?.firstElementChild as HTMLElement | null | undefined;
 		if (!el || !content) return;
 		let prevH = content.getBoundingClientRect().height;
-		// Fork (performance): the entry's own border-box height, not a fresh
+		// FORK (performance): the entry's own border-box height, not a fresh
 		// getBoundingClientRect() (which forced a layout of the whole transcript
 		// when another observer had just changed the page). The same number here:
 		// the content box has no padding or border, nothing scales it, and the

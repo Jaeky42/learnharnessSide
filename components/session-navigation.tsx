@@ -14,7 +14,7 @@ export function scrollSessionTarget(target: Range | HTMLElement, scope: HTMLElem
 	const node = "startContainer" in target ? target.startContainer : target;
 	const main = context?.scrollRef.current;
 	if (main?.contains(node)) context!.stopScroll();
-	// Fork (performance): a message the off-screen rule skipped is drawn before
+	// FORK (performance): a message the off-screen rule skipped is drawn before
 	// the passage in it is measured, and the jump is checked once more after
 	// the messages around it have their real heights (offscreen-target.ts).
 	revealOffscreenTarget(target, main ?? null, () => placeSessionTarget(target, node, scope, main));

@@ -486,7 +486,7 @@ function SessionsSidebar() {
 		try {
 			const res = await fetch("/api/chats", { cache: "no-store" });
 			const d = (await res.json()) as { chats: ChatListItem[] };
-			// Fork (performance): an equal list keeps the one on screen (no re-render).
+			// FORK (performance): an equal list keeps the one on screen (no re-render).
 			setChats((prev) => (prev && sameJsonValue(prev, d.chats) ? prev : d.chats));
 		} catch {
 			// a transient failure keeps the last snapshot

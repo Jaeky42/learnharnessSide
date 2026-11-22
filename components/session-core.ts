@@ -55,17 +55,17 @@ export interface SessionRecordSnapshot {
 	turnInFlight?: boolean;
 	turns?: TurnUsage[];
 	pricing?: SessionPricing;
-	/** Fork (performance): opaque; changes whenever the session's file changes. */
+	/** FORK (performance): opaque; changes whenever the session's file changes. */
 	stamp?: string;
 }
-/** Fork (performance): `GET /api/chats/<id>?only=turns`, the usage fields alone. */
+/** FORK (performance): `GET /api/chats/<id>?only=turns`, the usage fields alone. */
 export interface SessionUsageSnapshot {
 	turns?: TurnUsage[];
 	pricing?: SessionPricing;
 }
 export interface SessionRecordReadOptions {
 	adoption?: "replace" | "append" | "none";
-	/** Fork (performance): a replace adoption remembers the record's stamp as the
+	/** FORK (performance): a replace adoption remembers the record's stamp as the
 	 *  one this page shows (the caller also adopts the record's other fields). */
 	rememberStamp?: boolean;
 	signal?: AbortSignal;
@@ -80,7 +80,7 @@ export interface SessionRecordReadOptions {
 export interface PluginQuestionDraft { answer: PluginQuestionAnswerState; thinking: string; readingThinking: string }
 export type SessionStatus = "ready" | "submitted" | "streaming" | "error";
 
-/** Fork (performance): exact structural equality of two JSON values (what an
+/** FORK (performance): exact structural equality of two JSON values (what an
  *  API response parses to), so a refetch that changed nothing sets no state.
  *  Key order is ignored; an own `undefined` key differs from a missing one. */
 export function sameJsonValue(a: unknown, b: unknown): boolean {
@@ -100,7 +100,7 @@ export function sameJsonValue(a: unknown, b: unknown): boolean {
 	return true;
 }
 
-/** Fork (performance): what the sync catch-up does. An unchanged record is
+/** FORK (performance): what the sync catch-up does. An unchanged record is
  *  never downloaded again only because the usage figures haven't been read
  *  yet: they are read the cheap way (`readUsage`), then the owed-continuation
  *  check runs. A changed or unknown stamp, a failed check, or a usage read
@@ -335,7 +335,7 @@ export interface SessionModelOptions extends SessionModelDeps {
 	initialMessages: LhMessage[];
 	/** Retained, memory-only server failure when reopening a session. */
 	initialError?: string;
-	/** Fork (performance): the stamp of the record `initialMessages` came from. */
+	/** FORK (performance): the stamp of the record `initialMessages` came from. */
 	initialStamp?: string | null;
 	/** Fires on every state change (the hook re-renders). */
 	onChange?: () => void;
@@ -412,7 +412,7 @@ export class SessionModel {
 	/** Synchronous ready check for the gate (send/read mount logic). */
 	readyRef = true;
 
-	/** Fork (performance): the stamp of the record the page shows, with the
+	/** FORK (performance): the stamp of the record the page shows, with the
 	 *  state it was taken in. Any later change to that state (a stream, an
 	 *  append, another adoption, an error) makes the stamp unknown. */
 	private shownStamp: { stamp: string; base: LhMessage[]; tail: LhMessage[]; error: { message: string } | null; questionAvailability?: PluginQuestionAvailability; problemAvailability?: PluginProblemAvailability } | null = null;
@@ -443,7 +443,7 @@ export class SessionModel {
 		this.shownStamp = { stamp, base: this.base, tail: this.tail, error: this.errorValue, questionAvailability: this.pluginQuestionAvailability, problemAvailability: this.pluginProblemAvailability };
 	}
 
-	/** Fork (performance): the stamp of the record the page shows, or null when
+	/** FORK (performance): the stamp of the record the page shows, or null when
 	 *  it isn't known (the page changed since, or nothing was remembered). */
 	knownStamp(): string | null {
 		const shown = this.shownStamp;
@@ -455,13 +455,13 @@ export class SessionModel {
 		return shown.stamp;
 	}
 
-	/** Fork (performance): the canonical messages as they are now (the record the
+	/** FORK (performance): the canonical messages as they are now (the record the
 	 *  page shows when knownStamp() isn't null). */
 	canonicalNow(): readonly LhMessage[] {
 		return this.base;
 	}
 
-	/** Fork (performance): true only when the server's stamp for this session is
+	/** FORK (performance): true only when the server's stamp for this session is
 	 *  the one the page shows, and the page hasn't changed while asking. Any
 	 *  failure answers false (the caller then does the full read). */
 	async recordUnchanged(): Promise<boolean> {
@@ -477,7 +477,7 @@ export class SessionModel {
 		}
 	}
 
-	/** Fork (performance): the usage fields alone (`?only=turns`), under the same
+	/** FORK (performance): the usage fields alone (`?only=turns`), under the same
 	 *  staleness rule a non-adopting readRecord had: a read overtaken by a newer
 	 *  adoption, or by an action/stream epoch, returns undefined. */
 	async readUsage(options: { signal?: AbortSignal; isCurrent?: () => boolean } = {}): Promise<SessionUsageSnapshot | undefined> {
@@ -626,7 +626,7 @@ export class SessionModel {
 		} else if (mode === "replace") {
 			this.canonicalAcknowledged = Math.max(this.canonicalAcknowledged, ticket);
 			this.replaceMessages(record.messages, record.turnError, record.pluginQuestionAvailability, record.pluginProblemAvailability);
-			// Fork (performance): the page now shows exactly this record. Every
+			// FORK (performance): the page now shows exactly this record. Every
 			// other adoption changes the state the stamp was taken in, so it
 			// forgets the stamp by itself (knownStamp).
 			if (options.rememberStamp && typeof record.stamp === "string") this.rememberStamp(record.stamp);

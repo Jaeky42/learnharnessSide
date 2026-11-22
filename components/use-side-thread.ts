@@ -59,7 +59,7 @@ export function sideThreadReducer(state: SideThreadState | null, action: SideThr
 				...(action.text !== undefined ? { streamText: action.text } : {}),
 			}),
 		};
-		// Fork (performance): a snapshot that changes nothing keeps the state.
+		// FORK (performance): a snapshot that changes nothing keeps the state.
 		return action.type === "snapshot" && sameState(state, next) ? state : next;
 	}
 	if (action.type === "start") return { ...state, answering: true, streamText: "", error: undefined, failedQuestion: undefined };
@@ -68,7 +68,7 @@ export function sideThreadReducer(state: SideThreadState | null, action: SideThr
 	return { ...state, answering: false, error: action.error, failedQuestion: action.question };
 }
 
-/** Fork (performance): the same fields with the same values (identity for objects). */
+/** FORK (performance): the same fields with the same values (identity for objects). */
 function sameState(a: SideThreadState, b: SideThreadState): boolean {
 	const keys = new Set([...Object.keys(a), ...Object.keys(b)]) as Set<keyof SideThreadState>;
 	for (const key of keys) if (!Object.is(a[key], b[key]) || Object.hasOwn(a, key) !== Object.hasOwn(b, key)) return false;
@@ -77,7 +77,7 @@ function sameState(a: SideThreadState, b: SideThreadState): boolean {
 
 export function useSideThread(chatId: string, messages: readonly LhMessage[], getWorking?: () => string) {
 	const [state, dispatchToReact] = useReducer(sideThreadReducer, null);
-	// Fork (performance): the reducer's state with every action applied, also
+	// FORK (performance): the reducer's state with every action applied, also
 	// those React hasn't rendered yet, so a refresh can tell that its snapshot
 	// would change nothing and not dispatch it (a dispatch always re-rendered
 	// the lesson, even when the reducer kept the state).
@@ -86,7 +86,7 @@ export function useSideThread(chatId: string, messages: readonly LhMessage[], ge
 		reduced.current = sideThreadReducer(reduced.current, action);
 		dispatchToReact(action);
 	}, []);
-	// Fork (performance): the last list read, so an equal one sets no state.
+	// FORK (performance): the last list read, so an equal one sets no state.
 	const lastRead = useRef<{ chatId: string; text: string; revision: number; payload: { threads: SideChatThread[]; answering: Record<string, string> } } | null>(null);
 	const [threads, setThreads] = useState<SideChatThread[]>([]);
 	const stateRef = useRef(state); stateRef.current = state;
@@ -118,7 +118,7 @@ export function useSideThread(chatId: string, messages: readonly LhMessage[], ge
 			if (!response.ok) return;
 			const text = await response.text();
 			if (request !== refreshSerial.current || before !== revision.current) return;
-			// Fork (performance): the same text, with nothing adopted since it was
+			// FORK (performance): the same text, with nothing adopted since it was
 			// set (adopt bumps revision), is the list on screen: keep it, and its
 			// objects, so the snapshot below can be seen to change nothing.
 			const last = lastRead.current;
