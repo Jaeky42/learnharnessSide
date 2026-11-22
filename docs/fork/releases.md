@@ -22,7 +22,7 @@
 - Pushes that only change `CLAUDE.md` or `docs/**` don't run the workflow.
 - **A dry run:** started by hand (`workflow_dispatch`) on any branch, the workflow does everything except the last step. It tests, builds and attaches the installer to the run, and publishes no release. Used to check the cloud sync branch on Windows before its merge.
 - `LH_BUILD_VERSION` / `LH_BUILD_HOMEPAGE` (next.config.ts) make Settings show the stamped version and link release notes to this fork.
-- To pick up upstream: rebase `side-tutor` onto the new upstream release and push.
+- To pick up upstream: merge the new upstream release into the fork's history (as `git merge v0.6.0` was, on `claude/upstream-0.6.0`), then fast-forward both release branches to that commit, with the owner's approval. Never rebase a published release branch: they only ever move by fast-forward.
 
 ## Which branch feeds what
 
@@ -36,16 +36,16 @@
 
 - **Version rule:**
   - The desktop and server exchange a sync protocol version on every sync.
-  - If they don't match, sync **pauses**: the desktop keeps working locally and shows "Update the server to continue syncing".
+  - If they don't match, sync **pauses**: the desktop keeps working locally and shows "Update the server to continue syncing" (or "Update LearnHarness to continue syncing" when the app is the older side).
   - Releases that change a data format are marked, so they're never applied to only one side.
 
-Protocol 2 means both sides must be updated, or sync pauses (nothing is discarded while it is paused). The same commit goes to both branches, the server's first:
+A release that raises the sync protocol means both sides must be updated, or sync pauses (nothing is discarded while it is paused). The same commit goes to both branches, the server's first. The steps, as written for protocol 2 (the upstream 0.6.0 merge):
 
 1. The official LearnHarness app stays closed until the end: it shares the data folder, and once updated it writes format 2 without knowing about sync or held sessions.
 2. In Side Tutor: Settings → Cloud → Sync now, until "Up to date". No reply or helper left running.
 3. A copy of the PC's data folder and of the server's data, by hand. Format 2 is one-way, and the automatic backup was made only once, at the first sync.
-4. Push to the server's branch (owner's approval). The image builds; the owner updates the server and checks the site from the phone. Meanwhile the PC shows SYNC PAUSED and "Update LearnHarness to continue syncing". No Take over of a PC-held session during this gap.
+4. Push to the server's branch (owner's approval). The image builds; the owner updates the server and checks the site from the phone. Meanwhile the PC shows SYNC PAUSED and "Update LearnHarness to continue syncing". Don't continue a session the PC holds on another device during this gap (since seamless sessions there is no Take over: typing there moves the session).
 5. Push the same commit to `side-tutor` (owner's approval). The release builds; the app installs it at its next start. Settings → Cloud reads "Up to date" again.
 6. Plugins are off by default and per device: switch the same ones on in both places, from a computer.
 
-**Protocol 3 (Flashcards sync)** means the same: both sides must be updated, the server first, or all sync pauses, with nothing discarded. The steps above apply again as they stand. The round changes no file format (the chat record stays at 2, Flashcards' file at 1); only the protocol rises. Step 3's copy by hand covers Flashcards too; its own automatic backup is made once, right before each side's first Flashcards exchange. Steps 4 and 5 are done (both were fast-forwards); what is left is the owner's: the copies by hand, the server's update, then the PC's.
+**Protocol 3 (Flashcards sync)** means the same: both sides must be updated, the server first, or all sync pauses, with nothing discarded. The steps above apply again as they stand. The round changes no file format (the chat record stays at 2, Flashcards' file at 1); only the protocol rises. Step 3's copy by hand covers Flashcards too; its own automatic backup is made once, right before each side's first Flashcards exchange. Steps 4 and 5 were done (both were fast-forwards), and the owner has updated the server and the PC since: later rounds ran on both (the server's switch-over to several accounts: "everything works great"; `docs/fork/history/ship-log.md`).

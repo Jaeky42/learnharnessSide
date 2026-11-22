@@ -25,11 +25,11 @@
   - a cover in the bubble's own grey, with its icon, lies over the window and fades as the shape opens, so the bubble turns into the window. The owner saw two earlier demos and named their faults: one moved in two steps ("choppy"), one hid the contents first, which left only the dark middle on screen ("turns black");
   - it runs from wherever the bubble is to wherever the window was left. Only `transform` and `opacity` move, so nothing is laid out again on the way;
   - while it folds back the window is still on screen; the bubble appears when it has folded. An unseen stand-in keeps the bubble's place while the window is open, so the end point can be measured (`side-tutor-bubble-place`);
-  - **not animated:** with reduced motion (at once, as before); when a session becomes held (the window closes to the greyed bubble at once); and **on a phone, where the sheet's own slide-up is unchanged** (owner: "do not change the phone animation yet"). The owner has since asked for the phone's closing slide: the sheet now slides down when minimized and swipes down from its handle and top bar ("On a phone: swipe down to minimize" below); its opening is still unchanged;
+  - **not animated:** with reduced motion (at once, as before); and **on a phone, where the sheet's own slide-up is unchanged** (owner: "do not change the phone animation yet"). The owner has since asked for the phone's closing slide: the sheet now slides down when minimized and swipes down from its handle and top bar ("On a phone: swipe down to minimize" below); its opening is still unchanged;
   - `morphStart` and the timings are in `components/side-tutor-window.ts`; the run is in `components/side-tutor.tsx`.
 - **It stays above the Drawing Pad** (owner's ask; any plugin surface that covers the lesson). Upstream's pad is opaque and covers the lesson and the dock, and it covered the Tutor's window and bubble with them.
   - The open window keeps its place and is drawn one layer above the surface. Drawing beside it works, and what is typed in it stays.
-  - The bubble can't stay in the dock (the pad covers the dock and makes it inert), so while a surface is open it sits at the lesson's bottom right, 16 px in and 20 px up, as on a held session. That place was chosen while building, from the held-session rule, for the owner to review: under the top bar it would sit on the pad's own ✕.
+  - The bubble can't stay in the dock (the pad covers the dock and makes it inert), so while a surface is open it sits at the lesson's bottom right, 16 px in and 20 px up. That place was chosen while building, for the owner to review: under the top bar it would sit on the pad's own ✕.
   - Esc with the cursor in the Tutor minimizes the Tutor only; the next Esc closes the pad.
   - A menu opened from the surface still covers the Tutor.
   - **How:** upstream's `useSurfaceChromeStyle` (its hook for page chrome that floats over a plugin surface) gives the surface's rank; `components/chat.tsx` passes it to the Tutor as `above`.
@@ -129,7 +129,7 @@
   - **The − button and a tap on the dimmed lesson slide it away the same way** (they closed it at once).
   - **The slide:** only `transform` and the dim's `opacity` move; `max(130, 260 × the share of the height still to travel)` ms, the morph's easing (`cubic-bezier(0.2, 0.8, 0.2, 1)`). The sheet stays mounted while it goes; the bubble comes back when it is down, as on a computer when the window has folded.
   - **Unchanged:** opening (the 200 ms slide-up), and an answer being written carries on after minimizing as before.
-  - **At once:** with reduced motion (a swipe still follows the finger and minimizes, with no slide), and when a session becomes held, also in the middle of a slide (it then ends minimized).
+  - **At once:** with reduced motion (a swipe still follows the finger and minimizes, with no slide).
   - **Touch rules** (the iPhone's, "Touch and typing" in `docs/cloud-sync.md`): decided on the first movement, whose default is prevented from then on; the release speed comes from `releaseVelocity`, nothing if the finger had stopped; a second finger, or a cancelled touch, springs it back. A tap on the bar that doesn't move does nothing. A swipe that starts during the opening slide picks the sheet up where that slide had reached (the CSS slide is cancelled), so nothing jumps. A touch while it slides away does nothing.
   - With the keyboard up, the typing box is blurred when the slide away starts (every way of minimizing on a phone, with reduced motion too), so the keyboard closes as the sheet slides down, and the app takes its full height back as for any text box that loses focus ("Closing the keyboard" in `docs/cloud-sync.md`). It used to go only when the box unmounted at the end; WebKit sends no blur for a removed box (whatwg/html#1569), so the app kept believing a box had focus. Found by a reviewer; `slideAway` in `components/phone/tutor-sheet-swipe.ts`.
   - `components/phone/tutor-sheet-swipe.ts` (the rules and the touch driver); `components/side-tutor.tsx` hooks it to the sheet, the dim and every way of minimizing.
@@ -143,7 +143,7 @@
 **On a phone: swipe down to minimize**
 
 - **Read while building, for the owner to review:**
-  - the sheet's two other ways of closing on a session that isn't held slide away too: a tap on a quoted passage ("Show in the lesson", which closes the sheet first) and Esc from a connected keyboard;
+  - the sheet's two other ways of closing slide away too: a tap on a quoted passage ("Show in the lesson", which closes the sheet first) and Esc from a connected keyboard;
   - asked to open while it is still sliding away (the lesson's Ask is the only way left to do that), it springs back up and stays open;
   - a cancelled touch (`touchcancel`) springs back rather than deciding as a release would.
 - **Only the owner's iPhone can confirm the feel:** Chromium has no rubber band, no iOS keyboard and no 120 fps touch timing.

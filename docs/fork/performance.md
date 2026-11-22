@@ -23,6 +23,8 @@ Measured on a production build in headless Chromium, against synthetic sessions 
 3. **Reasoning signatures are left out of what the browser receives** (`thinkingSignature` on thinking blocks: about 24% of a record's bytes). The stored file, sync and the model replay are unchanged. A plugin's front end, which is handed the lesson's messages, no longer sees them.
 4. **The browser may skip drawing off-screen messages**, tried in the app with a temporary off switch (the owner's pick of three ways to try it). After trying it on the iPhone and the iPad the owner kept the rule and had the switch removed.
 
+**The owner's word after trying it: "the performance is fine, id only want changes that have zero behavior impact".** So nothing in "Not built (the audit's other recommendations)" below is asked for, and anything from that list that changes what the app does or shows is off the table unless the owner raises it: opening with only the recent part, pictures decoded lazily (a picture could show a moment late), and the editor and the Tutor loaded on demand (a first opening could wait). With no visible change at all: the per-message component (a large edit of upstream's lesson screen), the sync upload's duplicate work, the graph layout off the request thread and the activity feed's scan (all three on the server).
+
 ## What was built
 
 ### Step 1 (no change in what the app does or shows)
@@ -37,7 +39,7 @@ Measured on a production build in headless Chromium, against synthetic sessions 
   - On a skip it still runs the owed-continuation check.
   - **Usage not read yet is no reason for the full read** (`catchUpRead` in `components/session-core.ts`). On a slow device the catch-up fired before the mount's usage read had landed, and downloaded the whole record (4 of 4 runs at 4×, 950 messages). Now an unchanged stamp waits for the usage read under way, or starts one (`?only=turns`), then runs the continuation check. A usage read that leaves no figures still ends in the full read. The read after a turn settles always starts afresh; only the catch-up waits for one under way. Unit-tested; not measured again in a browser.
 - **No state change for the same data**: the jobs list, the Tutor's threads, the session list and the usage figures (`sameJsonValue`). The jobs fetch still runs its settle detection every time.
-- **The lesson reads only whether its own session is held** (`useSessionHeld` in `components/cloud/cloud-state.tsx`; the state lives in a small store read through `useSyncExternalStore`). `useCloud()` and `useSyncTrouble()` behave as before for the strip, the chip, the session list and the discard box.
+- **The lesson no longer reads the whole sync status** (the state lives in a small store read through `useSyncExternalStore`, `components/cloud/cloud-state.tsx`). This step had the lesson read only whether its own session is held (`useSessionHeld`); since seamless sessions the lesson screen reads nothing about it while it renders (a move reads the cloud state's `held` only when it starts, `components/cloud/session-move.ts`), and `useSessionHeld` stays in `cloud-state.tsx`, tested. `useCloud()` and `useSyncTrouble()` behave as before for the floating box, the chip and the discard box.
 - **Less to the browser**: `withoutThinkingSignatures` (`src/core/browser-record.ts`) on the full GET and on the page's `initialMessages`. It builds new objects only for the blocks that carry the field.
 - **The session list** (`src/store/chats.ts`): each file's summary is remembered until its stat changes. A failed read is never remembered.
 - **The stale-job sweep** (`src/server/jobs.ts`, `src/store/jobs.ts`): no session parse per job (the outer `listChats` loop already proves the session exists); the job store remembers which session a job file belongs to and reads only that session's files.
@@ -49,9 +51,9 @@ Measured on a production build in headless Chromium, against synthetic sessions 
 #### Rulings made while building (for the owner to review)
 
 - **A picture attached to a practice "thinking" note leaves no trace in a summary**, as before. The marker was decided for two places; this third one was left as it is.
-- **The off-screen rule is narrower than the one the audit measured** (which was every direct child of the transcript). Its gain was measured again; see "Measured".
+- **The off-screen rule is narrower than the one the audit measured** (which was every direct child of the transcript). Its gain was measured again; see "Measured" in `docs/fork/history/performance.md`.
 - **The jump fix does more than the plan's sentence** ("draw the target message, measure, check once a frame later"): it also draws the skipped messages around the target, and waits for the layout to settle (up to 20 frames) before its one check. Both came from the browser runs.
-- **700 px, not 1,000 px, for the assistant's messages on a phone** (above). The plan named 1,000.
+- **700 px, not 1,000 px, for the assistant's messages on a phone** (under "The off-screen rule" below). The plan named 1,000.
 - **The glide's rule is shaped differently from the description the owner approved** ("a shift that comes together with the lesson's height changing by the same amount"). Recorded frame by frame, the shift is a rise, and what ended the glide was the smooth scroll's return from it a frame or two later, with the height unchanged. So the rule has a 100 ms allowance after a rise and a "stopped dead" check; the intent is the same. The owner has been told.
 - **No diagram cache.** One was built and removed after review: mermaid queues renders but applies its configuration at once, so a quick theme switch could leave a chart drawn in the wrong theme in the cache. `components/mermaid-render.ts` is upstream's, unchanged.
 - **Whole parsed sessions are not kept in the server's memory between requests.** It would save the most parsing, but any code that modifies a session it was handed would corrupt the shared copy.
@@ -68,6 +70,7 @@ Measured on a production build in headless Chromium, against synthetic sessions 
 - **Not** on phase dividers, cards and placeholders (a message-sized estimate would inflate the scrollbar), and the dock spacer is a sibling of the column.
 - On by default on every device, the desktop app included.
 - **No switch.** The trial had one (`?offscreen=off` in the address set `data-lh-offscreen="off"` on `<html>` from the head script in `app/layout.tsx`, and every rule sat under `html:not([data-lh-offscreen="off"])`). It is removed: the head script is upstream's line again, the rules name the messages directly, and the jump helper no longer looks for the attribute. To compare with the rule off in a browser run, inject a stylesheet that sets `content-visibility: visible` on the two selectors.
+
 ### Jumps into a message that isn't drawn
 
 - **The fault** (found by the browser checks of the first build): inside a skipped message a passage measures as zeros (`Range.getBoundingClientRect()`), so upstream's `scrollSessionTarget` scrolled nowhere near it. The app's Find showed the match in 1 of 14 steps, the Tutor's "Show in the lesson" landed in 1 of 3 tries. A link to a message (the hash) was fine: the message's own box has its estimate.
@@ -97,7 +100,7 @@ Measured on a production build in headless Chromium, against synthetic sessions 
 - The graph layout off the request thread (0.35 s of blocked server per extraction batch at 300 concepts).
 - The activity feed's scan (every session, then every job file per session).
 
-**The owner's word after trying it: "the performance is fine, id only want changes that have zero behavior impact".** So nothing below is asked for, and anything from this list that changes what the app does or shows is off the table unless the owner raises it: opening with only the recent part, pictures decoded lazily (a picture could show a moment late), and the editor and the Tutor loaded on demand (a first opening could wait). With no visible change at all: the per-message component (a large edit of upstream's lesson screen), the sync upload's duplicate work, the graph layout off the request thread and the activity feed's scan (all three on the server).
+The owner's word on this list ("zero behavior impact") is under "The owner's decisions" above.
 
 **Decisions still the owner's:** opening a long lesson with only its recent part; syncing only what changed (protocol 4, server first); letting a helper's progress lines wait before a sync (the 2-second rule); pictures as their own files and old history archived (a stored format that syncs); installing the touch helpers only while needed; serving pictures by address; which pictures the model keeps seeing.
 

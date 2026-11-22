@@ -20,7 +20,7 @@ Workers' own measurements on the test library (Node, not a browser):
 | The same at 2,850 messages | 1,141–1,218 ms | 11 ms, then 0.1 ms |
 | `computeBacklinks`, 1,000 notes × 4 links | about 1 s | 11 ms |
 
-In a browser, after the build (headless Chromium, software rendering, a production build, 950 messages; medians of 3 where repeated; machine noise about ±30%, and the "before" column is the audit's, taken on a busier machine). "Off" is step 1 alone (`?offscreen=off`), "on" adds the off-screen rule as first built (a flat 600 px estimate).
+In a browser, after the build (headless Chromium, software rendering, a production build, 950 messages; medians of 3 where repeated; machine noise about ±30%, and the "before" column is the audit's, taken on a busier machine). "Off" is step 1 alone (`?offscreen=off`), "on" adds the off-screen rule as first built (a flat 600 px estimate). That switch has since been removed; to compare with the rule off now, see "No switch" under "The off-screen rule" in `docs/fork/performance.md`.
 
 | | before | off | on |
 |---|---|---|---|

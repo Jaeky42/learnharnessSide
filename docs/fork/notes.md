@@ -59,6 +59,7 @@ The learner's own notes beside the lesson, stored as Markdown in their Obsidian 
   - `notesMessageMs` in `components/notes/notes-drawer.tsx`.
 - **Editor:** CodeMirror for editing (sections fold while typing), plus a Read view with formatted math, folding, clickable links and images. The editor follows the chosen theme's light or dark mode live (`editorTheme(mode)`), and the drawer's colours are theme tokens.
 - **Where it appears:** both **teaching and practice** sessions.
+- **On a phone:** the drawer fills the screen and shows the list, then the note. Rows open their menu on press and hold; holding and then moving the finger drags the row into a folder. See "Phone layouts" in `docs/cloud-sync.md`.
 - **On the cloud server:** the vault is connected in Settings → Obsidian instead of by a folder path, and the drawer says when the notes aren't syncing with Obsidian. See "Obsidian vault on the VPS" in `docs/cloud-sync.md`. The desktop app's drawer is unchanged.
 - **Extras:**
   - Math in Read view.
@@ -67,17 +68,16 @@ The learner's own notes beside the lesson, stored as Markdown in their Obsidian 
   - **Vault offline:** edits are held in `<data>/notes/pending/` and written when the vault is back. A note changed meanwhile isn't overwritten; the offline version becomes "(offline copy)".
 - **Linked from:** the drawer lists the notes that link to the open note.
 - **Deleting a session** keeps its notes and drops only its home-folder record.
+- **Not built (yet):**
+  - Renaming notes inside the drawer (rename in Obsidian, which updates links).
+  - Embedding one note in another (`![[note]]`).
+  - Blocking vault files from the existing notes import into the graph.
 
 ### Rulings, limits and open items
 
 #### Added without being asked (after Phase 4)
 
 - **Wording and behaviour added without being asked:** the message `Deleted “Electricity”.` after a delete, and the message line showing on the phone's list screen. The owner has used both and asked only for the messages to go sooner, so they stand unless the owner says otherwise.
-
-- **Not built (yet):**
-  - Renaming notes inside the drawer (rename in Obsidian, which updates links).
-  - Embedding one note in another (`![[note]]`).
-  - Blocking vault files from the existing notes import into the graph.
 
 ## Behaviour details
 
@@ -106,13 +106,7 @@ The learner's own notes beside the lesson, stored as Markdown in their Obsidian 
   - **The message line** ("Moved …", "Deleted …", and refusals such as a name that's already taken in that folder) also shows at the bottom of the list screen. Its usual place is in the note half, which the list screen hides, so on a phone those messages were never seen. Found in the browser run of the drag and added without being asked, for the owner to review.
   - A phone always opens the drawer closed and doesn't remember it, so the desktop's saved state is untouched.
 
-- **On a phone:** the drawer fills the screen and shows the list, then the note. Rows open their menu on press and hold; holding and then moving the finger drags the row into a folder. See "Phone layouts" in `docs/cloud-sync.md`.
-
 ## Code map and tests
-
-### The dragging's numbers
-
-- The numbers to tune, should that change, are at the top of `row-drag.ts` (`EDGE_BAND`, `INTO_DWELL_MS`, `LEVEL_STICK`) and `row-drag-dom.ts` (`PART_MS`, `SETTLE_MS`, `SLIDE_MS`, `INTO_TUCK`).
 
 - `src/core/notes.ts`: pure logic (names and paths, properties, sections, links and resolution, backlinks, link suggestions, split and merge planning, attachment folder), exported through the core barrel.
 - `src/store/notes.ts`: vault I/O, the tree with an mtime cache, save with a conflict check, create, move, delete, split, merge, extract, undo, pending edits, attachments and asset lookup, and session home folders. Dynamic fs paths carry `/* turbopackIgnore: true */`.
@@ -134,3 +128,7 @@ The learner's own notes beside the lesson, stored as Markdown in their Obsidian 
   - `notes-api.ts`.
 - **Wiring:** `components/chat.tsx` (Notes chip and drawer mount; `landInEditor` when the shortcut opened it), `src/core/keyboard.ts` (`toggle-notes`), and `src/server/chats.ts` (session deletion hook).
 - **Tests:** `tests/notes-core.test.ts`, `notes-store.test.ts`, `notes-privacy.test.ts`, `notes-ui.test.tsx`; the dragging rules: `tests/notes-row-drag.test.ts`; the phone's hold-then-move touch rules: `tests/phone-hold-drag.test.ts`.
+
+### The dragging's numbers
+
+- The numbers to tune, should that change, are at the top of `row-drag.ts` (`EDGE_BAND`, `INTO_DWELL_MS`, `LEVEL_STICK`) and `row-drag-dom.ts` (`PART_MS`, `SETTLE_MS`, `SLIDE_MS`, `INTO_TUCK`).
