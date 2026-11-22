@@ -13,6 +13,10 @@
 - **A Dictate that fails shows its reason**
   - **In the browser** (iPhone size, the microphone refused): the line above the message box on all three screens with the bottom block's box unchanged, gone after 5.0 s, the mic still in the error colour after it; on the lesson the line ends at x 227 and the bubble starts at x 322; the Tutor's sheet showed the reason in its own line and the lesson's line stayed away; at 1280 px no line, the button's text as before.
 
+**Settings on a phone: the bullet as it read before the docs cleanup** (its parenthetical traced the list's earlier changes; the current rule is stated once under "Screens" in `docs/fork/phone-and-tablet.md`)
+
+- **Settings:** the desktop's floating panel, centred (90% wide, at most 85% of the visible height); the owner preferred it to a full-screen page. Inside: the section list first, then the section with a back arrow. It opens with the desktop's fade-and-grow and fades back out on close (150ms; closing waits for the fade). The Keyboard section is hidden on phones. (Since the upstream 0.6.0 merge the plugin rows were left out too; with the phone plugins round Core plugins came back, and the phone-ready plugins' pages open from it. Since the owner's ask that the list was "very cramped", Obsidian is a group inside Cloud on a phone, with no row of its own: "Settings on a phone" and "A less cramped list" under "Plugins on a phone" below.)
+
 ## Touch and typing
 
 ### Touch and typing: test pages, browser runs and earlier attempts
@@ -43,6 +47,12 @@
 - **A tap on the folded question ends at the bottom, open**
   - **What shipped first** (with the touch batch): the tap opened the question at once and slid the lesson down with `use-stick-to-bottom`'s spring. That library ends its slide at any upward scroll, and on an iPhone such scrolls come without a new touch (Safari's own momentum of a lesson still moving, or its late reports), so the question was let go and folded again. The fix held it open and slid again a frame after each such ending (`holdReveal`, up to 4 s), stopped the dock's own throw first, and let go for a new touch, a wheel, a mouse press on the lesson or a scrolling key. In Chromium the fold-back could only be reproduced with stand-ins for Safari's scroll reports (open at 116 ms, folded at 236 ms, 9,700 px from the bottom).
   - **The owner's verdict on the iPhone:** "when i click the question on the bottom while im scrolling, it pulls up the question, i see the content still scrolling up, then it jitters a bunch and finally pulls down. i wanted it to just smoothly pull all the way down the page and into the question." Safari's momentum kept going after the tap on the dock (a sibling of the scroller), and the slide and the slide-again loop fought it until it died.
+
+  - *The two bullets below are the glide's text as it read before the docs cleanup: the teach check's reading was overtaken by "Scrolling into a check" (a stopped glide no longer leaves a check that scrolling can't open), and "Removed" records what the first build had.*
+  - **The teach check's "Open" away from the bottom (a reading for the owner's review):** the same glide, and the check opens on arrival. It counts as revealed only on arrival (`openOnArrivalRef` in `chat.tsx`), so the invitation stays on screen during the glide, and a glide the learner stops leaves it as it was: reaching the bottom later by hand doesn't open it, as for any check that hasn't been opened. (That last part no longer holds: a waiting check now has its blank space under the lesson, the lesson rests at the end of its text, and reaching the bottom by hand opens it; a stopped glide still leaves it folded where it stopped. "Scrolling into a check: the blank space" in `docs/upstream-0.6.0.md`. A first attempt, release 0.6.30, opened it at the end of the text and was reverted.)
+
+  - **Removed:** the hold-and-slide-again loop (`revealToBottom`, `holdReveal`, `revealOver`, `REVEAL_HOLD_MS`, `REVEAL_BOTTOM_PX`) and its tests; `suppressFoldDuringReveal` in `chat.tsx` is upstream's again (one slide, a 2-second hold). The mouse and key rule stays, now to stop a glide.
+
   - **In the browser** (a production build at iPhone size, real touch through CDP; before is the shipped reveal):
     - a tap at rest 9,400 px up: before, the question opened at the tap (at 8,850 px) and slid open for 64 frames; now one smooth scroll, folded on every frame of the way, open at 15 px after 1.55 s, at the bottom (1 px), never moving up;
     - a tap right after a throw on the bar: before, opened at 9,290 px; now the same as at rest (one glide, open on arrival at 14 px);
@@ -62,6 +72,10 @@
     - a lesson that doesn't grow: one smooth scroll, arrival at 1,521 to 1,534 ms in all three builds;
     - a glide the browser ends 1,500 px short (no growth): the retry rule in all three: 10 still frames, a second glide, arrival at 2,303 to 2,311 ms;
     - the question folded on the way and opened on arrival in every case.
+
+**The glide and the browser's shift (item 6 of the glide's design): what was checked**
+
+- **In the browser after it** (a production build at iPhone size, 950 messages, real touch): 60 of 60 glides arrived and opened with the off-screen rule on (30 from the bar, 30 from a check's Open), 20 of 20 with it off. Five of the 60 had a one-frame move up of 155–1,694 px; none ended the glide (replayed through the old rule, all five would have). A touch on the lesson, a drag on the dock and a jump to a message during the glide each ended it folded, 3 of 3, and it stayed.
 
 ## How it's built
 
@@ -85,3 +99,9 @@
 - **Tests, typecheck, lint** (on the branch after the merge of `side-tutor`, before the sync fixes): typecheck clean; lint clean apart from the one existing warning; the full suite without `tests/safe-fetch.test.ts`: 5,997 tests, 5,988 pass, 4 skipped, 5 fail. The 5 are the four that fail in the development sandbox on untouched code ("Development notes from the merge" in `docs/upstream-0.6.0.md`) and one plugin SDK type test that runs out of its 30-second limit in a full run and passes alone. The plugin's own tests: 204 of 204.
 - **The computer:** compared element by element at 1280 and 700 px against the build before the change: identical.
 - **A fresh reviewer** read the phone diff and found two real bugs (the rename box stuck open after a hold on, or a slide off, its ✕; a hold inside the rename box opening the menu and saving) and smaller items. All are fixed.
+
+**Settings on a phone: what the topic file used to say was replaced** (the plugin page rows, retired by the owner's "very cramped" ask; the locked switch's old look, retired by the "Disabled" switch)
+
+- **Replaced:** the locked switch used to show whether the plugin was on, with upstream's hint ("Enabled", "Saving…", "Error", "Loading…").
+
+- **Replaced** (owner's ask, after the round shipped: "this settings page is getting very cramped on my phone"): the list had a **Flashcards** and a **Rich code blocks** row after Core plugins, each while its plugin was on. Their pages are reached from their ⚙ on Core plugins instead.
