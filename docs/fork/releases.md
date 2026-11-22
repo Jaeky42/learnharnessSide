@@ -22,7 +22,7 @@
 - Pushes that only change `CLAUDE.md` or `docs/**` don't run the workflow.
 - **A dry run:** started by hand (`workflow_dispatch`) on any branch, the workflow does everything except the last step. It tests, builds and attaches the installer to the run, and publishes no release. Used to check the cloud sync branch on Windows before its merge.
 - `LH_BUILD_VERSION` / `LH_BUILD_HOMEPAGE` (next.config.ts) make Settings show the stamped version and link release notes to this fork.
-- To pick up upstream: merge the new upstream release into the fork's history (as `git merge v0.6.0` was, on `claude/upstream-0.6.0`), then fast-forward both release branches to that commit, with the owner's approval. Never rebase a published release branch: they only ever move by fast-forward.
+- To pick up upstream: merge the new upstream release into the fork's history (as `git merge v0.6.0` was, on `claude/upstream-0.6.0`), then fast-forward both release branches to that commit, with the owner's approval. So far both release branches have only ever moved by fast-forward.
 
 ## Which branch feeds what
 
@@ -48,4 +48,4 @@ A release that raises the sync protocol means both sides must be updated, or syn
 5. Push the same commit to `side-tutor` (owner's approval). The release builds; the app installs it at its next start. Settings → Cloud reads "Up to date" again.
 6. Plugins are off by default and per device: switch the same ones on in both places, from a computer.
 
-**Protocol 3 (Flashcards sync)** means the same: both sides must be updated, the server first, or all sync pauses, with nothing discarded. The steps above apply again as they stand. The round changes no file format (the chat record stays at 2, Flashcards' file at 1); only the protocol rises. Step 3's copy by hand covers Flashcards too; its own automatic backup is made once, right before each side's first Flashcards exchange. Steps 4 and 5 were done (both were fast-forwards), and the owner has updated the server and the PC since: later rounds ran on both (the server's switch-over to several accounts: "everything works great"; `docs/fork/history/ship-log.md`).
+**Protocol 3 (Flashcards sync)** means the same: both sides must be updated, the server first, or all sync pauses, with nothing discarded. The steps above apply again as they stand. The round changes no file format (the chat record stays at 2, Flashcards' file at 1); only the protocol rises. Step 3's copy by hand covers Flashcards too; its own automatic backup is made once, right before each side's first Flashcards exchange. Steps 4 and 5 were done (both were fast-forwards), and the server has been updated since (the switch-over to several accounts: "everything works great"; `docs/fork/history/ship-log.md`). The PC updates itself at its next start; the docs record no word from the owner on that update by itself.

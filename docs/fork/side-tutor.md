@@ -29,7 +29,7 @@
   - `morphStart` and the timings are in `components/side-tutor-window.ts`; the run is in `components/side-tutor.tsx`.
 - **It stays above the Drawing Pad** (owner's ask; any plugin surface that covers the lesson). Upstream's pad is opaque and covers the lesson and the dock, and it covered the Tutor's window and bubble with them.
   - The open window keeps its place and is drawn one layer above the surface. Drawing beside it works, and what is typed in it stays.
-  - The bubble can't stay in the dock (the pad covers the dock and makes it inert), so while a surface is open it sits at the lesson's bottom right, 16 px in and 20 px up. That place was chosen while building, for the owner to review: under the top bar it would sit on the pad's own ✕.
+  - The bubble can't stay in the dock (the pad covers the dock and makes it inert), so while a surface is open it sits at the lesson's bottom right, 16 px in and 20 px up. That place was chosen while building, from the held-session rule (since removed with seamless sessions; the place stayed), for the owner to review: under the top bar it would sit on the pad's own ✕.
   - Esc with the cursor in the Tutor minimizes the Tutor only; the next Esc closes the pad.
   - A menu opened from the surface still covers the Tutor.
   - **How:** upstream's `useSurfaceChromeStyle` (its hook for page chrome that floats over a plugin surface) gives the surface's rank; `components/chat.tsx` passes it to the Tutor as `above`.
