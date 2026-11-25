@@ -111,3 +111,45 @@ test("an account that does not offer them does not get them", async () => {
 	await offer([{ id: BASE, name: "GPT-6.1 Sol" }]);
 	assert.deepEqual(chatGPTModels().map((m) => m.id), [BASE]);
 });
+
+// --- through refreshConnectionCatalog, and the remote overlay --------------------
+test("refreshConnectionCatalog hands the bridge the bundled list plus the two extras, once each, and no overlay-only id", async () => {
+	const { setModelCatalogOverlay } = await import("../src/agent/models.ts");
+	const { refreshConnectionCatalog } = await import("../src/server/model-catalog.ts");
+	const overlayOnly = "gpt-9-overlay-only";
+	const sol61 = base();
+	setModelCatalogOverlay(new Map([["openai", [
+		{ ...structuredClone(sol61), id: overlayOnly, name: "Overlay only" },
+		{ ...structuredClone(sol61), id: ASTRA, name: "Overlay Astra" },
+	]]]));
+	try {
+		epoch++;
+		const refresh = refreshConnectionCatalog("chatgpt");
+		await new Promise((r) => setImmediate(r));
+		const request = pending.at(-1);
+		const models = [BASE, ASTRA, SOL, overlayOnly].map((id) => ({ id, name: id }));
+		ipc({ channel: "lh:chatgpt", id: request.id, op: request.op, ok: true, value: { epoch, authorityRevision: 1, revision: ++revision, status: status("A"), accountId: "A", models } });
+		await refresh;
+		const ids = chatGPTModels().map((m) => m.id);
+		assert.deepEqual(ids, [BASE, ASTRA, SOL]);
+	} finally {
+		setModelCatalogOverlay(new Map());
+	}
+});
+
+test("an overlay row with a GPT-6.2 id yields that id once under an API key", async () => {
+	const { setModelCatalogOverlay } = await import("../src/agent/models.ts");
+	const sol61 = base();
+	setModelCatalogOverlay(new Map([["openai", [{ ...structuredClone(sol61), id: ASTRA, name: "Overlay Astra" }]]]));
+	try {
+		for (const list of [piModels().getModels("openai"), piModels().getAllModels("openai")]) {
+			assert.equal(list.filter((m) => m.id === ASTRA).length, 1);
+			assert.equal(list.filter((m) => m.id === SOL).length, 1);
+		}
+		const ids = piModels().getModels("openai").map((m) => m.id);
+		assert.equal(new Set(ids).size, ids.length);
+		assert.equal(piModels().getModels("openai").find((m) => m.id === ASTRA)!.name, "Overlay Astra");
+	} finally {
+		setModelCatalogOverlay(new Map());
+	}
+});

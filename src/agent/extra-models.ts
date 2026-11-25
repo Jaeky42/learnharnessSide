@@ -66,17 +66,20 @@ export function extraModelsFor<T extends Model<Api>>(models: readonly T[]): T[] 
 	return extras;
 }
 
+/** `models` plus the extras missing from it (the rule above, on a plain list). */
+export function withExtraModels<T extends Model<Api>>(models: readonly T[]): T[] {
+	return [...models, ...extraModelsFor(models)];
+}
+
 /** The `openai` provider with the extras added to its catalog. Everything else (auth, streaming) is the provider's own. */
 export function withExtraOpenAIModels<TApi extends Api>(provider: Provider<TApi>): Provider<TApi> {
 	return {
 		...provider,
 		getModels: () => {
-			const models = provider.getModels();
-			return [...models, ...extraModelsFor(models)];
+			return withExtraModels(provider.getModels());
 		},
 		getAllModels: () => {
-			const models = provider.getAllModels?.() ?? provider.getModels();
-			return [...models, ...extraModelsFor(models as readonly Model<Api>[] as readonly Model<TApi>[])];
+			return withExtraModels((provider.getAllModels?.() ?? provider.getModels()) as readonly Model<TApi>[]);
 		},
 	};
 }
