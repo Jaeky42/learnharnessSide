@@ -45,6 +45,7 @@ import {
 } from "@/src/core";
 import { MenuShell } from "@/components/menu-shell";
 import { useInteractionLayers } from "@/components/interaction-layers";
+import { useIsPhone } from "@/components/phone/use-phone"; // FORK (phone)
 import { Hint } from "@/components/ui/hint";
 import { BUNDLED_READING_FONTS, useAppearance } from "./appearance.tsx";
 import { FontMenuList } from "./model-menu";
@@ -254,6 +255,11 @@ export function AppearanceSection({
 }) {
 	const { appearance: resolved, activeTheme, colors, themes, refreshThemes } = useAppearance();
 	const md = appearance?.mdRendering;
+	// FORK (phone): the phone layout shows only "Compact session list" of the
+	// three rows upstream 0.7.0 added (owner's decision); a tablet and a
+	// computer show all three. Display only: the settings keep their values
+	// and still apply.
+	const phone = useIsPhone();
 
 	// The font dropdown's open state + its enumeration cache. undefined =
 	// not enumerated yet (desktop: click-bound queryLocalFonts pending);
@@ -501,20 +507,25 @@ export function AppearanceSection({
 					}}
 				/>
 			</SettingsRow>
-			<SettingsRow label="Transcript width" testid="row-transcript-width">
-				<TranscriptWidthSlider
-					value={resolved.transcriptMaxWidth}
-					// Full = absence (the unset representation for numbers).
-					onCommit={(rem) => { void onSectionChange({ ...appearance, transcriptMaxWidth: rem ?? undefined }); }}
-				/>
-			</SettingsRow>
-			<SettingsRow label="Adapt question layout" testid="row-adaptive-questions">
-				<Toggle
-					checked={resolved.adaptiveQuestions}
-					label="Adapt question layout"
-					onChange={(on) => onSectionChange({ ...appearance, adaptiveQuestions: on })}
-				/>
-			</SettingsRow>
+			{/* FORK (phone): hidden on a phone, see `phone` above. */}
+			{!phone && (
+				<>
+					<SettingsRow label="Transcript width" testid="row-transcript-width">
+						<TranscriptWidthSlider
+							value={resolved.transcriptMaxWidth}
+							// Full = absence (the unset representation for numbers).
+							onCommit={(rem) => { void onSectionChange({ ...appearance, transcriptMaxWidth: rem ?? undefined }); }}
+						/>
+					</SettingsRow>
+					<SettingsRow label="Adapt question layout" testid="row-adaptive-questions">
+						<Toggle
+							checked={resolved.adaptiveQuestions}
+							label="Adapt question layout"
+							onChange={(on) => onSectionChange({ ...appearance, adaptiveQuestions: on })}
+						/>
+					</SettingsRow>
+				</>
+			)}
 		</>
 	);
 }
