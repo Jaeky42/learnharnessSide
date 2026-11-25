@@ -29,7 +29,10 @@ async function onlyResponse(id: string, only: string): Promise<Response> {
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
 	const { id } = await params;
-	const only = new URL(req.url).searchParams.get("only");
+	const query = new URL(req.url).searchParams;
+	// FORK (perf round): upstream 0.7.0's ?view=stats is the fork's ?only=turns
+	// (the same { turns, pricing } body and 404), so both spellings work.
+	const only = query.get("view") === "stats" ? "turns" : query.get("only");
 	if (only !== null) return await onlyResponse(id, only);
 	// Perf round: the record is read once and handed to the helpers below. Each
 	// read takes the file's stamp first, so a write landing in between yields an

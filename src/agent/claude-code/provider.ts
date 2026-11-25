@@ -21,11 +21,6 @@ export const CLAUDE_CODE_MODELS: readonly Model<Api>[] = [
 	{ ...SHARED_MODEL_FIELDS, id: "opus", name: "Claude Opus" },
 	{ ...SHARED_MODEL_FIELDS, id: "sonnet", name: "Claude Sonnet" },
 	{ ...SHARED_MODEL_FIELDS, id: "haiku", name: "Claude Haiku" },
-	// Fork addition (owner's ask): listed as "fable" to match the aliases
-	// above; `claude --model` gets the full model id (claudeCliModel in
-	// constants.ts).
-	// Whether a Claude plan can use it through Claude Code is up to
-	// Anthropic; the CLI reports it if not.
 	{ ...SHARED_MODEL_FIELDS, id: "fable", name: "Claude Fable" },
 ];
 

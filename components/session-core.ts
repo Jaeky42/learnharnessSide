@@ -64,6 +64,8 @@ export interface SessionUsageSnapshot {
 	turns?: TurnUsage[];
 	pricing?: SessionPricing;
 }
+export type SessionStatsSnapshot = Pick<SessionRecordSnapshot, "turns" | "pricing">;
+
 export interface SessionRecordReadOptions {
 	adoption?: "replace" | "append" | "none";
 	/** FORK (performance): a replace adoption remembers the record's stamp as the
@@ -633,6 +635,18 @@ export class SessionModel {
 			if (options.rememberStamp && typeof record.stamp === "string") this.rememberStamp(record.stamp);
 		}
 		return record;
+	}
+
+	/** Usage-only read. Observe canonical ordering without adopting a record or
+	 * letting a stats response invalidate a pending transcript read. */
+	async readStats(signal?: AbortSignal): Promise<SessionStatsSnapshot | undefined> {
+		const ticket = ++this.canonicalIssued;
+		const epoch = this.canonicalEpoch;
+		const response = await this.fetch(`/api/chats/${encodeURIComponent(this.chatId)}?view=stats`, { signal });
+		if (!response.ok) throw new Error("Could not refresh session stats.");
+		const stats = await response.json() as SessionStatsSnapshot;
+		if (signal?.aborted || epoch !== this.canonicalEpoch || ticket < this.canonicalAcknowledged) return undefined;
+		return stats;
 	}
 
 	/** Read-only canonical adoption: never sends a replacement teacher turn. */

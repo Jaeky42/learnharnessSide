@@ -33,7 +33,8 @@ export function isPhoneViewport(width: number, electron: boolean): boolean {
 }
 
 function inElectron(): boolean {
-	return typeof navigator !== "undefined" && navigator.userAgent.includes("Electron");
+	// A stand-in navigator with no userAgent (upstream's tests) is no Electron.
+	return typeof navigator !== "undefined" && typeof navigator.userAgent === "string" && navigator.userAgent.includes("Electron");
 }
 
 function matches(query: string): boolean {

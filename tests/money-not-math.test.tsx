@@ -28,10 +28,10 @@ const render = (md: string) => renderToStaticMarkup(<MessageResponse mode="stati
 const renderTool = (md: string) => renderToStaticMarkup(<ToolContentResponse mode="static">{md}</ToolContentResponse>);
 /** The rendered text, with each formula replaced by a marker. */
 const shown = (html: string) => html
-	.replace(/<span class="katex">[\s\S]*?<\/span><\/span><\/span>(<\/span>)*/g, "[math]")
+	.replace(/<span class="katex"[^>]*>[\s\S]*?<\/span><\/span><\/span>(<\/span>)*/g, "[math]")
 	.replace(/<[^>]+>/g, "")
 	.replace(/&#x27;/g, "'").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
-const formulas = (html: string) => (html.match(/<span class="katex">/g) ?? []).length;
+const formulas = (html: string) => (html.match(/<span class="katex"[ >]/g) ?? []).length;
 
 describe("the rule", () => {
 	it("opens on a digit, and the closing dollar starts the next amount or formula", () => {

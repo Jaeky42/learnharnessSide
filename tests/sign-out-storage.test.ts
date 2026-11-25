@@ -29,6 +29,7 @@ const { CONTENT_KEYS, CONTENT_PREFIXES, clearAccountContent } = await import("..
 const VIEW_LOCAL = [
 	"lh:notes-open", "lh:notes-view", "lh:notes-tree-open", "lh:notes-tree-height", "lh:notes-width", "lh:notes-mode",
 	"lh:side-tutor:pos", "lh:side-tutor:size", "lh:sidebar-open", "lh:session-kind-filter", "lh.graph.camera.v1", "lh:keymap",
+	"lh:sidebar-open-folders", "lh.graph.folder-filter.v1",
 	"some-other-site-key", "lh:notes-opened-later",
 ];
 const CONTENT_LOCAL = ["lh:notes-expanded", "lh:notes-split-dismissed", "lh:notes-open-note:chat_1", "lh:notes-open-note:chat_abc"];
@@ -81,11 +82,13 @@ describe("the audit: who touches the browser's storage", () => {
 		const scanned = ["components", "app", "lib", "hooks", path.join("src", "core"), "plugins"].map((d) => path.join(root, d)).filter((d) => fs.existsSync(d));
 		const found = scanned.flatMap(walk).filter((f) => !f.includes(`${path.sep}tests${path.sep}`) && !f.includes(`${path.sep}node_modules${path.sep}`)).filter(uses).map((f) => path.relative(root, f).split(path.sep).join("/")).sort();
 		assert.deepEqual(found, [
+			"components/graph-folder-filter.tsx",
 			"components/graph-view.tsx",
 			"components/notes/notes-drawer.tsx",
 			"components/opening-prompt.ts",
 			"components/phone/keyboard-debug.ts",
 			"components/settings/sign-out-storage.ts",
+			"components/sidebar-folders.tsx",
 			"components/sidebar.tsx",
 			"components/side-tutor.tsx",
 			"src/core/keyboard.ts",

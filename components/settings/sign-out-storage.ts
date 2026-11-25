@@ -15,6 +15,8 @@
  *     lh:side-tutor:pos|size       the Tutor window                                view
  *     lh:sidebar-open, lh:session-kind-filter                                      view
  *     lh.graph.camera.v1           the graph's zoom and pan                        view
+ *     lh:sidebar-open-folders      session-list folders open (folder ids only)     view
+ *     lh.graph.folder-filter.v1    the graph's folder filter (folder ids only)     view
  *     lh:keymap                    keyboard shortcut overrides (a preference)      view
  *   sessionStorage
  *     lh.openingPrompt.<chatId>    the first message of a new session, until it is sent   content

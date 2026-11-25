@@ -55,7 +55,7 @@ describe("money renders as the bullet says", () => {
 	};
 	/** The rendered text, with each formula replaced by a marker. */
 	const shown = (html: string) => html
-		.replace(/<span class="katex">[\s\S]*?<\/span><\/span><\/span>(<\/span>)*/g, "[math]")
+		.replace(/<span class="katex"[^>]*>[\s\S]*?<\/span><\/span><\/span>(<\/span>)*/g, "[math]")
 		.replace(/<[^>]+>/g, "");
 
 	for (const [surface, render] of Object.entries(surfaces)) {

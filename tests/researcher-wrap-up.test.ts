@@ -1,6 +1,8 @@
 /**
- * Researcher wrap-up: a run that ends on a tool call (turn cap) or on a message
- * with no text gets ONE more request to write its brief. Scripted, zero network.
+ * Researcher wrap-up: a run whose last message has no text gets ONE more
+ * request to write its brief. Since upstream 0.7.0 the researcher has no turn
+ * limit (owner's decision), so a run can no longer end on a capped tool call.
+ * Scripted, zero network.
  */
 
 import assert from "node:assert/strict";
@@ -96,7 +98,7 @@ describe("researcher wrap-up", () => {
 	it("the wrap-up text is the approved one", () => {
 		assert.equal(
 			RESEARCH_WRAP_UP_MESSAGE,
-			"Your research time is up. Do not call any more tools. Write your final brief now, in the required format, using only what you have already gathered. If something could not be established, say so under Gaps.",
+			"Your last message contained no brief. Do not call any more tools. Write your final brief now, in the required format, using only what you have already gathered. If something could not be established, say so under Gaps.",
 		);
 	});
 
@@ -108,42 +110,13 @@ describe("researcher wrap-up", () => {
 		assert.equal(wrapUpSent(seen), false);
 	});
 
-	it("A: 16 tool turns, then the wrap-up request returns the brief", async () => {
+	it("no turn limit: 20 tool turns, then a brief, with no wrap-up", async () => {
 		const seen: Seen[] = [];
-		const { text, calls, search } = await run([
-			...toolTurns(16),
-			capturing(seen, fauxAssistantMessage([fauxText(BRIEF)])),
-		]);
+		const { text, calls, search } = await run([...toolTurns(20), capturing(seen, fauxAssistantMessage([fauxText(BRIEF)]))]);
 		assert.equal(text, BRIEF);
-		assert.equal(calls, 17);
-		assert.equal(search.queries.length, 16);
-		assert.equal(seen.length, 1);
-		assert.equal(lastUserText(seen[0]!), RESEARCH_WRAP_UP_MESSAGE);
-		// Tool declarations travel as system messages in the transcript.
-		const sys = seen[0]!.messages as Array<{ role: string; toolsAdded?: Array<{ name: string }>; toolsRemoved?: unknown[] }>;
-		const added = sys.filter((m) => m.role === "system").flatMap((m) => m.toolsAdded ?? []);
-		assert.ok(added.some((t) => t.name === "web_search"), "tools are still declared");
-		assert.ok(!sys.some((m) => m.toolsRemoved?.length), "no tool was removed");
-	});
-
-	it("the cap is 16, not 12", async () => {
-		const seen: Seen[] = [];
-		const { text, calls } = await run([...toolTurns(12), capturing(seen, fauxAssistantMessage([fauxText(BRIEF)]))]);
-		assert.equal(text, BRIEF);
-		assert.equal(calls, 13);
+		assert.equal(calls, 21);
+		assert.equal(search.queries.length, 20);
 		assert.equal(wrapUpSent(seen), false);
-	});
-
-	it("A2: narration plus a tool call as the 16th message is not the brief", async () => {
-		const seen: Seen[] = [];
-		const { text, calls } = await run([
-			...toolTurns(15),
-			toolTurn(15, "Let me check one more source."),
-			capturing(seen, fauxAssistantMessage([fauxText(WRAP_BRIEF)])),
-		]);
-		assert.equal(text, WRAP_BRIEF);
-		assert.equal(calls, 17);
-		assert.equal(lastUserText(seen[0]!), RESEARCH_WRAP_UP_MESSAGE);
 	});
 
 	it("B: a thinking-only final message gets a wrap-up", async () => {
@@ -155,7 +128,13 @@ describe("researcher wrap-up", () => {
 		]);
 		assert.equal(text, WRAP_BRIEF);
 		assert.equal(calls, 4);
+		assert.equal(seen.length, 1);
 		assert.equal(lastUserText(seen[0]!), RESEARCH_WRAP_UP_MESSAGE);
+		// Tool declarations travel as system messages in the transcript.
+		const sys = seen[0]!.messages as Array<{ role: string; toolsAdded?: Array<{ name: string }>; toolsRemoved?: unknown[] }>;
+		const added = sys.filter((m) => m.role === "system").flatMap((m) => m.toolsAdded ?? []);
+		assert.ok(added.some((t) => t.name === "web_search"), "tools are still declared");
+		assert.ok(!sys.some((m) => m.toolsRemoved?.length), "no tool was removed");
 	});
 
 	it("C: brief plus a tool call, then a thinking-only closing message", async () => {
@@ -182,26 +161,28 @@ describe("researcher wrap-up", () => {
 
 	it("a tool call in the wrap-up reply is refused and the run ends", async () => {
 		const { text, calls, search } = await run([
-			...toolTurns(16),
+			...toolTurns(2),
+			fauxAssistantMessage([fauxThinking("hmm")]),
 			fauxAssistantMessage(
 				[fauxText(WRAP_BRIEF), fauxToolCall("web_search", { query: "distinctive-wrap-up-query" }, { id: "late" })],
 				{ stopReason: "toolUse" },
 			),
 		]);
 		assert.equal(text, WRAP_BRIEF);
-		assert.equal(calls, 17);
+		assert.equal(calls, 4);
 		assert.ok(!search.queries.some((q) => q.includes("distinctive-wrap-up-query")));
-		assert.equal(search.queries.length, 16);
+		assert.equal(search.queries.length, 2);
 	});
 
 	it("a wrap-up reply with no text resolves to an empty string, with one wrap-up only", async () => {
 		const seen: Seen[] = [];
 		const { text, calls } = await run([
-			...toolTurns(16),
+			...toolTurns(2),
+			fauxAssistantMessage([fauxThinking("hmm")]),
 			capturing(seen, fauxAssistantMessage([fauxThinking("nothing to say")])),
 		]);
 		assert.equal(text, "");
-		assert.equal(calls, 17);
+		assert.equal(calls, 4);
 		assert.equal(seen.length, 1);
 	});
 
@@ -216,7 +197,7 @@ describe("researcher wrap-up", () => {
 				setTimeout(() => controller.abort(), 20);
 			});
 		await assert.rejects(
-			run([...toolTurns(16), stuck as unknown as FauxResponseStep], { abortSignal: controller.signal }),
+			run([...toolTurns(2), fauxAssistantMessage([fauxThinking("hmm")]), stuck as unknown as FauxResponseStep], { abortSignal: controller.signal }),
 			(err: Error) => err.name === "AbortError",
 		);
 	});

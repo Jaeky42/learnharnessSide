@@ -24,6 +24,14 @@ export async function register() {
 			console.error("[LearnHarness] Flashcards sync: the saved time zone couldn't be used:", error instanceof Error ? error.message : error);
 		}
 	}
+	// Upstream 0.7.0: the remote model catalog's saved snapshot, before the
+	// plugins. FORK: in its own try, so a failure here can't stop the rest.
+	try {
+		const { initializeModelCatalog } = await import("./src/server/remote-model-catalog.ts");
+		initializeModelCatalog();
+	} catch (error) {
+		console.error("[models] The saved model catalog couldn't be loaded:", error);
+	}
 	try {
 		const { initializePlugins } = await import("./src/server/plugins.ts");
 		await initializePlugins();

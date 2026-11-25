@@ -131,7 +131,10 @@ describe("the lesson since seamless sessions", () => {
 	it("passes no blocked tooltip to the plugin buttons or the highlight toolbar; their presses start the move", () => {
 		const chat = readFileSync(new URL("../components/chat.tsx", import.meta.url), "utf8");
 		const blocked = [...chat.matchAll(/\bblocked=\{([^}]*)\}/g)].map((m) => m[1]!.trim());
-		assert.equal(blocked.length, 2, "PluginTopBarActions and SelectionToolbar");
+		// Since upstream 0.7.0 the top bar mounts PluginSessionTopBarActions, which
+		// takes no `blocked` and passes none to PluginTopBarActions.
+		assert.equal(blocked.length, 1, "SelectionToolbar");
+		assert.match(chat, /<PluginSessionTopBarActions readContext=\{actionContext\} captureContext=\{captureActionContext\} refreshRef=\{refreshPluginActions\} \/>/);
 		for (const value of blocked) assert.match(value, /^undefined\b/);
 		assert.match(chat, /prewarmSessionMove\(chatId\); \/\/ FORK \(seamless sessions\): a plugin button starts the move/);
 		assert.match(chat, /if \(handled\) prewarmSessionMove\(chatId\);/, "Cite and Ask");
