@@ -15,14 +15,18 @@
 - The update feed is this fork's GitHub Releases (`publish` in the side config: provider github, owner Jaeky42, repo learnharnessSide, releaseType release).
 - `publish` **must stay a single object**. The `extends` merge concatenates arrays (builder-util-runtime `deepAssign`), so a list would keep the official feed first.
 - `.github/workflows/side-tutor-windows.yml` runs on every push to `side-tutor`, in this order:
-  1. Stamps version `<major>.<minor>.<run number>` into the runner's package.json (never committed). electron-builder 26 has no `--em` flag.
+  1. Stamps version `<major>.<minor>.<run number>` into the runner's package.json (never committed). electron-builder 26 has no `--em` flag. Since the 0.7.0 merge `package.json` says 0.7.0, so releases read 0.7.<run number> (they were 0.6.<run number>; the update check takes 0.7.x as newer).
   2. Runs the side-tutor, notes and cloud sync tests on Windows, builds, and smoke-tests the server and the packaged app.
   3. Checks that the packaged `app-update.yml` points at this fork and that the package name and version are right.
   4. Only then publishes a GitHub Release (`gh release create`, with the installer, blockmap and latest.yml).
 - Pushes that only change `CLAUDE.md` or `docs/**` don't run the workflow.
 - **A dry run:** started by hand (`workflow_dispatch`) on any branch, the workflow does everything except the last step. It tests, builds and attaches the installer to the run, and publishes no release. Used to check the cloud sync branch on Windows before its merge.
 - `LH_BUILD_VERSION` / `LH_BUILD_HOMEPAGE` (next.config.ts) make Settings show the stamped version and link release notes to this fork.
-- To pick up upstream: merge the new upstream release into the fork's history (as `git merge v0.6.0` was, on `claude/upstream-0.6.0`), then fast-forward both release branches to that commit, with the owner's approval. So far both release branches have only ever moved by fast-forward.
+- **Startup announcements are off** (owner's decision at the 0.7.0 merge; "The owner's decisions at the 0.7.0 merge" in `docs/fork/upstream.md`). Upstream's packaged desktop app asks `https://learnharness.ai/startup-messages.json` at every launch and shows the newest message once (`electron/startup-messages.cjs`). Those messages are written for the official app; Side Tutor updates itself from this fork's releases. Chosen over keeping the feed and over a feed of the fork's own.
+  - **What was done:** in `electron/main.cjs` (`FORK (startup announcements off)`) the main process never starts the feed, so no request is made and no dismissal file is written. Upstream's `startup-messages.cjs`, the two IPC handlers (`lh:startup-message:take` and `:dismiss`, which now answer "no message"), `electron/preload.cjs` and the renderer's box (`components/startup-message.tsx`) stay in place, unused, so later upstream releases merge cleanly. Browser and server mode never had the feed.
+  - **Pinned by** `tests/startup-messages-off.test.ts` (it reads the main process's source and fails if it can start the feed). Upstream's own `tests/startup-messages.test.ts` still runs, with its notifier-workflow case skipped while upstream's two notify workflows are absent.
+  - **Not checked:** the packaged Windows app itself (that no request is made and the box never shows).
+- To pick up upstream: merge the new upstream release into the fork's history (as `git merge v0.6.0` and then `git merge v0.7.0` were, on `claude/upstream-0.6.0`), then fast-forward both release branches to that commit, with the owner's approval. So far both release branches have only ever moved by fast-forward.
 
 ## Which branch feeds what
 
@@ -30,7 +34,7 @@
   - a push to `side-tutor` publishes a desktop release (and builds the server image `:latest`). It still needs the owner's approval every time;
   - the owner's server follows `LH_CHANNEL=dev`, which is built from `claude/pensive-goldberg-7dty2m`. A change the server should get must be pushed there; a change both should get goes to both branches, kept at the same commit.
   - Moving the server to `latest`, so one branch feeds both, is the owner's call and hasn't been asked.
-- **The two sides must speak the same sync protocol version** (1 in release 0.5.6; **2 from the upstream 0.6.0 merge on**, see `docs/fork/upstream.md`; **3 with Flashcards sync**, see "Flashcards sync" in `docs/fork/cloud-sync.md`). A change that raises it has to reach the server and the desktop together, or sync pauses until both are updated.
+- **The two sides must speak the same sync protocol version** (1 in release 0.5.6; **2 from the upstream 0.6.0 merge on**, see `docs/fork/upstream.md`; **3 with Flashcards sync**, see "Flashcards sync" in `docs/fork/cloud-sync.md`; **still 3 at the upstream 0.7.0 merge**, which changes no wire format, chat format or Flashcards file, so the server and a PC can be updated in either order). A change that raises it has to reach the server and the desktop together, or sync pauses until both are updated.
 
 ## Updating the server and the PC together
 

@@ -20,7 +20,7 @@ This is a fork of amosblomqvist/learnharness. It ships as a separate Windows app
 ## Working here
 
 - Follow AGENTS.md: investigate, ask about design decisions, and get the plan approved before implementing.
-- After `npm ci`, run `npm run plugins:setup` (upstream 0.6.0's core plugins); the build and several tests need it.
+- After `npm ci`, run `npm run plugins:setup` (the core plugins); the build and several tests need it.
 - Tests: `npm test` (all), or `NODE_ENV=test npx tsx --test tests/<file>.test.ts`. Also `npm run typecheck` and `npm run lint`. Known test failures in the development sandbox, and every other recipe, are in `docs/fork/development.md`.
 - **Every push to `side-tutor` publishes a release** that installed apps download automatically, and needs the owner's approval every time. Pushes that only change `CLAUDE.md` or `docs/` don't build. Any other push builds, `.claude/` included, unless its commit message carries `[skip ci]`.
 - **Two branches feed two things:** `side-tutor` feeds the Windows app (and the server image `:latest`); the owner's server follows the image `:dev`, built from `claude/pensive-goldberg-7dty2m`. A change both should get goes to both branches, kept at the same commit. See "Which branch feeds what" in `docs/fork/releases.md`.

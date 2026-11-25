@@ -55,13 +55,13 @@ Graph extraction, research, compaction and visuals run on **whichever device hol
 | `jobs/<jobId>.json` (helper jobs; each names its `chatId`) | Whole-file rewrite | Follow the chat's lease, inside its session |
 | `graph/*.jsonl` | Mostly appends, with some rewrites (see below) | Appends as lines; rewrites as replayed operations |
 | `sources.json`, positions, `settings.json` | Read-modify-write maps | Last writer wins per key; device-specific keys excluded |
-| `prompts/**` (prompt override texts), `graph/render-settings.json` (the graph view's sliders), `graph/source-organization.json` (chains-view folders) | Files and maps | Item by item, latest change wins (slice 5) |
+| `prompts/**` (prompt override texts), `graph/render-settings.json` (the graph view's sliders), `graph/source-organization.json` (chains-view folders, which are also the session list's folders: "Session folders" under "Settings and the other small files" below) | Files and maps | Item by item, latest change wins (slice 5) |
 | `themes/<id>.json` (imported themes; never the built-in ones) | Whole file per theme | Item by item, one theme each, latest change wins; removing one removes it on both ("Appearance is per device" below) |
 | `core-plugin-data/flashcards/flashcards.json` (Flashcards' library; since Flashcards sync) | Whole-file rewrite by the plugin | Item by item, latest change wins per item; schedules never travel and are worked out again from the combined reviews (see "Flashcards sync" below) |
 | The other plugins' data, which plugins are on, Flashcards' model choice and its uploaded files' text | Per device | Never synced |
 | `notes/settings.json` (vault path), `notes/pending/` | Per device | Never synced |
 | `obsidian-sync.json` (the server's Obsidian sync record) | Per device | Never synced |
-| `auth.json`, subscription credentials, model caches | Per device | Never synced |
+| `auth.json`, subscription credentials, model caches, `model-catalog.json` (upstream's saved remote model catalog, "Refresh model catalog" in Settings → Agent) | Per device | Never synced |
 | `sync/` (sync's own state on each side) | Per device | Never synced |
 
 ### Graph sync
@@ -92,8 +92,8 @@ Graph extraction, research, compaction and visuals run on **whichever device hol
 12. **Settings split.**
     - Synced, latest change wins per setting: dictation language, graph (extraction on/off, rendering on/off, chunk size, the graph view sliders), compaction threshold, agent (tool switches, search engine, prober graph tools), and prompt overrides (the texts and their switches).
     - Per device, never synced: model slots and per-role model overrides, the custom provider, the Claude Code switch, file-access folders, the reading font, automatic updates, keyboard shortcuts, keys and sign-ins.
-    - **Appearance is per device** (owner's change, after the phone plugins round; it synced until then): everything on Settings → Appearance. The theme, the colour overrides, the background, the reading font size, code ligatures, serif session names, heading weight, and the bold and italic colours. Imported theme files still sync. See "Appearance is per device" under "Settings and the other small files" below.
-    - The chains-view folders (`source-organization.json`) always sync.
+    - **Appearance is per device** (owner's change, after the phone plugins round; it synced until then): everything on Settings → Appearance. The theme, the colour overrides, the background, the reading font size, code ligatures, serif session names, heading weight, and the bold and italic colours; since the 0.7.0 merge also upstream's Compact session list, Transcript width and Adapt question layout (`appearance.compactSessionList`, `appearance.transcriptMaxWidth`, `appearance.adaptiveQuestions`). Imported theme files still sync. See "Appearance is per device" under "Settings and the other small files" below.
+    - The chains-view folders (`source-organization.json`) always sync; since the 0.7.0 merge they are the session list's folders too.
     - At the first pairing, where the two sides differ, the desktop's value is kept.
     - A session's own model travels with the session; if it isn't set up on the other device, the learner picks one there.
 13. **Graph deletions: repeat the action.** The server keeps one ordered log of graph changes. A deletion is logged as what was done ("delete session X with its concepts", "delete node N", the chain clean-up) and each device runs it on its own graph. A rewrite the engine doesn't recognise is logged as its exact result (which lines went or changed), so nothing is skipped.
@@ -234,9 +234,9 @@ The sync protocol version stayed at 1 for these changes: nothing had been paired
   - `ensureSessionHere(chatId)` answers `"here"` at once, with no request, when sync isn't in use or the session isn't in the cloud state's `held`. Otherwise it posts `{op:"take-over", chatId, force:true}` to `/api/cloud`. `yours`, `moved` and `continued-offline` mean it is here; `waiting` is asked again every 2 seconds for as long as the lesson is open, with no limit; anything else is a failure. Callers of one session share one move.
   - On arrival it refreshes the cloud state and has the open lesson read its record again; the answer is `"here-changed"` when that read brought message ids the page hadn't shown, or didn't land.
   - **The triggers** (`useSessionMoveTriggers`): listeners on the document, in the capture phase, for `input` and `paste` in a text box or the confidence bar inside the dock or the Tutor's typing row, and for a click on the lesson's or the Tutor's Dictate, an answer option, Cite, Ask and a plugin button. The dictation shortcut starts it too. Focus alone starts nothing; the notes editor, the session-list search and Settings start nothing. A move started this way that fails is silent.
-  - `fetchHere` wraps a simple write (rename in the top bar and the session list, delete, the session's model and thinking, the artifact switch, manual extraction, the Tutor's Ask and Retry): move first, then the request. When the move fails it answers a made-up 409 that carries the failure sentence, which is what the delete box and the Tutor then show.
+  - `fetchHere` wraps a simple write (rename in the top bar and the session list, delete, the session's model and thinking, the artifact switch, manual extraction, the Tutor's Ask and Retry): move first, then the request. When the move fails it answers a made-up 409 that carries the failure sentence, which is what the delete box and the Tutor then show. A write that changes several sessions at once, the session list's folder Delete, goes through `fetchAllHere` instead ("Deleting a folder with its sessions" below).
 - **`components/session-core.ts`** (upstream's, about 120 lines, each edit marked `FORK (seamless sessions)`): an optional `moveGate` on `SessionModel` runs before `send`, `steer` and the three dismissals, ahead of any optimistic change, so the text stays in the box until the session is here. `here-changed` or `failed` drops the action and keeps the text. An automatic continuation never moves a session.
-- **The net:** a 409 whose code is `session_held_elsewhere` (the page's `held` can be up to 10 seconds old) refreshes the cloud state, moves the session and retries the write once. Before, any 409 from a send was taken for "a reply is being written" and retried for 30 seconds.
+- **The net:** a 409 whose code is `session_held_elsewhere` (the page's `held` can be up to 10 seconds old) refreshes the cloud state, moves the session and retries the write once; **when that move fails too, `fetchHere` answers the same made-up 409 with the failure sentence** (corrected at the 0.7.0 merge: it used to hand back the server's own refusal, so a single session's Delete could show the retired "held by another device. Take it over…" text). Before, any 409 from a send was taken for "a reply is being written" and retried for 30 seconds.
 - **Removed from the page:** the "Held by" line and the greyed Rename and Delete in `components/sidebar.tsx`; the hidden message box, the title's lock and F2's in `components/chat.tsx`; the Tutor's `held` prop (the greyed bubble, the window closing); `components/cloud/take-over-dialog.tsx`. Upstream's `blocked` props on the plugin buttons and the highlight toolbar are kept and passed nothing.
 - **The floating box** (`components/cloud/session-strip.tsx`, the file and export keep their names; `app/cloud.css`):
   - the update box's look (`components/update-banner.tsx`: rounded, a border, a shadow, the popover background) and its ✕;
@@ -301,7 +301,7 @@ In `src/core/sync/screens.ts`. Change them only with the owner's approval.
 
 - **`force` for Unpair-freed sessions** (above).
 - **The ✕'s hidden label for screen readers is "Dismiss".**
-- **A move that fails for a session that isn't open** (Rename from the session list) shows nothing; the rename doesn't happen. Delete shows the failure sentence in its box.
+- **A move that fails for a session that isn't open** (Rename from the session list) shows nothing; the rename doesn't happen. Delete shows the failure sentence in its box. While the session is still moving here, Cancel and Esc close that box (owner's decision at the 0.7.0 merge; "Deleting a folder with its sessions" below).
 - **A session deleted on a PC while another device held it** still comes back at reconnect, as before. Counting a deletion as an unsent change (so that it deletes everywhere when the other device added nothing) was left out: it wasn't asked for.
 
 #### Known limits
@@ -358,9 +358,11 @@ In `src/core/sync/screens.ts`. Change them only with the owner's approval.
   - `s|…` the synced settings from `settings.json`, each on its own: the approved list (`SYNCED_SETTINGS`), plus every tool switch and every prompt switch (`SYNCED_SETTING_MAPS`). **Nothing else in `settings.json` is ever read or written by sync**: a request that names any other setting is refused whole (except the retired appearance settings, which are accepted and ignored: "Appearance is per device" below).
   - `p|…` prompt override texts (`prompts/**`);
   - `r|…` the graph view's sliders, one field each (`graph/render-settings.json`);
-  - `f|…` and `o|…` chains-view folders and where each source is filed (`graph/source-organization.json`);
+  - `f|…` and `o|…` chains-view folders and where each source is filed (`graph/source-organization.json`). **Session folders** are these same folders (see "Session folders" below);
   - `n|…` imported-file records (`graph/sources.json`); the file path in a record stays the importing device's;
   - `x|…` node places (`graph/positions.json`).
+- **Session folders** (upstream 0.7.0 shows the chains view's folders in the session list): a session's folder is `placements[<chatId>].folderId` in `graph/source-organization.json`, so folders and placements travel through the existing `f|` and `o|` items with no new code, and the "made whole after every change" rule below covers them. Which folders are open in the session list (`lh:sidebar-open-folders`) and the graph's folder filter (`lh.graph.folder-filter.v1`) are browser storage, per device, never synced ("Accounts on one server" in `docs/fork/server.md` for sign-out).
+- **Saved prompt overrides shadow upstream's rewritten texts** (`p|…`): a segment the learner overrode keeps its saved text on every device, so upstream 0.7.0's rewritten prober and teacher texts reach a device only for the segments not overridden.
 - **No hook in any write path.** Each side compares its files with what it last agreed on, whenever a round runs. That also catches a file edited by hand. The files are read and written through the app's own stores (`src/server/sync/map-views.ts`), so a value passes the same sanitizers as one set in the app.
 - **Latest change wins, on the server's clock.**
   - A change found in a file gets that file's own modified time (never later than now). A desktop adds the difference between its clock and the server's, measured on every answer and remembered for when it is offline.
@@ -405,6 +407,7 @@ In `src/core/sync/screens.ts`. Change them only with the owner's approval.
   1. **Everything on Settings → Appearance is per device:** the theme, the nine colour overrides, the background, the reading font size, code ligatures, serif session names, heading weight, and the bold and italic colours (the reading font always was). The PC has its own look; the server has its own, which the phone and the tablet share.
   2. **Imported theme files still sync** (`t|<theme id>`), so a theme imported on one side can be picked on the other. Removing one removes it on both, and a side that was using it falls back to the default theme.
   3. **No protocol change:** the sync protocol stays 3. The server and the PC can be updated in either order, and sync doesn't pause.
+  4. **Upstream 0.7.0's three new appearance settings are per device too** (approved with the 0.7.0 plan, without a question of their own): Compact session list, Transcript width and Adapt question layout. They are in no sync list (`SYNCED_SETTINGS`, `RETIRED_SETTINGS` in `src/core/sync/maps.ts` name none of them), so nothing about them is read or written by sync. No sync test names them.
 
 ### Rulings, limits and open items
 
@@ -422,6 +425,41 @@ In `src/core/sync/screens.ts`. Change them only with the owner's approval.
 **Appearance is per device**
 
 - **Tests:** in `tests/sync-maps.test.ts`: an older side meeting an updated one (an updated server with an older PC: ongoing, and a first exchange as the first and as a later desktop; an older server with an updated PC: ongoing), nothing reset on either, the forgetting, an idle round writing nothing afterwards, and a theme file still travelling; with the real files in `tests/sync-maps-wiring.test.ts`.
+
+## Deleting a folder with its sessions
+
+Upstream 0.7.0's session list has folders, and a folder's menu has Delete: the folder, its subfolders and every session inside (practice sessions included) go; imported notes inside move out to the deleted folder's parent. It is `DELETE /api/graph/sources/folders/<id>?mode=preserve-graph|delete-nodes` (`deleteFolderWithSessions`, `src/server/source-deletion.ts`; the box is `DeleteFolderDialog`, `components/delete-session-dialog.tsx`). Two things about it did not fit sync, and the fork changed them.
+
+- **A named deletion in the graph log.** `deleteFolderWithSessions` calls `recordGraphAction({ kind: "delete-sources", ids, mode }, …)` (marked `FORK (cloud sync)`) around its graph work, so the log carries the named `delete-sources` entry every device repeats with the app's own deletion code ("The graph log" above). Without it the log would have carried the generic `rewrite` entries, the net nothing in the app produces. The route's checks are upstream's: the reviewed scope must still match (409 `folder_scope_changed`), a running turn or job blocks it (409), and every session is checked before anything is written.
+- **Sessions another device holds move here first.** The server refuses the whole delete when any session in the folder is held elsewhere (409 `session_held_elsewhere`, from `runningWorkBlocker`), and nothing is deleted. The dialog therefore sends the DELETE through `fetchAllHere(chatIds, …)` (`components/cloud/session-move.ts`):
+  1. **Where sync isn't in use** (an app never paired, or the server's own site with no desktop), and for sessions the page already knows are here, nothing is asked: it is a plain fetch, exactly upstream's request.
+  2. **Before any move, a PC contacts its server** (`POST /api/cloud {op:"check"}`) when the folder holds a session that lives on another device. If sync doesn't read `ok` (offline, paused, not paired), nothing is moved and nothing is deleted, and the box shows the approved line. The server's own site is always reachable. **Why it asks first, not after:** a take-over that can't reach the server marks the session this PC's until it reconnects (`carryOn`, "Seamless sessions" above), and the next Try again would then have deleted it here.
+  3. **Each such session moves here, silently** (the same move as typing in a lesson, `startMove` and `settle`), all at once. **All or nothing:** when one move fails, the DELETE is not sent. An answer of `continued-offline` counts as a failure for this write, for the server going away between the check and the move (single sessions and typing still carry on offline).
+  4. **The net:** when the server still refuses with `session_held_elsewhere` (the page's knowledge of who holds what can be 10 seconds old), the refusal doesn't say which session, so the cloud state is read again, every session of the folder is moved afresh, and the DELETE is tried once more.
+  5. **No flag is raised:** a failed move from this box never sets a session's "move failed" flag (`SESSION_MOVE_FAILED_TEXT`'s), which would have left "This session couldn't be continued here." waiting in those lessons.
+- **A folder whose sessions all live on this PC** still deletes offline, with no extra request.
+- **The failure line:** a made-up or real `session_held_elsewhere` refusal shows `FOLDER_DELETE_FAILED_TEXT` in the box, followed by upstream's "Try again". Other failures keep upstream's texts; a scope that changed or a folder that is gone shows upstream's stale-folder message.
+- **Sessions that moved here stay here** when a later step fails, or when the box is cancelled while they move; they are this device's sessions like any other.
+
+### The owner's decisions and approved words
+
+- **Move here silently, then delete; when one can't be moved, nothing is deleted** (0.7.0 merge, decision 3; over refusing with a sentence, and over deleting only what is here). Pressing Delete moves every such session here without a question, as a single session's Delete does.
+- **The failure line** (decision 3b; `FOLDER_DELETE_FAILED_TEXT` in `src/core/sync/screens.ts`): "This folder couldn't be deleted right now. Nothing was deleted." followed by upstream's "Try again" (over mirroring the single-session sentence).
+- **A PC that can't reach its server deletes nothing that lives on another device** (decision 3c): refused with that same line. Chosen over leaving the first build (the PC deleted the folder locally, and sessions another device held came back at reconnect, as a single session's Delete behaves) and over making an offline delete stick, which would change the sync engine's settling rules.
+- **Cancel works while sessions are still moving** (the owner: "Yes, Cancel works while waiting"; chosen over "only the new folder box" and over leaving both boxes as they are). In both delete boxes, the folder's and a single session's, Cancel and Esc close the box for as long as sessions are still moving here, and **nothing is deleted**. Once the delete itself has been sent, the box is locked until it finishes, as before. Sessions that already moved here stay on this device. As built (`efdfac82`): `fetchHere` and `fetchAllHere` (`components/cloud/session-move.ts`) take an optional fourth argument with a cancel signal and two callbacks, "the write is being sent" and "moving again after a refusal". The cancel is checked before every send of the write, the net's retry included, and a cancelled call sends nothing, raises no "move failed" flag and shows no line. It is a separate signal, not the request's own (`init.signal`): the Tutor's Ask already passes that one for its Stop, and the cancel is never handed to `fetch`, so a DELETE that was sent can't be aborted by it. A cancelled wait gives up its move only when no other caller shares it (a lesson's own send, a pre-warm). The boxes (`useMovingPhase` in `components/delete-session-dialog.tsx`) lock at the moment the write is sent and unlock while the net moves sessions after a refusal. Every other caller of `fetchHere` passes nothing and runs the code it ran before.
+
+### Rulings, limits and open items
+
+- **Limits that stay** (named by the independent review, a read-only Opus reviewer, whose other findings are fixed in `ec2e2afd`):
+  - a helper job that travelled as "running" blocks the delete until it finishes;
+  - the log entry is written before the deletion runs (the known limit in "The graph log": a crash between leaves the change in the log but not in the ledger);
+  - a session this PC believes is its own, but another device took while the PC was offline, still comes back at reconnect (the known limit under "Seamless sessions").
+- **Not checked:** a desktop as the deleting side through the real route (the tests drive it with this process as the server, in both modes), a real browser, the real server and the owner's devices.
+
+### Code and tests
+
+- **Code:** `src/server/source-deletion.ts`, `app/api/graph/sources/folders/[id]/route.ts` (upstream's), `components/cloud/session-move.ts` (`fetchAllHere`, `serverReachable`, `allHere`, and `fetchHere`'s net), `components/delete-session-dialog.tsx` (`DeleteFolderDialog`), `src/core/sync/screens.ts` (`FOLDER_DELETE_FAILED_TEXT`), `components/sidebar.tsx` (the menu; upstream's).
+- **Tests:** `tests/sync-folder-delete.test.ts` (both modes; both sides end with the same session files, folders and graph ledgers; a `delete-sources` entry and no `rewrite`; the route refuses a held session and deletes nothing), `tests/folder-delete-ui.test.tsx` (the box, the moves, the offline refusal, an all-local offline delete, no flag, the net's failure; and for both boxes: Cancel while a move waits, Cancel refused once the DELETE is sent, a shared move kept, nothing sent after a Cancel during the net). The unpaired single-session box is pinned by upstream's `tests/modal-integration.test.tsx`. Upstream's own folder-delete tests (`folder-deletion-route`) pass unchanged.
 
 ## Timing, pictures sent once, and the loop
 

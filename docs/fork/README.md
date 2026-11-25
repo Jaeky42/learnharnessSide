@@ -1,6 +1,6 @@
 # The fork's docs
 
-This repository is a fork of amosblomqvist/learnharness, based on upstream **v0.6.0** (merged with `git merge`; the owner's choices at that merge are in `docs/fork/upstream.md`). The fork adds:
+This repository is a fork of amosblomqvist/learnharness, based on upstream **v0.7.0** (merged with `git merge`, first v0.6.0 and then v0.7.0 on top of it; the owner's choices at both merges are in `docs/fork/upstream.md`). The fork adds:
 
 - the side tutor and the notes drawer;
 - a separately installed Windows app that updates itself from this fork's releases;
@@ -19,12 +19,12 @@ Everything in `docs/fork/` is the fork's. Every other file under `docs/` is the 
 | the Tutor: its window, bubble, look, Dictate button, conversations, phone sheet | `side-tutor.md` |
 | the notes drawer | `notes.md` |
 | the lesson screen: a check that opens by scrolling, money and formulas, demos and the theme, the highlight toolbar on touch, dictation | `lesson.md` |
-| sync: pairing, sessions and leases, seamless sessions, the graph log, settings, timing, the sync screens, Flashcards sync, the protocol number | `cloud-sync.md` |
+| sync: pairing, sessions and leases, seamless sessions, the graph log, settings, session folders, deleting a folder with its sessions, timing, the sync screens, Flashcards sync, the protocol number | `cloud-sync.md` |
 | server mode: the login, model sign-ins, the Obsidian vault on the server, the image and hosting, accounts on one server, server updates | `server.md` |
-| the phone layout, touch behaviour on a phone or a tablet, the keyboard, the home-screen app, plugins on a phone | `phone-and-tablet.md` |
+| the phone layout, touch behaviour on a phone or a tablet (session folders included), the keyboard, the home-screen app, plugins on a phone | `phone-and-tablet.md` |
 | the model lists (Fable, GPT-6.2) or the research agent | `models-and-agents.md` |
 | plugins: the Drawing Pad, the core plugins, plugin security | `plugins.md` |
-| a file that upstream also has, or anything at the next upstream release | `upstream.md` (the 0.6.0 decisions, and the list of the fork's edits to upstream files) |
+| a file that upstream also has, or anything at the next upstream release | `upstream.md` (the 0.6.0 and 0.7.0 decisions, and the list of the fork's edits to upstream files) |
 | anything for speed on long sessions | `performance.md` |
 
 Those files are loaded into every Claude Code session through `CLAUDE.md`. These are not, and are read when the work needs them:

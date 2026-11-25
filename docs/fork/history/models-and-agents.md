@@ -1,10 +1,25 @@
 # History and records: Models and agents: the fork's additions
 
+## Claude Code: Fable in the model list
+
+### Claude Code: the fork's Fable entry (retired at the 0.7.0 merge)
+
+- **What it was:** a fork entry in the Claude Code list, **Claude Fable**, listed as `fable` to match upstream's three aliases (`opus`, `sonnet`, `haiku`; the owner's ask). The CLI had no such alias then, so `claudeCliModel` (`src/agent/claude-code/constants.ts`, with `CLAUDE_CODE_CLI_MODEL = { fable: "claude-fable-5-2" }`) passed the full id `claude-fable-5-2` to `claude --model`.
+- **What retired it:** upstream 0.7.0 lists `fable` itself, as a short name the CLI resolves. At the merge the owner chose upstream's entry over the fork's mapping; `constants.ts` and the list in `provider.ts` are upstream's again (`docs/fork/upstream.md`, "The owner's decisions at the 0.7.0 merge", decision 7).
+- **What was run at the merge:** the Claude Code program's help (version 2.1.332) was read and lists `fable` as a short name. No real request was made. The tests that pin the list pass with upstream's entry.
+
 ## Research: one wrap-up request
 
 ### The research wrap-up, what was checked
 
+- **Written for the 16-call limit** (retired at the 0.7.0 merge, which removed the limit; the other ways and the checks of them stand): the first of the four ways was the call limit, and the checks below that mention it ("16 tool calls make exactly 17 model calls") belong to the limit. Since the merge `tests/researcher-wrap-up.test.ts` runs 20 tool turns then a brief with no wrap-up.
 - **Checked** with scripted model replies only, by the implementer and then by an independent verifier with a script of its own: each of the four ways and the quiet variant now ends in the wrap-up's brief; 16 tool calls make exactly 17 model calls; a tool call in the wrap-up reply never ran; a wrap-up reply without text gives the old failure and no second wrap-up; a run that ends with a brief makes no extra call; a caller without `wrapUp` is as before. Typecheck clean, lint with its one existing warning.
+
+### Research: the 16-call limit and the first wrap-up words
+
+- **The limit:** the researcher's loop was capped at 16 model calls (upstream's was 12; the owner chose 16; the others offered were 12 and 20), so a job made at most 17 calls with the wrap-up. The limit was the first of four ways to end without a brief (`maxTurns` 16 in `src/agent/subagents/researcher.ts`).
+- **The first wrap-up words** (the owner's choice over a shorter text without the last sentence): "Your research time is up. Do not call any more tools. Write your final brief now, in the required format, using only what you have already gathered. If something could not be established, say so under Gaps."
+- **Retired at the 0.7.0 merge:** upstream removed the implicit turn cap of every background helper, and the owner chose no limit (`docs/fork/models-and-agents.md`, "Research: one wrap-up request"). The words changed because "research time is up" no longer describes the run: "Your last message contained no brief. …".
 
 ## ChatGPT and OpenAI: an empty reply is asked again
 

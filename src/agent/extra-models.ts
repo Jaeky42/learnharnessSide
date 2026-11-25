@@ -5,7 +5,7 @@ import type { Api, Model, Provider } from "@earendil-works/pi-ai";
  *
  * OpenAI released GPT-6.2 Astra and GPT-6.2 Sol on 17 Nov 2026 (API ids
  * `gpt-6.2-astra` and `gpt-6.2-sol`), after the newest published
- * `@earendil-works/pi-ai` (pinned 1.4.0, whose data stops at `gpt-6.1-sol`).
+ * `@earendil-works/pi-ai` (pinned 1.5.2 since the 0.7.0 merge, whose newest OpenAI entries are `gpt-6.1-sol` and `gpt-6.1-terra`).
  * Until the library knows them, they are added here to the `openai` provider
  * so the OpenAI API-key list and the ChatGPT subscription list (which shows an
  * account's model only when the `openai` catalog has the same id with
