@@ -74,7 +74,7 @@ Newest first. "Not recorded": the docs give none.
 - `lesson.md`: "Highlight, then Ask on a touch screen" and "Scrolling into a check" (what only the owner's devices can show); "Dictation" (Firefox on the owner's Android phone).
 - `side-tutor.md`: "Speaking to the tutor" (the Tutor's Dictate has never met a real microphone); "On a phone" (the swipe's feel).
 - `performance.md`: "Known faults with the rule on" (Safari's anchoring and Find, the scrollbar, the slide to the bottom).
-- `models-and-agents.md`: a lesson with GPT-6.2 not reported yet; the research wrap-up with a real model.
+- `models-and-agents.md`: a lesson with GPT-6.2 not reported yet; the research wrap-up with a real model; "ChatGPT and OpenAI: an empty reply is asked again" (not shipped yet): no real ChatGPT or OpenAI model was run and the cause of the empty reply is not known, and how often a plain retry is enough only the owner's use and the server log can show.
 
 ## Not built
 

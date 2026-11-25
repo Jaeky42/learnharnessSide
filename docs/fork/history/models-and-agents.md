@@ -5,3 +5,27 @@
 ### The research wrap-up, what was checked
 
 - **Checked** with scripted model replies only, by the implementer and then by an independent verifier with a script of its own: each of the four ways and the quiet variant now ends in the wrap-up's brief; 16 tool calls make exactly 17 model calls; a tool call in the wrap-up reply never ran; a wrap-up reply without text gives the old failure and no second wrap-up; a run that ends with a brief makes no extra call; a caller without `wrapUp` is as before. Typecheck clean, lint with its one existing warning.
+
+## ChatGPT and OpenAI: an empty reply is asked again
+
+### The reproduction, before the change
+
+- **How it was run:** the real `handleChatInput` through the real ChatGPT stream (`chatGPTStream`), with the desktop's ChatGPT bridge played by a faked IPC and the Responses API by a scripted `globalThis.fetch` (modelled on `tests/chatgpt-request-cycle.test.ts`). Each case answers a waiting quiz question in a teaching session. No real model.
+- **The five cases and what was seen:**
+  1. **Normal** (reasoning, then a final-answer message): one request; the reply is saved and the lesson goes on.
+  2. **Lease refused** before the request was sent (as when the sign-in token can't be refreshed): no request; the wire carries only `agent_start` and `agent_end`; nothing is saved after the answer's tool result; the record owes a continuation.
+  3. **Authority changed** between the scope's capture and the dispatch (the account's model list changed): the same as case 2.
+  4. **Reasoning only** (no message item): one request; the reply is saved as a finished reply with only a thinking block (`stopReason: "stop"`); the record owes nothing, so the lesson waits for the learner. This is the reported pause.
+  5. **Commentary only** (one message item in the `commentary` phase): one request; the reply is saved with its thinking and text, and shown. Not a pause.
+- Cases 2 and 3 are the known fault recorded in `models-and-agents.md` ("ChatGPT: a request refused before it is sent"), left as it is at the owner's word.
+
+### After the change, what was run
+
+- **Case 4 again:** three requests, three leases, three log lines (retrying, retrying, giving up); the saved record ends on one failed reply with "The teacher returned an empty reply. Retry when ready."
+- **`tests/empty-reply-flow.test.ts`** (5 tests, all pass; 4 of them fail with the `teacher-agent.ts` edit taken out, the automatic wake passes either way, as it should):
+  - empty, then a normal reply: 2 requests with their own leases; the second request is the first one again (same input items, without the dropped reasoning); the saved record is the answer's result and the normal reply only; the retry's events reach the wire (two `turn_start`); usage for both requests;
+  - three empties: 3 requests; the record ends on the failed reply (the third reply's thinking); `retryDrops` accepts it; a `retry` input then runs a normal turn;
+  - an automatic wake (`steers`) whose reply is empty: 1 request, saved as before, no error, no log line;
+  - a tool call, then an empty reply: not retried, saved as before, logged as "not retried: follows other output in this turn";
+  - scripted engines through the same handler: an Anthropic-labelled engine is not retried; an OpenAI-labelled one is.
+- **`tests/empty-reply-guard.test.ts`**: 24 tests, all pass.

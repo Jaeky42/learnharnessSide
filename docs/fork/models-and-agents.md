@@ -57,3 +57,53 @@
 ### Code and tests
 
 - **Tests:** `tests/researcher-wrap-up.test.ts`.
+
+## ChatGPT and OpenAI: an empty reply is asked again
+
+- **Why:** on ChatGPT models (GPT-6.2 Astra was where it was reported) a lesson sometimes stopped right after the learner answered a question. The model's reply had only thinking: no text and no tool call. The agent loop takes any reply without a tool call for the end of the run, the app saved it as a finished reply, nothing owed a continuation, and the lesson waited until the learner typed.
+- **What happens now** (`src/agent/empty-reply-guard.ts`, wired into the agents' `finishTurn` in `src/agent/teacher-agent.ts`):
+  - **The empty reply is dropped and the same request is sent again**, in the same turn, up to **2** times (at most 3 requests). It is taken out of the next request's context, out of the loop's new messages and out of the agent's state, so it is neither sent nor saved. Nothing new is stored: no new message type and no added message.
+  - **Still empty after the 2 retries:** that last reply is saved as a failed reply (`stopReason: "error"`, with the sentence below as its error), so the lesson shows the existing red failed-reply line and its Retry button, which work unchanged. The run ends there, as it does after a provider's error.
+  - **When it applies, all of these:**
+    - the conversation model's provider is `chatgpt` (the plan sign-in) or `openai` (an API key); every other provider behaves as before;
+    - the agent is one of the lesson's own three (prober, teacher, practice). Not the Tutor's side questions, and not the helpers;
+    - the reply ended normally (`stopReason: "stop"`; never after an error, a stop, a cut-off or a tool call) and has no tool call and no text with anything but whitespace;
+    - no earlier reply of this turn had a tool call or text: a turn that ran a tool and then returned empty is not retried;
+    - the request is owed to the learner: a request the app counts as automatic (`callPurpose.background`, a wake from a finished helper) is not retried.
+  - **Usage:** the empty attempts were real requests, and their usage is counted in the turn's usage as before.
+  - **On screen during a retry:** the first thinking folds and a second one starts. The dropped thought is gone once the turn settles.
+  - **The ChatGPT request cycle:** each retry is a new loop turn (`turn_start`), so it gets its own lease and its own dispatch, as any request does. That is why the retry is made in the agent loop and not inside the stream function.
+- **The server log:** each time the guard looks at an empty reply owed to the learner, one line: `[LearnHarness] Empty reply: <provider>:<model>; <agent>; empty reply <1, 2 or 3>; <retrying | giving up | not retried: follows other output in this turn>; thinking: <yes | no>; phases before: <labels>`. The labels are the phase of each text block of the assistant message before the empty reply, read from its OpenAI text signature (`commentary`, `final_answer`, or `none`). The line carries no lesson text, question, answer or id. Automatic requests are not logged.
+
+### The owner's decisions and approved words
+
+- **A plain retry**, over a hidden nudge (a message asking the model to go on) and over a visible line with a button. The nudge was declined because it would store a new hidden message that syncs.
+- **Up to 2 silent retries.**
+- **If it is still empty, the existing failed-reply line with Retry**, over stopping silently and over more retries.
+- **The sentence**, word for word (`EMPTY_REPLY_TEXT`): "The teacher returned an empty reply. Retry when ready."
+- **ChatGPT and OpenAI models only**, over every model.
+- **The request refused before it is sent** (the section below): leave it, write it down.
+
+### Rulings, limits and open items
+
+- **Read while building:** when the guard gives up, the run ends at once (`{ action: "end" }`), as the loop does after a provider's error, so no queued message starts another request after the failed reply and the failed reply stays the record's last message.
+- **Known limits:**
+  - a turn that runs a tool the learner doesn't see and then returns empty still stops. It is logged ("not retried: follows other output in this turn");
+  - an answer that travels with a waiting helper result counts as automatic and is not retried;
+  - a message the learner queues while a retry is being prepared joins that retry's request, as it would join any next request of the turn.
+- **Not checked:** no real ChatGPT or OpenAI model was run (only a scripted Responses backend and scripted engines). The cause of the empty reply is not known. A guess only: the answer reaches the model as a tool result after text the model had labelled its final answer; the log line's phase labels are there to check that. How often a plain retry is enough only the owner's use and the log can show.
+
+### Code and tests
+
+- **Code:** `src/agent/empty-reply-guard.ts` (fork-owned: the limit, the sentence, the rules, the per-run decision, the log line); one marked edit in upstream's `src/agent/teacher-agent.ts` (`baseAgentOptions`, `FORK (empty reply)`).
+- **Tests:** `tests/empty-reply-guard.test.ts` (the providers, what counts as empty, each stop reason, the "follows other output" rule, automatic requests, the limit, the log line's content); `tests/empty-reply-flow.test.ts` (the real `handleChatInput` through the real ChatGPT stream with a scripted backend: empty then a normal reply, three empties then Retry, an automatic wake, a tool call then an empty reply, usage for every request; and, with scripted engines through the same handler, an Anthropic-labelled engine not retried and an OpenAI-labelled one retried).
+
+## ChatGPT: a request refused before it is sent (known fault, not fixed)
+
+- **What happens:** a ChatGPT request refused before it is sent, for a reason other than the background-use consent (the sign-in token can't be refreshed, or the account's model list changed in that instant), ends the turn with nothing shown and nothing saved. `finishNativeCycle` in `src/agent/subscription-request-cycle.ts` drops the error reply along with the request's other held events.
+- **What follows:** read from the page's code, not run: the record then owes a continuation, and the page continues by itself (`continueIfOwed` in `components/session-core.ts`).
+- **Reproduced** on the server side with a scripted backend: the wire carries only `agent_start` and `agent_end`, and the saved record ends on the answer's tool result.
+
+### The owner's decisions and approved words
+
+- **Leave it, write it down.** Nothing is changed.
