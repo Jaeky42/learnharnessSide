@@ -314,7 +314,7 @@ describe("findings from the real stack", () => {
 		assert.equal(toHeaders(["Cookie", "a=1", "Host", "x", "cookie", "__Host-lh_session=t"]).get("cookie"), "a=1; __Host-lh_session=t");
 		assert.throws(() => toHeaders(["Authorization", "Bearer a", "authorization", "Bearer b"]));
 		const owner = await h.signIn("Boss", PASSWORD);
-		const gateway = await startGateway(h.deps.config, { relay: h.deps.relay, log: () => {}, loop: false, listen: false });
+		const gateway = await startGateway(h.deps.config, { relay: h.deps.relay, log: () => {}, loop: false, listen: false, now: () => h.clock.now });
 		await new Promise<void>((resolve) => gateway.server.listen(0, "127.0.0.1", resolve));
 		try {
 			const port = (gateway.server.address() as import("node:net").AddressInfo).port;
