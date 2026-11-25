@@ -850,11 +850,12 @@ async function main() {
 	createWindow(url, firstWindow => {
 		const fromFirstWindow = event => !firstWindow.isDestroyed() && event.sender === firstWindow.webContents &&
 			trustedSender(event, new URL(url).origin, BrowserWindow);
+		// FORK (startup announcements off): this app never contacts
+		// learnharness.ai for startup messages and never shows the box.
+		// Upstream's feed (startup-messages.cjs) stays in place, unused, so
+		// later releases merge cleanly; with `messages` never set, the two
+		// handlers below answer "no message" and write nothing.
 		let messages;
-		if (app.isPackaged && !devUrl) {
-			const { dismissalStore, startMessages } = require("./startup-messages.cjs");
-			messages = startMessages(firstWindow, dismissalStore(app.getPath("userData")));
-		}
 		ipcMain.handle("lh:startup-message:take", event => messages && fromFirstWindow(event) ? messages.take() : null);
 		ipcMain.handle("lh:startup-message:dismiss", (event, id) => !!messages && fromFirstWindow(event) && messages.dismiss(id));
 	});
