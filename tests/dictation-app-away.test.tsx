@@ -12,6 +12,7 @@ import { createRoot } from "react-dom/client";
 import { __resetAudioGraphForTests, useDictation, type Dictation } from "../components/dictation.tsx";
 import {
 	DICTATION_MIC_DEAD,
+	ENGINE_LAST_CHANCE_MS,
 	ENGINE_RESUME_CAP_MS,
 	ENGINE_SILENT_CHECK_MS,
 	LOSS_GRACE_MS,
@@ -258,13 +259,22 @@ test("a healthy running engine: no resume, no second engine, no timers left afte
 });
 
 test("when the fresh engine won't run either, the run ends with DICTATION_MIC_DEAD", async () => {
-	rig.setup = (ctx) => { ctx.state = "interrupted"; ctx.resumeMode = "hang"; };
 	const f = await fixture();
+	await record(f);
+	await act(async () => { f.dictation.cancel(); });
+	await settle();
+	rig.contexts[0]!.state = "interrupted";
+	rig.contexts[0]!.resumeMode = "hang";
+	rig.setup = (ctx) => { ctx.state = "interrupted"; ctx.resumeMode = "hang"; };
+	Socket.all = [];
 	await begin(f);
 	await tick(ENGINE_RESUME_CAP_MS);
-	assert.equal(rig.contexts.length, 2);
+	assert.equal(rig.contexts.length, 2, "the kept engine gets the short wait");
 	assert.equal(f.dictation.phase, "connecting");
 	await tick(ENGINE_RESUME_CAP_MS);
+	assert.equal(f.dictation.error, null, "the fresh engine is waited for longer");
+	assert.equal(f.dictation.phase, "connecting");
+	await tick(ENGINE_LAST_CHANCE_MS - ENGINE_RESUME_CAP_MS);
 	assert.equal(rig.contexts.length, 2, "one replacement per run");
 	assert.equal(f.dictation.error, DICTATION_MIC_DEAD);
 	assert.equal(f.dictation.error, "Microphone didn't start. Try again.");
@@ -272,6 +282,37 @@ test("when the fresh engine won't run either, the run ends with DICTATION_MIC_DE
 	assert.ok(rig.tracks.every((t) => t.stopped), "the microphone is released");
 	assert.equal(Socket.all.length, 0);
 	assert.equal(pending.size, 0);
+});
+
+test("an engine that is only slow to start is waited for: the page's first engine, and a replacement", async () => {
+	const slow = (ctx: Ctx) => {
+		ctx.state = "suspended";
+		ctx.resume = () => { ctx.resumes++; return new Promise<void>((resolve) => { setTimeout(() => { ctx.set("running"); resolve(); }, 2000); }); };
+	};
+	rig.setup = slow;
+	const f = await fixture();
+	await begin(f);
+	await tick(ENGINE_RESUME_CAP_MS * 2);
+	assert.equal(rig.contexts.length, 1, "not replaced at the short wait");
+	assert.equal(f.dictation.error, null);
+	await tick(2000 - ENGINE_RESUME_CAP_MS * 2);
+	assert.equal(rig.contexts.length, 1);
+	await act(async () => { Socket.all[0]!.open(); });
+	rig.nodes.at(-1)!.say();
+	assert.equal(f.dictation.phase, "recording");
+	await act(async () => { f.dictation.cancel(); });
+	await settle();
+	// the kept engine is now stuck; its replacement is slow, not dead
+	rig.contexts[0]!.state = "interrupted";
+	rig.contexts[0]!.resume = () => new Promise<void>(() => {});
+	await begin(f);
+	await tick(ENGINE_RESUME_CAP_MS);
+	assert.equal(rig.contexts.length, 2);
+	await tick(2000);
+	assert.equal(rig.contexts.length, 2);
+	assert.equal(f.dictation.error, null);
+	await act(async () => { Socket.all.at(-1)!.open(); });
+	assert.equal(f.dictation.phase, "recording");
 });
 
 // 5–6: the silent-engine net
@@ -293,6 +334,9 @@ test("a 'running' engine that is silent is replaced once; silent again ends the 
 	assert.equal(f.dictation.error, null);
 	assert.equal(rig.tracks[0]!.stopped, false, "same stream");
 	await tick(ENGINE_SILENT_CHECK_MS);
+	assert.equal(f.dictation.error, null, "the check that would end the run is patient");
+	assert.equal(f.dictation.phase, "recording");
+	await tick(ENGINE_LAST_CHANCE_MS - ENGINE_SILENT_CHECK_MS);
 	assert.equal(f.dictation.error, DICTATION_MIC_DEAD);
 	assert.equal(f.dictation.phase, "idle");
 	assert.equal(rig.contexts.length, 2);
@@ -366,6 +410,7 @@ test("a tap on Stop while the replacement engine won't run: the stop ends the ru
 	assert.equal(f.dictation.error, null);
 	assert.equal(f.dictation.phase, "stopping");
 	await closeNormally();
+	await tick(ENGINE_LAST_CHANCE_MS);
 	assert.equal(f.dictation.phase, "idle");
 	assert.equal(f.dictation.error, null);
 	assert.deepEqual(rig.appends, ["kept words"]);
@@ -489,6 +534,8 @@ test("the Firefox fallback still works, and the dead-engine replacement is a bud
 	const f = await fixture();
 	await begin(f);
 	await tick(ENGINE_RESUME_CAP_MS);
+	assert.equal(rig.contexts.length, 1, "an engine made in this run gets the patient wait");
+	await tick(ENGINE_LAST_CHANCE_MS - ENGINE_RESUME_CAP_MS);
 	assert.equal(rig.contexts.length, 3, "dead engine → fresh 16 kHz engine → native engine");
 	assert.deepEqual(rig.contexts[1]!.options, { sampleRate: 16000 });
 	assert.equal(rig.contexts[2]!.options, undefined);
@@ -550,6 +597,7 @@ test("engineRunning, engineSilent and the constants", () => {
 	assert.equal(DICTATION_MIC_DEAD, "Microphone didn't start. Try again.");
 	assert.equal(ENGINE_RESUME_CAP_MS, 500);
 	assert.equal(ENGINE_SILENT_CHECK_MS, 700);
+	assert.equal(ENGINE_LAST_CHANCE_MS, 4000);
 	assert.equal(SHOWN_RECENTLY_MS, 2000);
 	assert.equal(LOSS_GRACE_MS, 1500);
 	assert.equal(captureErrorMessage(new DOMException("x", "NotAllowedError")), "Microphone permission denied");

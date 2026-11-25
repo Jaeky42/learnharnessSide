@@ -13,6 +13,11 @@ export const DICTATION_MIC_DEAD = "Microphone didn't start. Try again.";
 export const ENGINE_RESUME_CAP_MS = 500;
 /** After the graph is connected: how long before a silent engine is taken for dead. */
 export const ENGINE_SILENT_CHECK_MS = 700;
+/** The wait for an engine there is nothing to fall back from: one made in this run
+ *  (never a kept one), at its resume and at the silent check that would end the run.
+ *  A healthy engine can be slow to start (the sound moving to a headset), and giving
+ *  up on the last one early gains nothing. */
+export const ENGINE_LAST_CHANCE_MS = 4000;
 /** Events iOS queued while the page was frozen fire right after it is shown again. */
 export const SHOWN_RECENTLY_MS = 2000;
 /** With the page in front the whole time, soft evidence is looked at again after this. */

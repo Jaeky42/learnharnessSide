@@ -53,3 +53,19 @@ Reverted at the owner's word; what the owner asked for in its place is "Scrollin
 ### Dictation in Firefox: what was checked
 
 - **Checked** by an independent verifier in Chromium with a made-up microphone and a stand-in for Deepgram's socket: the normal path built one engine at 16,000 and sent 4,096-byte frames at about 33,000 bytes a second; with the 16,000 engine made to refuse as Firefox does, the run stayed on, the first engine was closed, a second ran at 44,100, the frames were the same size at the same rate (not three times it), the meter moved, the words landed, and a second run built no 16,000 engine. Ten seconds of a 440 Hz tone from 44,100 and from 48,000 came out at 439.98 Hz with its level kept and 159,744 samples (within one frame of 160,000).
+
+### Dictation after the app was away: what was checked
+
+- **How it went:** built by one implementer from the approved plan (the recorder, the rules file and 22 tests), read by the lead, checked by an independent verifier. Two changes followed:
+  - **from the lead's read:** a tap on Stop while an engine was being replaced could have a recorder wired into a run that was ending, or the new sentence shown over the stop. A guard and two tests; both tests fail without it.
+  - **from the verifier's read:** an engine that was only slow to start would have ended in the new sentence after two waits of 500 ms. An engine made in the run is now waited for 4 seconds; one more test.
+- **Tests** (Node 22, one file at a time): `tests/dictation-app-away.test.tsx` 25 of 25; the recorder's other files unchanged and passing (`dictation-flow` 16, `dictation-native-rate-flow` 6, `dictation-native-rate` 11, `dictation-warm` 5, `plugin-dictation` 16, `phone-dictation-error` 7, `side-tutor-ui` 46, `phone-layout` 66). Typecheck clean; lint 0 errors.
+- **The full suite** (the verifier's run, before the two changes above, `tests/safe-fetch.test.ts` left out, beside a running dev server and browser): 7,069 tests, 7,056 passed, 8 failed, 1 cancelled, 4 skipped. The failures: the four known files of the development sandbox, and `tests/headless-helper-lifecycle.test.ts` and `tests/plugin-grading-types.test.ts`, which passed when run again alone (put down to the load).
+- **In a browser** (the verifier; Chromium, server mode, the new-session screen, a made-up microphone, a stand-in for Deepgram's socket that counts the audio it is sent; iPhone 13 size unless said; run before the two changes above):
+  - a normal run: one engine, 27 frames of audio sent, the words in the box;
+  - **the kept engine stuck** (suspended, then made to read "interrupted" with a `resume()` that never settles): a second engine was built in the same run, 38 frames sent, the words in the box, no error. This is the reported fault;
+  - **every engine stuck:** three engines in all, then the red line "Microphone didn't start. Try again." above the box, gone after about 6 seconds, the microphone in the error colour and Dictate idle;
+  - **the microphone taken away** (the page made to read hidden, then the track muted): the run ended by itself after 11 frames, the words in the box, no error, Dictate idle;
+  - **the page hidden with the track left alone:** still recording 3 seconds later (35 frames); Stop then worked;
+  - **at 1280 × 800:** the normal run and the stuck engine, the same.
+- **Not checked:** a real iPhone or iPad, Safari, a real "interrupted" engine, a real microphone, Deepgram itself. The stuck engine and the muted track were made by script.

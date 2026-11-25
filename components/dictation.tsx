@@ -11,6 +11,7 @@ import { dispatchFocusedPluginShortcut } from "@/components/plugin-input-focus";
 // FORK (dictation after the app was away): the dead-engine and lost-mic rules.
 import {
 	DICTATION_MIC_DEAD,
+	ENGINE_LAST_CHANCE_MS,
 	ENGINE_RESUME_CAP_MS,
 	ENGINE_SILENT_CHECK_MS,
 	LOSS_GRACE_MS,
@@ -655,11 +656,12 @@ export function useDictation({ append, destination = "primary", disabled = false
 			 * (iOS leaves it "interrupted", or its resume never settles) is
 			 * replaced once per run; a running engine costs nothing new. Resolves
 			 * to null when the run went stale, throws DICTATION_MIC_DEAD when no
-			 * engine will run. */
+			 * engine will run. A kept engine gets the short wait (`cap`); one made
+			 * in this run gets the patient one, since it may only be slow to start. */
 			let replacedEngine = false;
-			const runningEngine = async (kept: AudioContext): Promise<AudioContext | null> => {
+			const runningEngine = async (kept: AudioContext, cap: number): Promise<AudioContext | null> => {
 				if (engineRunning(kept)) return kept;
-				await resumeWithin(kept, ENGINE_RESUME_CAP_MS);
+				await resumeWithin(kept, cap);
 				if (gen !== genRef.current) return null;
 				if (engineRunning(kept)) return kept;
 				if (replacedEngine) throw new Error(DICTATION_MIC_DEAD);
@@ -668,7 +670,7 @@ export function useDictation({ append, destination = "primary", disabled = false
 				const fresh = ensureAudioGraph();
 				await fresh.module;
 				if (gen !== genRef.current) return null;
-				if (!engineRunning(fresh.ctx)) await resumeWithin(fresh.ctx, ENGINE_RESUME_CAP_MS);
+				if (!engineRunning(fresh.ctx)) await resumeWithin(fresh.ctx, ENGINE_LAST_CHANCE_MS);
 				if (gen !== genRef.current) return null;
 				if (!engineRunning(fresh.ctx)) throw new Error(DICTATION_MIC_DEAD);
 				return fresh.ctx;
@@ -722,6 +724,7 @@ export function useDictation({ append, destination = "primary", disabled = false
 			 * start. An engine that says it is running but neither clocks nor sends
 			 * anything is replaced once per run (same stream; the socket and the
 			 * queue are left alone); silent again, the run ends with DICTATION_MIC_DEAD.
+			 * The check that would end the run waits the patient ENGINE_LAST_CHANCE_MS.
 			 * Skipped where the engine has no clock (older stand-ins). */
 			const armSilentNet = (ctx: AudioContext, worklet: AudioWorkletNode, heard: () => boolean) => {
 				const clockAtArm = (ctx as { currentTime?: unknown }).currentTime;
@@ -755,13 +758,14 @@ export function useDictation({ append, destination = "primary", disabled = false
 						setError(captureErrorMessage(e));
 						cleanup();
 					});
-				}, ENGINE_SILENT_CHECK_MS);
+				}, replacedEngine ? ENGINE_LAST_CHANCE_MS : ENGINE_SILENT_CHECK_MS);
 			};
 			const buildGraph = async (): Promise<boolean> => {
 				// FORK (dictation after the app was away): `keptCtx`, made to run below (was a suspended-only resume).
+				const hadEngine = sharedCtx !== null;
 				const { ctx: keptCtx, module } = ensureAudioGraph();
 				await module;
-				const ctx = await runningEngine(keptCtx);
+				const ctx = await runningEngine(keptCtx, hadEngine ? ENGINE_RESUME_CAP_MS : ENGINE_LAST_CHANCE_MS);
 				if (!ctx) return false;
 				if (gen !== genRef.current) return false;
 				// FORK (dictation after the app was away): a rebuild that outlives a tap on Stop wires nothing.
