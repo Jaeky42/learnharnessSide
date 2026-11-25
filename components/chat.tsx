@@ -106,7 +106,7 @@ import { ThinkingCard, ProblemCard, type PracticeThinkingData } from "@/componen
 import { GraphContextCard, type GraphContextData } from "@/components/graph-context-card";
 import { TopBar } from "@/components/top-bar";
 import { useIsTouchPhone } from "@/components/phone/use-phone";
-import { DictationErrorLine } from "@/components/phone/dictation-error-line"; // FORK (phone dictation error)
+import { DICTATION_ERROR_BESIDE_BUBBLE, DictationErrorLine } from "@/components/phone/dictation-error-line"; // FORK (phone dictation error)
 import { PluginTopBarActions } from "@/components/plugin-chrome";
 import { usePluginShortcutPage } from "@/components/plugin-shortcuts";
 import { createPluginSessionActionContext, type PluginSessionViewInput } from "@/src/core";
@@ -3125,7 +3125,7 @@ export function DockOverlay({
 			<div className="h-24 bg-gradient-to-t from-background via-background/85 to-transparent" />
 			<div ref={blockRef} data-phone="dock" className="relative bg-background pb-5">
 				{/* FORK (phone dictation error): phone only, floats above the dock (clear of the scroll-down disc and the Tutor's bubble). */}
-				<DictationErrorLine error={dictationError} className="mb-12" />
+				<DictationErrorLine error={dictationError} className={`mb-12 ${DICTATION_ERROR_BESIDE_BUBBLE}`} />
 				<div className={DOCK}>
 					<div ref={viewportRef} data-dock-viewport="" className="pointer-events-auto">
 					<div ref={bodyRef}>

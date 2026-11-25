@@ -13,8 +13,11 @@
  *   - It floats: absolutely positioned against the nearest positioned
  *     ancestor, with pointer-events off, so the message box and the lesson
  *     never move when it comes and goes.
- *   - Left-aligned and kept clear of the right 5.5rem, where the Tutor's
- *     bubble sits just above the message box.
+ *   - Centred on the screen (owner's ask; it was left-aligned), as wide as
+ *     its words, a long reason wrapping centred. Where the Tutor's bubble
+ *     sits just above the message box (the lesson), the caller narrows it by
+ *     5.5rem on BOTH sides (`DICTATION_ERROR_BESIDE_BUBBLE`), so it stays
+ *     centred and clear of the bubble.
  *
  * The mic icon's error colour is app/phone.css's, from the idle button's
  * `data-dictation-error` attribute (components/dictation.tsx).
@@ -26,6 +29,11 @@ import { cn } from "@/lib/utils";
 
 /** How long the line stays after a failure. */
 export const DICTATION_ERROR_MS = 5000;
+
+/** The line's place: centred above the bottom block, as wide as its words. */
+export const DICTATION_ERROR_PLACE = "inset-x-0 mx-auto w-fit max-w-[calc(100%-2rem)] text-center";
+/** For a screen with the Tutor's bubble at the right: the bubble's room kept on both sides. */
+export const DICTATION_ERROR_BESIDE_BUBBLE = "max-w-[calc(100%-11rem)]";
 
 /**
  * The failure to show right now: `error` for DICTATION_ERROR_MS after it
@@ -55,7 +63,8 @@ export function DictationErrorLine({ error, className }: { error: string | null 
 			role="alert"
 			data-testid="dictation-error-line"
 			className={cn(
-				"pointer-events-none absolute bottom-full left-4 w-fit max-w-[calc(100%-5.5rem)] rounded-xl border border-border bg-card/95 px-3 py-1.5 text-xs text-error shadow-lg backdrop-blur",
+				"pointer-events-none absolute bottom-full rounded-xl border border-border bg-card/95 px-3 py-1.5 text-xs text-error shadow-lg backdrop-blur",
+				DICTATION_ERROR_PLACE,
 				className,
 			)}
 		>

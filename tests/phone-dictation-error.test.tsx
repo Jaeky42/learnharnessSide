@@ -31,7 +31,7 @@ Object.assign(globalThis, {
 	HTMLElement: dom.window.HTMLElement, Element: dom.window.Element, IS_REACT_ACT_ENVIRONMENT: true,
 });
 const { createRoot } = await import("react-dom/client");
-const { DICTATION_ERROR_MS, DictationErrorLine } = await import("../components/phone/dictation-error-line.tsx");
+const { DICTATION_ERROR_BESIDE_BUBBLE, DICTATION_ERROR_MS, DictationErrorLine } = await import("../components/phone/dictation-error-line.tsx");
 
 const roots: { root: import("react-dom/client").Root; host: HTMLElement }[] = [];
 async function mount(error: string | null) {
@@ -67,6 +67,22 @@ describe("the short line above the message box", () => {
 		assert.ok(classes.includes("absolute") && classes.includes("pointer-events-none"));
 		// Clear of the Tutor's bubble at the right.
 		assert.ok(classes.some((c) => c.startsWith("max-w-[calc(100%-")));
+	});
+
+	it("is centred on the screen (owner's ask), and beside the Tutor's bubble keeps its room on both sides", async () => {
+		const { host } = await mount("Microphone didn't start. Try again.");
+		const classes = (line(host)!.getAttribute("class") ?? "").split(/\s+/);
+		for (const c of ["inset-x-0", "mx-auto", "w-fit", "text-center", "max-w-[calc(100%-2rem)]"]) assert.ok(classes.includes(c), c);
+		assert.ok(!classes.some((c) => c.startsWith("left-")), "no left-aligned place");
+		// The lesson's line: the bubble's 5.5rem on both sides, still centred.
+		const lesson = document.createElement("div");
+		document.body.appendChild(lesson);
+		const root = createRoot(lesson);
+		roots.push({ root, host: lesson });
+		await act(async () => root.render(<div className="relative"><DictationErrorLine error="x" className={`mb-12 ${DICTATION_ERROR_BESIDE_BUBBLE}`} /></div>));
+		const beside = (line(lesson)!.getAttribute("class") ?? "").split(/\s+/);
+		assert.ok(beside.includes("max-w-[calc(100%-11rem)]") && !beside.includes("max-w-[calc(100%-2rem)]"));
+		assert.ok(beside.includes("mx-auto") && beside.includes("inset-x-0") && beside.includes("mb-12"));
 	});
 
 	it("shows nothing while there is no error", async () => {
