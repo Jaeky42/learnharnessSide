@@ -27,8 +27,10 @@ function parse(text: string, media: string | null = null): Rule[] {
 	}
 }
 const rules = parse(css);
-const USER = '[data-session-find-root] > [data-testid="user-message"]';
-const ASSISTANT = "[data-session-find-root] > .is-assistant";
+const OLDER = "[data-older-transcript-row]";
+const USER = `[data-session-find-root] > [data-testid="user-message"]${OLDER}`;
+const ASSISTANT = `[data-session-find-root] > .is-assistant${OLDER}`;
+const spec = (sel: string) => (sel.match(/\[[^\]]+\]|\.[\w-]+/g) ?? []).length;
 
 describe("app/offscreen.css", () => {
 	it("is imported by the root layout", () => {
@@ -53,6 +55,22 @@ describe("app/offscreen.css", () => {
 		assert.deepEqual(phone.map((r) => [r.selectors, r.decls]), [
 			[[USER], ["contain-intrinsic-size: auto 100px"]],
 		]);
+	});
+	it("applies only to older rows: every selector needs upstream's attribute", () => {
+		for (const r of rules) for (const sel of r.selectors) assert.ok(sel.includes(OLDER), sel);
+	});
+	it("beats upstream's flat rule on older rows, and the draw override beats both", () => {
+		const fork = rules.find((r) => r.media === null && r.selectors[0] === USER)!;
+		const draw = rules.find((r) => r.decls.includes("content-visibility: visible"))!;
+		const upstream = 1; // [data-older-transcript-row]
+		for (const sel of fork.selectors) assert.ok(spec(sel) > upstream);
+		for (const sel of draw.selectors) assert.ok(spec(sel) > spec(USER) && spec(sel) > upstream);
+	});
+	it("pins upstream's attribute in chat.tsx and globals.css", () => {
+		const chat = readFileSync(path.join(root, "components/chat.tsx"), "utf8");
+		const globals = readFileSync(path.join(root, "app/globals.css"), "utf8");
+		assert.match(chat, /data-older-transcript-row=/);
+		assert.match(globals, /\[data-older-transcript-row\]\s*\{/);
 	});
 	it("isn't limited to browsers: the desktop app gets it too", () => {
 		assert.doesNotMatch(css, /lh-electron/);

@@ -31,12 +31,13 @@
  * has no computed styles or animation frames (the tests' DOMs).
  */
 
-/** The messages app/offscreen.css lets the browser skip. The same two
- *  selectors as the stylesheet;
+/** The messages app/offscreen.css lets the browser skip: older rows only
+ *  (upstream's `data-older-transcript-row`; the newest turn is never skipped,
+ *  so never needs drawing). The same two selectors as the stylesheet;
  *  tests/offscreen-target.test.ts keeps the two equal. */
 export const OFFSCREEN_BLOCK_SELECTORS = [
-	'[data-session-find-root] > [data-testid="user-message"]',
-	"[data-session-find-root] > .is-assistant",
+	'[data-session-find-root] > [data-testid="user-message"][data-older-transcript-row]',
+	"[data-session-find-root] > .is-assistant[data-older-transcript-row]",
 ] as const;
 const BLOCK = OFFSCREEN_BLOCK_SELECTORS.join(", ");
 /** The attribute that has app/offscreen.css draw a skipped message. */

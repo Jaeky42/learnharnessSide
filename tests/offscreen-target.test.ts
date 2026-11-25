@@ -25,13 +25,15 @@ const WINDOW_HEIGHT = 800;
 type Row = { el: HTMLElement; real: number; estimate: number; drawn: boolean; remembered: number | null; block: boolean };
 
 function setup({ rows: specs, off = false, browserApis = true }: {
-	rows: Array<{ kind: "user" | "assistant" | "card"; real: number; estimate?: number; drawn?: boolean }>;
+	/** `newest`: in the newest turn, so without upstream's older-row attribute: never skipped. */
+	rows: Array<{ kind: "user" | "assistant" | "card"; real: number; estimate?: number; drawn?: boolean; newest?: boolean }>;
 	off?: boolean;
 	browserApis?: boolean;
 }) {
+	const older = (spec: { newest?: boolean }) => spec.newest ? "" : " data-older-transcript-row";
 	const html = specs.map((spec, i) => spec.kind === "user"
-		? `<div data-testid="user-message" id="r${i}"><p>learner ${i}</p></div>`
-		: spec.kind === "assistant" ? `<div class="is-assistant" id="r${i}"><p>teacher ${i}</p></div>`
+		? `<div data-testid="user-message"${older(spec)} id="r${i}"><p>learner ${i}</p></div>`
+		: spec.kind === "assistant" ? `<div class="is-assistant"${older(spec)} id="r${i}"><p>teacher ${i}</p></div>`
 		: `<div class="card" id="r${i}"><p>card ${i}</p></div>`).join("");
 	const { window, document } = parseHTML(`<html><body><div id="main"><div data-session-find-root="">${html}</div></div></body></html>`);
 	const main = document.getElementById("main") as unknown as HTMLElement;
@@ -41,7 +43,7 @@ function setup({ rows: specs, off = false, browserApis = true }: {
 		estimate: spec.estimate ?? (spec.kind === "card" ? spec.real : 600),
 		drawn: spec.drawn ?? spec.kind === "card",
 		remembered: null,
-		block: spec.kind !== "card",
+		block: spec.kind !== "card" && !spec.newest,
 	}));
 	const ruleOn = () => !off;
 	const isDrawn = (row: Row) => !row.block || !ruleOn() || row.drawn || row.el.hasAttribute(DRAW_ATTRIBUTE);
@@ -332,6 +334,28 @@ describe("when it does nothing more than the plain jump", () => {
 		revealOffscreenTarget(outside as unknown as HTMLElement, env.main, () => { placed++; });
 		assert.equal(placed, 2);
 		assert.equal(env.drawnAttributes(), 0);
+	});
+});
+
+describe("the newest turn", () => {
+	it("is never skipped: a target in it needs no drawing, no attribute, no frame", () => {
+		const rows = Array.from({ length: 30 }, (_, i) => ({
+			kind: i % 2 ? "assistant" as const : "user" as const,
+			real: i % 2 ? 900 : 50,
+			drawn: i >= 22,
+			newest: i >= 28,
+		}));
+		const env = setup({ rows });
+		env.scrollTo(1e9);
+		env.main.scrollTo({ top: 1e9 });
+		env.scrolls.length = 0;
+		const target = env.passage(29);
+		scrollSessionTarget(target, env.main, env.context);
+		assert.equal(env.topOf(target) <= 700, true);
+		assert.equal(env.rows[29]!.el.hasAttribute(DRAW_ATTRIBUTE), false);
+		assert.equal(env.rows[28]!.el.hasAttribute(DRAW_ATTRIBUTE), false);
+		assert.equal(env.drawnAttributes(), 0);
+		assert.equal(env.pendingFrames(), 0);
 	});
 });
 

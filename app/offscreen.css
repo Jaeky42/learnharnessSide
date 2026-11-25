@@ -8,12 +8,18 @@
  * the dock spacer (a sibling of the column, never a child of it). The assistant's
  * MessageContent already clips with overflow-hidden, so paint containment adds
  * no new clipping there.
+ *
+ * Only OLDER rows: upstream (v0.7.0) marks every row before the newest learner
+ * turn with `data-older-transcript-row` (components/chat.tsx) and never skips
+ * the newest turn. These rules require that attribute too, so the newest turn
+ * is always drawn. They are more specific than upstream's own flat 800px rule
+ * (app/globals.css), so on older rows the per-kind estimates below win.
  */
-[data-session-find-root] > [data-testid="user-message"] {
+[data-session-find-root] > [data-testid="user-message"][data-older-transcript-row] {
 	content-visibility: auto;
 	contain-intrinsic-size: auto 60px;
 }
-[data-session-find-root] > .is-assistant {
+[data-session-find-root] > .is-assistant[data-older-transcript-row] {
 	content-visibility: auto;
 	contain-intrinsic-size: auto 700px;
 }
@@ -21,21 +27,22 @@
 /* The estimates are the mean heights measured in a long lesson (a narrower
  * column makes taller rows on a phone). A message drawn once remembers its
  * real height ("auto"). components/offscreen-target.ts uses the same two
- * selectors (OFFSCREEN_BLOCK_SELECTORS; a test keeps them equal).
+ * selectors, attribute included (OFFSCREEN_BLOCK_SELECTORS; a test keeps them equal).
  *
  * The assistant's estimate stays 700px on a phone, although its messages
  * average about 1,000px there: with 1000px a lesson opened 38px short of its
  * bottom at phone size (3 of 3 loads; 1px with 700px). */
 @media (max-width: 639.98px) {
-	[data-session-find-root] > [data-testid="user-message"] {
+	[data-session-find-root] > [data-testid="user-message"][data-older-transcript-row] {
 		contain-intrinsic-size: auto 100px;
 	}
 }
 
 /* A jump into a skipped message (Find, "Show in the lesson", a link to a
  * message) draws it, and the messages it brings on screen, for a few frames
- * before measuring: components/offscreen-target.ts sets the attribute. */
-[data-session-find-root] > [data-testid="user-message"][data-lh-draw],
-[data-session-find-root] > .is-assistant[data-lh-draw] {
+ * before measuring: components/offscreen-target.ts sets the attribute. It is
+ * more specific than both this sheet's rules and upstream's, so it wins. */
+[data-session-find-root] > [data-testid="user-message"][data-older-transcript-row][data-lh-draw],
+[data-session-find-root] > .is-assistant[data-older-transcript-row][data-lh-draw] {
 	content-visibility: visible;
 }
