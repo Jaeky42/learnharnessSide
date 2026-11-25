@@ -2,8 +2,8 @@
 
 import { useEffect, useState, type ReactElement, type ReactNode } from "react";
 import { HostDialog } from "@/components/host-dialog";
-import { fetchHere } from "@/components/cloud/session-move";
-import type { ChatDeleteMode, ChatListItem, FolderDeletionScope } from "@/src/core";
+import { fetchAllHere, fetchHere, HELD_ELSEWHERE_CODE } from "@/components/cloud/session-move";
+import { FOLDER_DELETE_FAILED_TEXT, type ChatDeleteMode, type ChatListItem, type FolderDeletionScope } from "@/src/core";
 
 /** The graph-traces checkbox copy (owner, 2026-09-24 flow rework — was
  *  the delete-nodes option's body in the two-button design): the
@@ -287,7 +287,9 @@ export function DeleteFolderDialog({
 		setBusy(true);
 		setFailure(null);
 		try {
-			const res = await fetch(`/api/graph/sources/folders/${encodeURIComponent(folder.id)}?mode=${mode}`, {
+			// FORK (cloud sync): every session inside that another device holds
+			// moves here first, all or nothing (owner: "move here, then delete").
+			const res = await fetchAllHere(folder.scope.chatIds, `/api/graph/sources/folders/${encodeURIComponent(folder.id)}?mode=${mode}`, {
 				method: "DELETE",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify(folder.scope),
@@ -298,7 +300,10 @@ export function DeleteFolderDialog({
 				return;
 			}
 			if (!res.ok) {
-				setFailure({ code: body.code ?? "error", error: body.error ?? `Delete failed (${res.status})` });
+				// FORK (cloud sync): a session that couldn't be moved here gets the
+				// approved line, never the server's "held by another device" text.
+				const held = res.status === 409 && body.code === HELD_ELSEWHERE_CODE;
+				setFailure({ code: body.code ?? "error", error: held ? FOLDER_DELETE_FAILED_TEXT : body.error ?? `Delete failed (${res.status})` });
 				setBusy(false);
 				return;
 			}

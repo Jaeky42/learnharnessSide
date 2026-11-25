@@ -229,6 +229,32 @@ export async function fetchHere(chatId: string, input: string, init?: RequestIni
 	return fetch(input, init);
 }
 
+/**
+ * FORK (cloud sync): a write that changes several sessions at once (the
+ * sidebar's folder Delete, owner's decision "move here, then delete"). Every
+ * one of them that another device holds moves here first, silently; all or
+ * nothing: when any move fails the write isn't sent and the made-up refusal
+ * comes back (code `session_held_elsewhere`). Where nothing has to move this
+ * is a plain fetch: an unpaired app makes no other request.
+ *
+ * The safety net: the server may still refuse because a session is held
+ * elsewhere (the page's `held` can be up to 10 s old). The refusal doesn't
+ * say which session, so every one of them is moved (the cloud state asked
+ * again) and the write is tried once more.
+ */
+export async function fetchAllHere(chatIds: readonly string[], input: string, init?: RequestInit): Promise<Response> {
+	const needed = chatIds.filter((chatId) => moves.has(chatId) || sessionNeedsMove(chatId));
+	if (needed.length > 0) {
+		const results = await Promise.all(needed.map((chatId) => ensureSessionHere(chatId)));
+		if (results.includes("failed")) return moveFailedResponse();
+	}
+	const response = await fetch(input, init);
+	if (!(await isHeldRefusal(response))) return response;
+	const again = await Promise.all(chatIds.map((chatId) => moveAfterRefusal(chatId)));
+	if (again.includes("failed")) return response;
+	return fetch(input, init);
+}
+
 /** SessionModel's gate (session-core.ts), for the session hook. */
 export function sessionMoveGate(chatId: string) {
 	return {

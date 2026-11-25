@@ -141,7 +141,8 @@ export async function deleteFolderWithSessions(folderId: string, mode: ChatDelet
 		if (running.has(id)) throw blockedIn(title, "extraction_winding_down", "");
 	}
 	const chatIds = new Set(targets.chatIds);
-	deleteSourcesTraces(stores.graphStore, chatIds, mode);
+	// FORK (cloud sync): logged as what it is, so other devices repeat it.
+	if (chatIds.size > 0) recordGraphAction({ kind: "delete-sources", ids: [...chatIds], mode }, () => deleteSourcesTraces(stores.graphStore, chatIds, mode));
 	for (const id of chatIds) {
 		const outcome = deleteIdleChatRecord(id);
 		if (!outcome.ok) throw new SourceDeletionError(outcome.error, outcome.status, outcome.code);

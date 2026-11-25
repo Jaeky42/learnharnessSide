@@ -94,6 +94,9 @@ export interface SessionHolder {
 /** The box's words when a session couldn't be moved here for an action (owner-approved). Also the `error` of the made-up refusal a write gets then. */
 export const SESSION_MOVE_FAILED_TEXT = "This session couldn't be continued here. Try again.";
 
+/** The folder Delete's failure line when a session inside couldn't be moved here first (owner-approved). Nothing is deleted then. Upstream's "Try again" follows it. */
+export const FOLDER_DELETE_FAILED_TEXT = "This folder couldn't be deleted right now. Nothing was deleted.";
+
 // ─── Slice 3: the desktop's own notices ─────────────────────────────────────
 
 /** What is off with this PC's sync. Never set on a PC that was never paired, or that the learner unpaired. */
