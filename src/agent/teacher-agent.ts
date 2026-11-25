@@ -212,7 +212,7 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 	const stopper = makeQuestionStopper(kind);
 	const narrationGuard = narrationGuardApplies(kind, engine.model, opts.tools !== undefined);
 	const narrationHooks = narrationGuard ? makeNarrationGuard() : undefined;
-	// FORK (empty reply): ChatGPT/OpenAI replies with only thinking are asked again.
+	// FORK (empty reply): an empty ChatGPT/OpenAI reply is asked again, once, with a nudge.
 	const emptyReply = emptyReplyGuardApplies(engine.model)
 		? makeEmptyReplyGuard({ model: engine.model, kind, isBackground: () => opts.callPurpose?.background === true })
 		: undefined;
@@ -290,7 +290,9 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 		// UI-only markers (plan-block) drop, the app's id fields strip, and
 		// an abort's dangling question call gets its INTERRUPTED result. It
 		// must never throw (pi's convertToLlm contract).
-		convertToLlm: toLlmMessages,
+		// FORK (empty reply): the one nudged request gets the hidden instruction here, at
+		// the conversion only: never in the agent's state, the record or the wire.
+		convertToLlm: emptyReply ? emptyReply.withNudge(toLlmMessages) : toLlmMessages,
 		...(opts.contextUpdates ? { prepareNextTurnWithContext: ({ context }: { context: { messages: AgentMessage[] } }) => {
 			const messages = opts.contextUpdates!(context.messages);
 			return messages.length ? { messages } : undefined;

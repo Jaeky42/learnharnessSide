@@ -39,3 +39,28 @@
   - The log lines read as built, for example `[LearnHarness] Empty reply: openai:gpt-5; teacher; empty reply 1; retrying; thinking: yes; phases before: none`, with no lesson text in them.
   - Seen: while the retry starts, the open thinking block shows an empty body for a moment before the second thought arrives.
   - Not run: a real OpenAI reply, and the ChatGPT sign-in path in a browser (the flow tests cover that path on the server side).
+
+### The plain retry, as it failed in use
+
+- **Shipped** as releases 0.6.51 (the guard, `a14973f`) and 0.6.52 (the test repair, the same app), and on the server image `:dev` from the same commit.
+- **On the owner's server, with GPT-6.2 Astra,** the same request came back empty every time: two turns, three requests each, six empty replies, then the red line in both turns. The log lines read:
+  - `[LearnHarness] Empty reply: chatgpt:gpt-6.2-astra; teacher; empty reply 1; retrying; thinking: no; phases before: commentary`
+  - then `empty reply 2; retrying` and `empty reply 3; giving up`, with the same other fields.
+- **What they showed:**
+  - the reply was completely empty, with no thinking block either (`thinking: no`);
+  - the text before the question was labelled `commentary`, so the earlier guess (`final_answer`) was wrong;
+  - an identical request gets the identical empty answer, so a plain retry cannot help.
+- **What did work,** by the owner's experience: a real user message ("continue") typed after the empty turn. The learner's answer reaches the model as the question tool's result, not as a user message. That led to the nudge (`models-and-agents.md`, "ChatGPT and OpenAI: an empty reply is asked again").
+
+### The nudge, what was run
+
+- **No real model.** Node 22, the development sandbox.
+- **`tests/empty-reply-flow.test.ts`** (6 tests, all pass), the real `handleChatInput` through the real ChatGPT stream with a scripted Responses backend:
+  - empty, then a normal reply: 2 requests with their own leases; the second request's last input item is a user message whose text is exactly the instruction, and it has one input item more than the first and none of the dropped reply; the saved record is the answer's result and the normal reply only; the saved file and every wire event are free of the instruction; a page model fed that wire never shows more than one assistant message; usage for both requests;
+  - empty twice: 2 requests; the record ends on the failed reply (the nudged reply's thinking); `retryDrops` accepts it; a `retry` input runs a normal turn whose one request has no nudge;
+  - a nudged reply that calls a tool: 3 requests; the third, after the tool result, has no nudge;
+  - an automatic wake (`steers`) whose reply is empty: 1 request, no nudge; a tool call then an empty reply: not nudged; an Anthropic-labelled scripted engine: not nudged; an OpenAI-labelled one: nudged, the nudge being the last message the engine saw.
+- **`tests/empty-reply-guard.test.ts`**: 28 tests, all pass (the nudge armed for one conversion, used up there and cleared by any reply; the instruction word for word; the log words; the guard and the page agreeing on what is empty).
+- **`tests/empty-reply-page.test.ts`**: 9 tests, all pass; 4 of them fail with the page's rule switched off in a scratch copy (the ones that expect the empty attempt hidden), the 5 that expect a message kept pass either way.
+SUITE_PLACEHOLDER
+
