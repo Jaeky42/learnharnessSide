@@ -8,7 +8,23 @@ import { deepgramListenUrl, type DictationLanguage } from "@/src/core";
 import { useDictationLanguage } from "@/components/dictation-preference";
 import { setDictationActive } from "@/components/dictation-state";
 import { dispatchFocusedPluginShortcut } from "@/components/plugin-input-focus";
+// FORK (dictation after the app was away): the dead-engine and lost-mic rules.
+import {
+	DICTATION_MIC_DEAD,
+	ENGINE_RESUME_CAP_MS,
+	ENGINE_SILENT_CHECK_MS,
+	LOSS_GRACE_MS,
+	captureErrorMessage,
+	captureEvidence,
+	captureLost,
+	engineRunning,
+	engineSilent,
+	lossAction,
+	pageHidden,
+	resumeWithin,
+} from "@/components/dictation-capture";
 export { isDictationActive } from "@/components/dictation-state";
+export { DICTATION_MIC_DEAD } from "@/components/dictation-capture"; // FORK (dictation after the app was away)
 
 /**
  * Voice dictation — the cloud engine (STT wave 1, 2026-09-17).
@@ -420,6 +436,23 @@ export function useDictation({ append, destination = "primary", disabled = false
 	const waitersRef = useRef<Array<{ resolve: () => void; reject: (error: unknown) => void }>>([]);
 	const appendFailureRef = useRef<{ error: unknown } | null>(null);
 	const appendPendingRef = useRef(false);
+	/* FORK (dictation after the app was away): the run's capture watchers (track,
+	 * engine and page listeners plus the grace timer; the function removes them),
+	 * the engine the run's graph is connected to, the silent-engine check's
+	 * timer, and stop() for the watchers (declared below start). */
+	const captureWatchRef = useRef<(() => void) | null>(null);
+	const runCtxRef = useRef<AudioContext | null>(null);
+	const silentNetRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+	const stopRef = useRef<() => void>(() => {});
+	const disarmCapture = useCallback(() => {
+		captureWatchRef.current?.();
+		captureWatchRef.current = null;
+		runCtxRef.current = null;
+		if (silentNetRef.current) {
+			clearTimeout(silentNetRef.current);
+			silentNetRef.current = null;
+		}
+	}, []);
 
 	/** Flush into this run's fixed destination. Called exactly once at cleanup; the
 	 *  buffer clears itself so double-cleanup is a no-op. */
@@ -450,6 +483,7 @@ export function useDictation({ append, destination = "primary", disabled = false
 			safetyRef.current = null;
 		}
 		pendingRef.current = [];
+		disarmCapture(); // FORK (dictation after the app was away)
 		for (const track of streamRef.current?.getTracks() ?? []) track.stop();
 		streamRef.current = null;
 		sourceRef.current?.disconnect();
@@ -489,7 +523,7 @@ export function useDictation({ append, destination = "primary", disabled = false
 			// Both branches consume the promise, including stop-without-finish.
 			void Promise.resolve(appended).then(() => complete(null), (error: unknown) => complete({ error }));
 		} else complete(failure);
-	}, [flush, owner, setPhase]);
+	}, [flush, owner, setPhase, disarmCapture]); // FORK (dictation after the app was away): disarmCapture
 
 	/** Open the Deepgram socket and wire its messages. `gen` guards staleness. */
 	const openSocket = useCallback(
@@ -530,6 +564,13 @@ export function useDictation({ append, destination = "primary", disabled = false
 				if (ev.code === 1000) {
 					// Our own CloseStream landing: finalize now — the stop path's
 					// safety net stays as the no-close backstop only.
+					cleanup();
+					return;
+				}
+				// FORK (dictation after the app was away): the microphone was taken
+				// away (iOS, the app left mid-run): end the run keeping the words,
+				// with no error and no reconnect.
+				if (captureLost(streamRef.current?.getTracks() ?? [], runCtxRef.current)) {
 					cleanup();
 					return;
 				}
@@ -610,17 +651,129 @@ export function useDictation({ append, destination = "primary", disabled = false
 			// per-run costs (context creation, module fetch) are gone.
 			// FORK (Firefox sample rate): built by a function so a NotSupportedError
 			// from the 16 kHz graph can retry once with a native-rate graph.
+			/* FORK (dictation after the app was away): a kept engine that won't run
+			 * (iOS leaves it "interrupted", or its resume never settles) is
+			 * replaced once per run; a running engine costs nothing new. Resolves
+			 * to null when the run went stale, throws DICTATION_MIC_DEAD when no
+			 * engine will run. */
+			let replacedEngine = false;
+			const runningEngine = async (kept: AudioContext): Promise<AudioContext | null> => {
+				if (engineRunning(kept)) return kept;
+				await resumeWithin(kept, ENGINE_RESUME_CAP_MS);
+				if (gen !== genRef.current) return null;
+				if (engineRunning(kept)) return kept;
+				if (replacedEngine) throw new Error(DICTATION_MIC_DEAD);
+				replacedEngine = true;
+				dropAudioGraph();
+				const fresh = ensureAudioGraph();
+				await fresh.module;
+				if (gen !== genRef.current) return null;
+				if (!engineRunning(fresh.ctx)) await resumeWithin(fresh.ctx, ENGINE_RESUME_CAP_MS);
+				if (gen !== genRef.current) return null;
+				if (!engineRunning(fresh.ctx)) throw new Error(DICTATION_MIC_DEAD);
+				return fresh.ctx;
+			};
+			/* FORK (dictation after the app was away): stop as if Stop was tapped
+			 * (words kept, no error) when the microphone is taken away; installed
+			 * once the graph is connected, removed by disarmCapture(). */
+			const watchCapture = (ctx: AudioContext) => {
+				captureWatchRef.current?.();
+				runCtxRef.current = ctx;
+				let shownAt: number | null = null;
+				let graceTimer: ReturnType<typeof setTimeout> | null = null;
+				const live = () =>
+					gen === genRef.current && (phaseRef.current === "connecting" || phaseRef.current === "recording");
+				const lost = () => captureEvidence(streamRef.current?.getTracks() ?? [], ctx);
+				const evaluate = () => {
+					if (!live()) return;
+					const action = lossAction(lost(), { hidden: pageHidden(), shownAt, now: Date.now() });
+					if (action === "stop") stopRef.current();
+					else if (action === "recheck" && !graceTimer) {
+						graceTimer = setTimeout(() => {
+							graceTimer = null;
+							if (live() && lost()) stopRef.current();
+						}, LOSS_GRACE_MS);
+					}
+				};
+				const onVisibility = () => {
+					if (!pageHidden()) shownAt = Date.now();
+					evaluate();
+				};
+				const removals: Array<() => void> = [];
+				const listen = (target: unknown, types: string[], fn: () => void) => {
+					const t = target as { addEventListener?: unknown; removeEventListener?: unknown } | null;
+					if (!t || typeof t.addEventListener !== "function" || typeof t.removeEventListener !== "function") return;
+					const et = t as EventTarget;
+					for (const type of types) et.addEventListener(type, fn);
+					removals.push(() => {
+						for (const type of types) et.removeEventListener(type, fn);
+					});
+				};
+				for (const track of stream.getTracks()) listen(track, ["ended", "mute"], evaluate);
+				listen(ctx, ["statechange"], evaluate);
+				if (typeof document !== "undefined") listen(document, ["visibilitychange"], onVisibility);
+				captureWatchRef.current = () => {
+					for (const remove of removals) remove();
+					if (graceTimer) clearTimeout(graceTimer);
+					graceTimer = null;
+				};
+			};
+			/* FORK (dictation after the app was away): a net that doesn't block the
+			 * start. An engine that says it is running but neither clocks nor sends
+			 * anything is replaced once per run (same stream; the socket and the
+			 * queue are left alone); silent again, the run ends with DICTATION_MIC_DEAD.
+			 * Skipped where the engine has no clock (older stand-ins). */
+			const armSilentNet = (ctx: AudioContext, worklet: AudioWorkletNode, heard: () => boolean) => {
+				const clockAtArm = (ctx as { currentTime?: unknown }).currentTime;
+				if (typeof clockAtArm !== "number") return;
+				if (silentNetRef.current) clearTimeout(silentNetRef.current);
+				silentNetRef.current = setTimeout(() => {
+					silentNetRef.current = null;
+					if (gen !== genRef.current || workletRef.current !== worklet) return;
+					if (!engineSilent(heard(), clockAtArm, (ctx as { currentTime?: unknown }).currentTime)) return;
+					if (replacedEngine) {
+						setError(DICTATION_MIC_DEAD);
+						cleanup();
+						return;
+					}
+					replacedEngine = true;
+					captureWatchRef.current?.();
+					captureWatchRef.current = null;
+					runCtxRef.current = null;
+					try {
+						sourceRef.current?.disconnect();
+					} catch {}
+					sourceRef.current = null;
+					try {
+						worklet.disconnect();
+					} catch {}
+					workletRef.current = null;
+					dropAudioGraph();
+					buildGraph().catch((e: unknown) => {
+						// A run that is already stopping ends by itself, with its words and no error.
+						if (gen !== genRef.current || phaseRef.current === "stopping") return;
+						setError(captureErrorMessage(e));
+						cleanup();
+					});
+				}, ENGINE_SILENT_CHECK_MS);
+			};
 			const buildGraph = async (): Promise<boolean> => {
-				const { ctx, module } = ensureAudioGraph();
+				// FORK (dictation after the app was away): `keptCtx`, made to run below (was a suspended-only resume).
+				const { ctx: keptCtx, module } = ensureAudioGraph();
 				await module;
-				if (ctx.state === "suspended") await ctx.resume();
+				const ctx = await runningEngine(keptCtx);
+				if (!ctx) return false;
 				if (gen !== genRef.current) return false;
+				// FORK (dictation after the app was away): a rebuild that outlives a tap on Stop wires nothing.
+				if (phaseRef.current === "stopping") return false;
 
+				let heard = false; // FORK (dictation after the app was away): the silent-engine net
 				const worklet = needsNativeRate
 					? new AudioWorkletNode(ctx, "pcm-capture", { processorOptions: { targetRate: 16000 } })
 					: new AudioWorkletNode(ctx, "pcm-capture");
 				workletRef.current = worklet;
 				worklet.port.onmessage = (e) => {
+					heard = true; // FORK (dictation after the app was away)
 					if (gen !== genRef.current) return;
 					const msg = e.data as { type: string; rms?: number; buffer?: ArrayBuffer };
 					if (msg.type === "level") {
@@ -642,6 +795,9 @@ export function useDictation({ append, destination = "primary", disabled = false
 				// Pull the graph with silence out (the worklet writes no output) —
 				// an unconnected worklet node is never clocked.
 				worklet.connect(ctx.destination);
+				// FORK (dictation after the app was away): watch for a lost mic and a silent engine.
+				watchCapture(ctx);
+				armSilentNet(ctx, worklet, () => heard);
 				return true;
 			};
 			try {
@@ -694,6 +850,7 @@ export function useDictation({ append, destination = "primary", disabled = false
 		const gen = genRef.current;
 		if (phaseRef.current !== "recording" && phaseRef.current !== "connecting") return;
 		setPhase("stopping");
+		disarmCapture(); // FORK (dictation after the app was away)
 
 		// Mic dies FIRST — no more audio enqueues (dictate pattern). The
 		// per-run nodes die with it; the AudioContext stays (mitigation C).
@@ -720,7 +877,8 @@ export function useDictation({ append, destination = "primary", disabled = false
 		} else {
 			cleanup();
 		}
-	}, [cleanup, setPhase]);
+	}, [cleanup, setPhase, disarmCapture]); // FORK (dictation after the app was away): disarmCapture
+	stopRef.current = stop; // FORK (dictation after the app was away): the capture watchers stop through this
 
 	const cancel = useCallback(() => {
 		if (phaseRef.current === "idle") return;

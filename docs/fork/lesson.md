@@ -156,7 +156,44 @@
     - Any other failure, or a failing retry, ends the run with its reason as before.
   - **Code:** `components/dictation.tsx` (`needsNativeRate`, `dropAudioGraph`, `isGraphRateError`, `buildGraph` in `start`; each edit marked `FORK (Firefox sample rate)`), `public/worklets/pcm-capture.js`. Tests: `tests/dictation-native-rate.test.ts` (the worklet), `tests/dictation-native-rate-flow.test.tsx` (the recorder with stand-in engines).
 
+- **Dictation after the app was away** (owner's report, the iPhone's home-screen app: "my dictation isnt working after i close my ios learnharness web app and reopen it. and sometimes it shows a red error message that mentions deepgram").
+  - **The cause below is a working assumption:** Chromium has no such interruption, and the owner couldn't reproduce the red line to read it. The owner's iPhone is the proof.
+  - **The assumed cause:** the recorder keeps one audio engine for the life of the page (upstream's `sharedCtx`) and woke it only when it read "suspended". When iOS puts the app in the background it interrupts the engine, and it can stay that way after the app is shown again: its state reads "interrupted", or `resume()` never settles (WebKit bugs 263627, 273511, 276016, 281566, 281955 and 291892, open when this was written). Used as it was, the engine clocked nothing: the bars stood still, no audio reached Deepgram, Deepgram hung up after about 10 seconds, the one reconnect got no audio either, and the run ended with "Deepgram connection lost (…)" about 20 seconds after the tap. A run stopped before that ended with no words and no message.
+    - The same red line came from leaving the app during a run: iOS takes the microphone from a home-screen app in the background (WebKit bug 239602), the connection dies, and the reconnect gets no audio.
+  - **Starting a run:**
+    - an engine that reads "running" is used as before: no new call and no wait;
+    - any other state: `resume()` is given at most 500 ms (`ENGINE_RESUME_CAP_MS`). Still not running, the engine is closed and a fresh one built in the same run (the Firefox fix's `dropAudioGraph`), once per run. A fresh one that won't run either ends the run with "Microphone didn't start. Try again.";
+    - **a net that holds nothing up:** 700 ms after the recorder is wired (`ENGINE_SILENT_CHECK_MS`), an engine that has sent nothing from its worklet and whose clock (`currentTime`) hasn't moved is replaced the same way, with the same microphone stream, the connection and the queued audio left alone. It shares the one replacement per run; silent again, the run ends with the same sentence. The clock is read because it doesn't depend on the page's own thread being free;
+    - **told by the symptom, never by the device's name**, so every device where the engine runs makes the calls it made before.
+  - **The microphone taken away during a run:** the run stops as if Stop was tapped. The words so far land in the box, and no error shows.
+    - **What counts:** a microphone track that ended; a track the system muted; the engine no longer running (`captureEvidence` in `components/dictation-capture.ts`). Only positive evidence counts.
+    - **When it is looked at:** at the track's `ended` and `mute` events, the engine's `statechange`, the page's `visibilitychange` (both ways), and when Deepgram's connection drops.
+    - **Stopped at once** for an ended track, while the page is hidden, and for 2 seconds after it is shown again (`SHOWN_RECENTLY_MS`: what iOS queued while the page was frozen arrives then). **With the page in front the whole time** a mute or an engine that stopped is looked at again after 1.5 seconds (`LOSS_GRACE_MS`) and stops the run only if it still holds, so a moment's mute while the sound moves to a headset doesn't end a dictation.
+    - **A connection that drops with the capture lost** ends the run with its words and no reconnect. With the capture alive it reconnects once, as upstream built it, and "Deepgram connection lost (…)" stays for a real network loss.
+    - **Not a reason:** the page being hidden. Dictating on a computer with another window or tab in front carries on as before.
+  - **The Tutor's Dictate** uses the same recorder and gets both parts.
+  - **A tap on Stop while an engine is being replaced** ends the run as any Stop does: nothing more is wired, and no error shows.
+
+### The owner's decisions and approved words
+
+#### Dictation after the app was away
+
+- **Leaving the app during a dictation: it stops and the words are kept** (the owner's choice of three, from drawings; the others were carrying on by itself at the return, which would switch the microphone on without a tap, and stopping with the words thrown away).
+- **The sentence** when no engine will run (`DICTATION_MIC_DEAD` in `components/dictation-capture.ts`; the owner's choice of three): "Microphone didn't start. Try again." A tap on Dictate tries again, as after any failed run.
+- **Every device** gets the taken-away rule (over browsers only, and over touch browsers only). On a computer it matters only when the microphone really goes during a run (unplugged, say): the run used to carry on in silence until stopped.
+- **The plan** (the two parts above, told by the symptom) was approved by the owner in chat.
+
 ### Rulings, limits and open items
+
+- **Dictation after the app was away:**
+  - **Rulings made while building (for the owner to review):** the numbers (500 ms for the wake-up, 700 ms for the net, 2 seconds after the page is shown, 1.5 seconds of grace in front); a `resume()` slower than 500 ms on a healthy engine gets a fresh engine, which costs the building of one and nothing else; an engine that merely reads "suspended" during a run, with the page in front, stops the run after the 1.5 seconds.
+  - **Known limits:** if iOS leaves the microphone alone while the app is away and nothing is seen lost at the return, the dictation carries on; an audio failure that only reloading the page cures (WebKit bug 319706, iOS 26) ends in the new sentence, and closing the app fully is the way out; a run whose engine stops clocking later than the 700 ms check, with nothing else seen, still ends in upstream's "Deepgram connection lost (…)".
+  - **Not checked:** a real iPhone or iPad, the home-screen app, a real microphone, Deepgram itself. WebKit's bug pages couldn't be opened from the development sandbox (the host is outside its network); the bug numbers and what they say are from search results.
+  - **Only the owner's iPhone can show** whether a fresh engine runs where the kept one is stuck, whether the words land when the app is left during a run, and what the red line reads if a dictation still fails: ask what it reads.
 
 - **Dictation in Firefox:**
   - **Not checked:** a real Firefox, on Android or a computer; a real microphone; Deepgram's own recognition of the converted audio. If it still turns off on the owner's phone, the line above the message box now says why: ask what it reads.
+
+### Code and tests
+
+- **Dictation after the app was away:** `components/dictation-capture.ts` (fork-owned: the sentence, the four numbers and the rules `engineRunning`, `captureEvidence`, `captureLost`, `lossAction`, `engineSilent`, `resumeWithin`); `components/dictation.tsx` (`runningEngine`, `watchCapture` and `armSilentNet` in `start`, the check in the socket's `close` handler, `disarmCapture` in `cleanup` and `stop`; each edit marked `FORK (dictation after the app was away)`). Tests: `tests/dictation-app-away.test.tsx` (the recorder with stand-in engines, tracks and a page that can be hidden: a stuck engine replaced, a suspended one woken with the calls of before, a healthy one untouched, no engine running, the silent net, Stop during a replacement, a track ending, a mute hidden, just shown and in front, the engine interrupted, the page hidden with a live capture, the connection dropping both ways, the Firefox fallback beside it, and the rules).
