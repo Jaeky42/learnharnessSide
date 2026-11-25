@@ -203,3 +203,14 @@ Status: **Phases 1–4 done (server mode, sign-in on the server, phone layouts, 
 - **Way back:** the tree at `dce63584`.
 - **Not done, on purpose:** the 42 upstream files whose fork edits carry no marker got no new comments (they are listed in "Every upstream file the fork has edited" in `docs/fork/upstream.md`); upstream's three test helpers at the top of `tests/` stayed where they are; the temporary keyboard readout and the `TODO(owner wording)` placeholder are untouched; `main` and the old session branches were not touched.
 - **For the owner to know:** the files loaded into every session come to about 440 KB, against about 530 KB before, not the roughly 300 KB estimated in the plan: almost all of the text turned out to be live rules, as-built contracts and lists for the owner, which stay in the topic files.
+
+### An empty reply is asked again (releases 0.6.51 and 0.6.52)
+
+- **What:** on ChatGPT and OpenAI models, a reply owed to the learner that has only thinking is dropped and requested again in the same turn, up to 2 times; still empty, it is saved as a failed reply, so the failed-reply line and its Retry apply (`docs/fork/models-and-agents.md`, "ChatGPT and OpenAI: an empty reply is asked again").
+- **Built on** `claude/modest-euler-dy4rc7`, from `fa5dda0`: `a14973f` (the guard, its tests and docs), `cfe18d7` and `711576f` (docs).
+- **Shipped** with the owner's word ("Ship to both"): `711576f` to `claude/pensive-goldberg-7dty2m`, then to `side-tutor`, both plain fast-forwards. The Windows workflow published **release 0.6.51**.
+- **The server image did not build from that commit.** Both server image runs hung in "Every other test" until the job's 30-minute limit. The cause was not this round: two cases of `tests/gateway-review.test.ts` redeemed an invite made on the helpers' fixed clock (15 November 2026) through a gateway on the real clock, and an invite lasts 7 days, so from 22 November 12:00 UTC the test waited forever. The last passing run was on 22 November at 09:52 UTC.
+- **The repair** (`cce472a`, `65bf2fb`; test files and docs only): those two cases, and one in `tests/gateway-lifecycle.test.ts` that would have failed from 15 December, give the gateway the test's clock. Shipped with the owner's word ("Both branches") to both branches at `65bf2fb`. The server image `:dev` was published from it (typecheck, tests, lint, the image's smoke test and the accounts stack tests all passed), and the Windows workflow published **release 0.6.52**, the same app as 0.6.51.
+- **Way back:** `git revert a14973f`; the server image built from `dce63584`, the one before this round.
+- **The owner's word:** the plan approved ("Approved, build it"); shipped at the owner's word. Not yet confirmed in use: no real ChatGPT model was run before the ship.
+

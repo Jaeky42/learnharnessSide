@@ -4,9 +4,9 @@ Kept current: a ship adds one row here and one entry in `history/ship-log.md`. T
 
 ## Where the branches stand
 
-- `side-tutor` feeds the Windows app (every push that changes more than `CLAUDE.md` or `docs/` publishes a release) and the server image `:latest`. `claude/pensive-goldberg-7dty2m` feeds the server image `:dev`, which the owner's server follows. `claude/upstream-0.6.0` is the working branch and builds nothing. The docs cleanup brought all three to the same commit; its commits carry `[skip ci]`, so no release and no server image were built for it, and the released app and the server image are still those of the dictation round (built from `dce63584`). Details: `releases.md`, "Which branch feeds what".
+- `side-tutor` feeds the Windows app (every push that changes more than `CLAUDE.md` or `docs/` publishes a release) and the server image `:latest`. `claude/pensive-goldberg-7dty2m` feeds the server image `:dev`, which the owner's server follows. Both are at the empty-reply round's commit (`65bf2fb`, plus its docs-only ship record). `claude/upstream-0.6.0`, the earlier working branch, builds nothing and was not moved by that round (it is at the docs cleanup's commit, `fa5dda0`). Details: `releases.md`, "Which branch feeds what".
 - Sync protocol **3** (`SYNC_PROTOCOL_VERSION` in `src/core/sync/protocol.ts`); chat record format 2; Flashcards' file format 1. The server and the PC must speak the same protocol, the server updated first.
-- The latest release is **0.6.49**, the dictation round, built from `dce63584` (read from the repository's releases).
+- The latest release is **0.6.52**, the empty-reply round with its test repair, built from `65bf2fb` (read from the repository's releases). The server image `:dev` was published from the same commit.
 
 ## What shipped
 
@@ -14,6 +14,7 @@ Newest first. "Not recorded": the docs give none.
 
 | Round | What it is | Code commit(s) | Release | Way back | The owner's word |
 |---|---|---|---|---|---|
+| An empty reply is asked again | On ChatGPT and OpenAI models, a reply owed to the learner that has only thinking is silently requested again, up to 2 times; still empty, the failed-reply line with Retry. And two gateway tests put on the test's clock, which had hung the server image workflow | `a14973f` (the guard), `cce472a` and `65bf2fb` (the tests); from `fa5dda0` | 0.6.51 (the guard), then 0.6.52 (the test repair; the app is the same) | `git revert a14973f`; the server image tagged for `dce63584` | the plan approved ("Approved, build it"), shipped at the owner's word ("Ship to both", twice); not yet confirmed with a real ChatGPT model. `models-and-agents.md`, "ChatGPT and OpenAI: an empty reply is asked again"; `history/ship-log.md` |
 | The docs regrouped, and a comment-only source tidy | The fork's docs split by topic into `docs/fork/` and corrected; inside upstream's files every fork marker comment reads `FORK (topic)`; three test helpers moved to `tests/helpers/`. No behaviour change | `095e973e` (the tidy), `3ccae15f` (the move, word for word), then the corrections; from `dce63584` | none: every commit carries `[skip ci]` | the tree at `dce63584` (`git revert` the range from it) | the plan was approved by the owner ("approved"); the result not yet seen. `README.md`; `history/ship-log.md`, "The docs regrouped into docs/fork/, and a comment-only source tidy (no release)" |
 | Dictation in Firefox, and a failed Dictate's reason on a phone | The recorder retries at the device's own rate when Firefox refuses 16 kHz; on a phone a failed Dictate shows why | `6c1e714`, `3033b56` (fast-forward from `b40cd07`) | 0.6.49 | `git revert 6c1e714` (the fallback); `git revert 3033b56` (the phone's line) | not yet confirmed (the Firefox cause is an assumption only the owner's Android phone can confirm). `lesson.md`, "Dictation"; `phone-and-tablet.md`, "Screens" |
 | Seamless sessions, the pairing form's hint, GPT-6.2 | A session moves to the device you type on: no "Held by", no Take over; GPT-6.2 Astra and Sol in the model list | `ca90585` to `ebdc405`; dry runs on `56e6091`; shipped as `b40cd07` (from `d4c05e6`) | 0.6.48 | the server image tagged `d4c05e6`; revert `ca90585` to `ebdc405` | seamless sessions: not yet confirmed on a device. GPT-6.2: "they appear!" (on the phone). `cloud-sync.md`, "Seamless sessions"; `models-and-agents.md`, "OpenAI and ChatGPT: GPT-6.2 in the model list" |
@@ -74,7 +75,7 @@ Newest first. "Not recorded": the docs give none.
 - `lesson.md`: "Highlight, then Ask on a touch screen" and "Scrolling into a check" (what only the owner's devices can show); "Dictation" (Firefox on the owner's Android phone).
 - `side-tutor.md`: "Speaking to the tutor" (the Tutor's Dictate has never met a real microphone); "On a phone" (the swipe's feel).
 - `performance.md`: "Known faults with the rule on" (Safari's anchoring and Find, the scrollbar, the slide to the bottom).
-- `models-and-agents.md`: a lesson with GPT-6.2 not reported yet; the research wrap-up with a real model; "ChatGPT and OpenAI: an empty reply is asked again" (not shipped yet): no real ChatGPT or OpenAI model was run and the cause of the empty reply is not known, and how often a plain retry is enough only the owner's use and the server log can show.
+- `models-and-agents.md`: a lesson with GPT-6.2 not reported yet; the research wrap-up with a real model; "ChatGPT and OpenAI: an empty reply is asked again": no real ChatGPT or OpenAI model was run and the cause of the empty reply is not known, and how often a plain retry is enough only the owner's use and the server log can show.
 
 ## Not built
 
