@@ -69,6 +69,8 @@ interface Move {
 	abandon: () => void;
 	/** The server's status that brought the session here ("yours", "moved", "continued-offline"), once it has. */
 	arrival: () => string | null;
+	/** Callers waiting on it (or a pre-warm, which never lets go): a cancelled box abandons the move only when it was the last. */
+	shares: number;
 }
 const moves = new Map<string, Move>();
 const arrivalHandlers = new Map<string, () => Promise<boolean>>();
@@ -147,6 +149,7 @@ function startMove(chatId: string): Move {
 	const move: Move = {
 		abandon,
 		arrival: () => arrival,
+		shares: 0,
 		promise: run().then((result) => {
 			if (result === "here" || result === "here-changed") failed.delete(chatId);
 			return result;
@@ -162,8 +165,29 @@ function startMove(chatId: string): Move {
 	return move;
 }
 
-async function settle(chatId: string, move: Move, raise: boolean): Promise<MoveResult> {
-	const result = await move.promise;
+/** A move's outcome, or "cancelled" as soon as `cancel` aborts. */
+function untilCancelled<T>(promise: Promise<T>, cancel?: AbortSignal): Promise<T | "cancelled"> {
+	if (!cancel) return promise;
+	if (cancel.aborted) return Promise.resolve("cancelled");
+	return new Promise((resolve, reject) => {
+		const onAbort = () => resolve("cancelled");
+		cancel.addEventListener("abort", onAbort, { once: true });
+		promise.then(
+			(value) => { cancel.removeEventListener("abort", onAbort); resolve(value); },
+			(error: unknown) => { cancel.removeEventListener("abort", onAbort); reject(error); },
+		);
+	});
+}
+
+function settle(chatId: string, move: Move, raise: boolean): Promise<MoveResult>;
+function settle(chatId: string, move: Move, raise: boolean, cancel: AbortSignal | undefined): Promise<MoveResult | "cancelled">;
+async function settle(chatId: string, move: Move, raise: boolean, cancel?: AbortSignal): Promise<MoveResult | "cancelled"> {
+	move.shares++;
+	let result: MoveResult | "abandoned" | "cancelled";
+	try { result = await untilCancelled(move.promise, cancel); } finally { move.shares--; }
+	// Cancelled (a delete box closed while it waited): no flag, and the move is
+	// abandoned only when nobody else waits on it (a lesson's own send).
+	if (result === "cancelled") { if (move.shares === 0) move.abandon(); return "cancelled"; }
 	if (result === "abandoned") return "failed";
 	if (result === "failed" && raise && !failed.has(chatId)) { failed.add(chatId); notify(); }
 	return result;
@@ -185,7 +209,9 @@ export function ensureSessionHere(chatId: string): Promise<MoveResult> {
  *  plugin button). A failure here raises nothing. */
 export function prewarmSessionMove(chatId: string): void {
 	if (moves.has(chatId) || !sessionNeedsMove(chatId)) return;
-	void startMove(chatId).promise;
+	const move = startMove(chatId);
+	move.shares++; // a pre-warm never lets go: a cancelled box doesn't stop it
+	void move.promise;
 }
 
 /** The safety net: a write was refused because another device holds the
@@ -194,6 +220,29 @@ export function moveAfterRefusal(chatId: string): Promise<MoveResult> {
 	arrivedAt.delete(chatId);
 	source?.refresh();
 	return settle(chatId, startMove(chatId), true);
+}
+
+/**
+ * FORK (cloud sync): what a delete box gives `fetchHere` and `fetchAllHere`
+ * (owner's decision: Cancel and Esc close the box while sessions are still
+ * moving here; once the delete itself is sent the box is locked). The other
+ * callers pass nothing and behave as before.
+ *
+ *   cancel   aborted by the box's Cancel or Esc: nothing more is sent (no
+ *            write, no retry from the net) and the call rejects with an
+ *            AbortError. No flag is raised. It is never handed to fetch, so
+ *            a write already sent can't be aborted by it.
+ *   onSend   called synchronously right before each send of the write
+ *   onMove   called when the net starts moving sessions after a refusal
+ */
+export interface MoveFirst {
+	cancel?: AbortSignal;
+	onSend?: () => void;
+	onMove?: () => void;
+}
+
+function stopIfCancelled(cancel?: AbortSignal): void {
+	if (cancel?.aborted) throw new DOMException("Cancelled before anything was sent.", "AbortError");
 }
 
 /** Stop asking for this session (the lesson closed). A send waiting for it
@@ -226,15 +275,26 @@ function moveFailedResponse(): Response {
  * Delete, the model and thinking, the artifact switch, manual extraction,
  * the Tutor's Ask). Where nothing has to move this is a plain fetch.
  */
-export async function fetchHere(chatId: string, input: string, init?: RequestInit): Promise<Response> {
-	if (moves.has(chatId) || sessionNeedsMove(chatId)) {
-		if ((await ensureSessionHere(chatId)) === "failed") return moveFailedResponse();
+export async function fetchHere(chatId: string, input: string, init?: RequestInit, first: MoveFirst = {}): Promise<Response> {
+	const { cancel } = first;
+	const pending = moves.get(chatId) ?? (sessionNeedsMove(chatId) ? startMove(chatId) : null);
+	if (pending) {
+		const result = await settle(chatId, pending, true, cancel);
+		if (result === "failed") return moveFailedResponse();
 	}
+	stopIfCancelled(cancel);
+	first.onSend?.();
 	const response = await fetch(input, init);
 	if (!(await isHeldRefusal(response))) return response;
+	first.onMove?.();
+	arrivedAt.delete(chatId);
+	source?.refresh();
+	const again = await settle(chatId, startMove(chatId), true, cancel);
 	// The net's move failed too: the approved sentence, never the server's
 	// retired "held by another device" text.
-	if ((await moveAfterRefusal(chatId)) === "failed") return moveFailedResponse();
+	if (again === "failed") return moveFailedResponse();
+	stopIfCancelled(cancel);
+	first.onSend?.();
 	return fetch(input, init);
 }
 
@@ -262,12 +322,18 @@ export async function fetchHere(chatId: string, input: string, init?: RequestIni
  * say which session, so every one of them is moved (the cloud state asked
  * again) and the write is tried once more.
  */
-export async function fetchAllHere(chatIds: readonly string[], input: string, init?: RequestInit): Promise<Response> {
+export async function fetchAllHere(chatIds: readonly string[], input: string, init?: RequestInit, first: MoveFirst = {}): Promise<Response> {
+	const { cancel } = first;
 	const needed = chatIds.filter((chatId) => moves.has(chatId) || sessionNeedsMove(chatId));
-	if (needed.length > 0 && !(await allHere(needed, false))) return moveFailedResponse();
+	if (needed.length > 0 && !(await allHere(needed, false, cancel))) return moveFailedResponse();
+	stopIfCancelled(cancel);
+	first.onSend?.();
 	const response = await fetch(input, init);
 	if (!(await isHeldRefusal(response))) return response;
-	if (!(await allHere(chatIds, true))) return moveFailedResponse();
+	first.onMove?.();
+	if (!(await allHere(chatIds, true, cancel))) return moveFailedResponse();
+	stopIfCancelled(cancel);
+	first.onSend?.();
 	return fetch(input, init);
 }
 
@@ -286,15 +352,19 @@ async function serverReachable(): Promise<boolean> {
 }
 
 /** Move these sessions here for a write to all of them, raising no flag; true when every one arrived from the server. */
-async function allHere(chatIds: readonly string[], afterRefusal: boolean): Promise<boolean> {
-	if (!(await serverReachable())) return false;
+async function allHere(chatIds: readonly string[], afterRefusal: boolean, cancel?: AbortSignal): Promise<boolean> {
+	stopIfCancelled(cancel);
+	const reachable = await serverReachable();
+	stopIfCancelled(cancel);
+	if (!reachable) return false;
 	if (afterRefusal) source?.refresh();
 	const arrived = await Promise.all(chatIds.map(async (chatId) => {
 		if (afterRefusal) arrivedAt.delete(chatId);
 		const move = afterRefusal ? startMove(chatId) : moves.get(chatId) ?? startMove(chatId);
-		const result = await settle(chatId, move, false);
-		return result !== "failed" && move.arrival() !== "continued-offline";
+		const result = await settle(chatId, move, false, cancel);
+		return result !== "failed" && result !== "cancelled" && move.arrival() !== "continued-offline";
 	}));
+	stopIfCancelled(cancel);
 	return arrived.every(Boolean);
 }
 

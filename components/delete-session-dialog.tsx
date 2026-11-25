@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState, type ReactElement, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactElement, type ReactNode } from "react";
 import { HostDialog } from "@/components/host-dialog";
-import { fetchAllHere, fetchHere, HELD_ELSEWHERE_CODE } from "@/components/cloud/session-move";
+import { fetchAllHere, fetchHere, HELD_ELSEWHERE_CODE, type MoveFirst } from "@/components/cloud/session-move";
 import { FOLDER_DELETE_FAILED_TEXT, type ChatDeleteMode, type ChatListItem, type FolderDeletionScope } from "@/src/core";
 
 /** The graph-traces checkbox copy (owner, 2026-09-24 flow rework — was
@@ -54,6 +54,46 @@ export function folderDeleteCopy(input: { sessions: number; subfolders: number; 
 }
 
 /**
+ * FORK (cloud sync): a delete box's "moving" phase (owner's decision). While
+ * sessions are still moving here, Cancel and Esc close the box and nothing is
+ * sent; once the delete itself has been sent the box is locked until it
+ * finishes, as upstream's. Where nothing has to move, the send starts at once
+ * and the box is exactly upstream's. A cancelled run shows nothing: no
+ * failure line, no flag.
+ */
+function useMovingPhase() {
+	const [sending, setSending] = useState(false);
+	const run = useRef<{ controller: AbortController; sending: boolean } | null>(null);
+	return {
+		sending,
+		/** A new run: what fetchHere / fetchAllHere get, and whether it was cancelled. */
+		begin(): { first: MoveFirst; cancelled: () => boolean } {
+			const mine = { controller: new AbortController(), sending: false };
+			run.current = mine;
+			setSending(false);
+			const current = () => run.current === mine;
+			const mark = (next: boolean) => { mine.sending = next; if (current()) setSending(next); };
+			return {
+				first: { cancel: mine.controller.signal, onSend: () => mark(true), onMove: () => mark(false) },
+				cancelled: () => mine.controller.signal.aborted,
+			};
+		},
+		/** May the box close now? True when no run is under way, or it is still moving (it is then cancelled). */
+		close(busy: boolean): boolean {
+			const mine = run.current;
+			if (!busy || !mine) return true;
+			if (mine.sending) return false;
+			mine.controller.abort();
+			run.current = null;
+			setSending(false);
+			return true;
+		},
+		/** The box was closed from outside: only the look resets; a run already sent still finishes as upstream's does. */
+		reset() { setSending(false); },
+	};
+}
+
+/**
  * Session deletion (wave 6 chunk A; owner flow rework 2026-09-24) — THE
  * destructive-confirmation surface, portaled z-50 like the setup dialog,
  * now in the node dialog's shape (the two must read as one design):
@@ -94,6 +134,7 @@ export function DeleteSessionDialog({
 	// change of intent, honored as such — the checkbox is disabled while
 	// busy, so no mid-flight switches).
 	const [failure, setFailure] = useState<{ code: string; error: string } | null>(null);
+	const phase = useMovingPhase(); // FORK (cloud sync)
 
 	// Fresh state per session: closing resets, opening a new chat starts clean.
 	useEffect(() => {
@@ -101,6 +142,7 @@ export function DeleteSessionDialog({
 			setTraces(false);
 			setBusy(false);
 			setFailure(null);
+			phase.reset();
 		}
 	}, [chat]);
 
@@ -109,9 +151,11 @@ export function DeleteSessionDialog({
 		const mode: ChatDeleteMode = traces ? "delete-nodes" : "preserve-graph";
 		setBusy(true);
 		setFailure(null);
+		const turn = phase.begin();
 		try {
-			// FORK (seamless sessions): a session another device holds moves here first.
-			const res = await fetchHere(chat.id, `/api/chats/${chat.id}?mode=${mode}`, { method: "DELETE" });
+			// FORK (seamless sessions): a session another device holds moves here
+			// first; Cancel closes the box while it does (FORK (cloud sync)).
+			const res = await fetchHere(chat.id, `/api/chats/${chat.id}?mode=${mode}`, { method: "DELETE" }, turn.first);
 			const body = (await res.json()) as {
 				ok?: boolean;
 				error?: string;
@@ -127,10 +171,12 @@ export function DeleteSessionDialog({
 			}
 			onDeleted(chat.id, mode, body.graphRevision ?? 0);
 		} catch {
+			if (turn.cancelled()) { setBusy(false); return; } // closed while it moved: nothing to show
 			setFailure({ code: "network", error: "Delete failed — network error. Try again." });
 			setBusy(false);
 		}
 	};
+	const close = () => { if (phase.close(busy)) onClose(); };
 
 	if (!chat) return null;
 
@@ -140,10 +186,11 @@ export function DeleteSessionDialog({
 				busy={busy}
 				failure={failure}
 				onTraces={(next) => setTraces(next)}
-				onClose={onClose}
+				onClose={close}
+				cancelLocked={busy && phase.sending}
 				onRun={() => void run()}
 				renderFrame={(frame) => <HostDialog open frame={frame} onClose={() => {
-					if (busy) return "blocked";
+					if (!phase.close(busy)) return "blocked";
 					onClose(); return "closed";
 				}} backdropProps={{ className: "fixed inset-0 z-50 flex items-center justify-center bg-background/80" }}>{frame.props.children}</HostDialog>}
 			/>;
@@ -159,6 +206,7 @@ export function DeleteSessionBody({
 	onTraces,
 	onClose,
 	onRun,
+	cancelLocked = busy,
 	renderFrame,
 	copy = SESSION_DELETE_COPY,
 }: {
@@ -170,6 +218,8 @@ export function DeleteSessionBody({
 	onTraces: (next: boolean) => void;
 	onClose: () => void;
 	onRun: () => void;
+	/** FORK (cloud sync): Cancel is off only while this is true; by default while busy (upstream's). */
+	cancelLocked?: boolean;
 	renderFrame?: (frame: ReactElement<{ children: ReactNode }>) => ReactNode;
 	/** The wording; the folder Delete reuses this exact surface. */
 	copy?: DeleteDialogCopy;
@@ -238,7 +288,7 @@ export function DeleteSessionBody({
 					type="button"
 					data-testid="delete-cancel"
 					onClick={onClose}
-					disabled={busy}
+					disabled={cancelLocked}
 					className="rounded-sm px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
 				>
 					Cancel
@@ -273,11 +323,13 @@ export function DeleteFolderDialog({
 	const [traces, setTraces] = useState(false);
 	const [busy, setBusy] = useState(false);
 	const [failure, setFailure] = useState<{ code: string; error: string } | null>(null);
+	const phase = useMovingPhase(); // FORK (cloud sync)
 	useEffect(() => {
 		if (!folder) {
 			setTraces(false);
 			setBusy(false);
 			setFailure(null);
+			phase.reset();
 		}
 	}, [folder]);
 
@@ -286,6 +338,7 @@ export function DeleteFolderDialog({
 		const mode: ChatDeleteMode = traces ? "delete-nodes" : "preserve-graph";
 		setBusy(true);
 		setFailure(null);
+		const turn = phase.begin();
 		try {
 			// FORK (cloud sync): every session inside that another device holds
 			// moves here first, all or nothing (owner: "move here, then delete").
@@ -293,7 +346,7 @@ export function DeleteFolderDialog({
 				method: "DELETE",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify(folder.scope),
-			});
+			}, turn.first);
 			const body = (await res.json()) as { error?: string; code?: string; graphRevision?: number; deletedChatIds?: string[] };
 			if (body.code === "folder_scope_changed" || body.code === "not_found") {
 				onStale(body.error ?? "This folder changed. Nothing was deleted.");
@@ -309,10 +362,12 @@ export function DeleteFolderDialog({
 			}
 			onDeleted({ deletedChatIds: body.deletedChatIds ?? [], graphRevision: body.graphRevision ?? 0 });
 		} catch {
+			if (turn.cancelled()) { setBusy(false); return; } // closed while it moved: nothing to show
 			setFailure({ code: "network", error: "Delete failed — network error. Try again." });
 			setBusy(false);
 		}
 	};
+	const close = () => { if (phase.close(busy)) onClose(); };
 
 	if (!folder) return null;
 	return <DeleteSessionBody
@@ -322,10 +377,11 @@ export function DeleteFolderDialog({
 				busy={busy}
 				failure={failure}
 				onTraces={(next) => setTraces(next)}
-				onClose={onClose}
+				onClose={close}
+				cancelLocked={busy && phase.sending}
 				onRun={() => void run()}
 				renderFrame={(frame) => <HostDialog open frame={frame} onClose={() => {
-					if (busy) return "blocked";
+					if (!phase.close(busy)) return "blocked";
 					onClose(); return "closed";
 				}} backdropProps={{ className: "fixed inset-0 z-50 flex items-center justify-center bg-background/80" }}>{frame.props.children}</HostDialog>}
 			/>;

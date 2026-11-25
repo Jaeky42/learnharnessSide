@@ -91,7 +91,7 @@ const okSync = { state: "ok", message: null, lastContactAt: Date.now() };
 
 type Call = { method: string; url: string; body: unknown };
 /** The server, scripted. `deletes` answers each DELETE in turn (the last one repeats). */
-function script(opts: { held?: Record<string, unknown>; take?: (chatId: string) => unknown; deletes?: Array<{ status: number; body: unknown }>; check?: string; deleteUrl?: string }) {
+function script(opts: { held?: Record<string, unknown>; take?: (chatId: string) => unknown; deletes?: Array<{ status: number; body: unknown }>; check?: string; deleteUrl?: string; deleteGate?: Promise<void> }) {
 	const calls: Call[] = [];
 	let deleteIndex = 0;
 	const deletes = opts.deletes ?? [{ status: 200, body: { ok: true, deletedChatIds: SCOPE.chatIds, graphRevision: 7 } }];
@@ -109,6 +109,7 @@ function script(opts: { held?: Record<string, unknown>; take?: (chatId: string) 
 			return reply === null ? new Response("{}", { status: 500 }) : Response.json(reply);
 		}
 		if (method === "DELETE") {
+			if (opts.deleteGate) await opts.deleteGate;
 			const answer = deletes[Math.min(deleteIndex++, deletes.length - 1)]!;
 			return Response.json(answer.body, { status: answer.status });
 		}
@@ -351,5 +352,205 @@ describe("the single-session Delete's net (fetchHere)", () => {
 		assert.equal(await move.isHeldRefusal(response), true, "callers that look for the refusal (manual extraction) still see one");
 		assert.deepEqual(await response.json(), { code: "session_held_elsewhere", error: SESSION_MOVE_FAILED_TEXT });
 		assert.equal(move.isMoveFailed("chat_9"), true, "a single session's failed move still raises its flag, as before");
+	});
+});
+
+// ── Cancel while sessions are still moving here (owner's decision) ─────────
+
+const escape = async () => {
+	const event = new dom.window.Event("keydown", { bubbles: true, cancelable: true });
+	Object.assign(event, { key: "Escape" });
+	await act(async () => { document.dispatchEvent(event); });
+	await settle();
+};
+const cancelButton = () => byTest("delete-cancel") as HTMLButtonElement | null;
+function gate() { let open!: () => void; const promise = new Promise<void>((resolve) => { open = resolve; }); return { promise, open }; }
+
+/** The single-session box, with an outcome like the folder box's. */
+async function mountSession(chatId = "chat_1") {
+	const outcome: { deleted: string[]; closed: number } = { deleted: [], closed: 0 };
+	function Harness() {
+		const [open, setOpen] = React.useState(true);
+		return <DeleteSessionDialog chat={open ? { id: chatId, title: "Circuits" } : null}
+			onClose={() => { outcome.closed++; setOpen(false); }}
+			onDeleted={(id) => { outcome.deleted.push(id); setOpen(false); }} />;
+	}
+	const { DeleteSessionDialog } = await import("../components/delete-session-dialog.tsx");
+	const host = document.createElement("div");
+	document.body.appendChild(host);
+	const root = createRoot(host);
+	roots.push({ root, host });
+	await act(async () => root.render(<InteractionLayersProvider><ServerEventsProvider connect={channel()}><CloudProvider><Harness /></CloudProvider></ServerEventsProvider></InteractionLayersProvider>));
+	await settle();
+	return outcome;
+}
+
+describe("Cancel while sessions are still moving here", () => {
+	it("folder box: Cancel closes it while a move waits; no DELETE, no flag, no failure line, and the move stops asking", async () => {
+		cookie = "lh_cloud=1";
+		const server = script({ held: { chat_3: holder }, take: () => ({ status: "waiting", reason: "reply" }) });
+		const outcome = await mount();
+		await click(byTest("delete-confirm"));
+		assert.equal(byTest("delete-confirm")?.textContent, "Deleting…", "the label is today's");
+		assert.equal(cancelButton()?.disabled, false, "Cancel stays usable while it moves");
+		await click(cancelButton());
+		assert.equal(outcome.closed, 1);
+		await fireTimeout(move.MOVE_ASK_AGAIN_MS);
+		await fireTimeout(move.MOVE_ASK_AGAIN_MS);
+		assert.equal(server.deletesMade().length, 0);
+		assert.equal(server.takes().length, 1, "the move this box started was abandoned: not asked again");
+		assert.equal(move.isMoveFailed("chat_3"), false);
+		assert.equal(byTest("delete-failure"), null);
+		assert.deepEqual(outcome.deleted, []);
+	});
+
+	it("folder box: Esc closes it the same way", async () => {
+		cookie = "lh_cloud=1";
+		const server = script({ held: { chat_3: holder }, take: () => ({ status: "waiting", reason: "reply" }) });
+		const outcome = await mount();
+		await click(byTest("delete-confirm"));
+		await escape();
+		assert.equal(outcome.closed, 1);
+		await fireTimeout(move.MOVE_ASK_AGAIN_MS);
+		assert.equal(server.deletesMade().length, 0);
+		assert.equal(move.isMoveFailed("chat_3"), false);
+	});
+
+	it("folder box: once the DELETE is sent it is locked until it finishes", async () => {
+		cookie = "lh_cloud=1";
+		const door = gate();
+		const server = script({ held: { chat_3: holder }, deleteGate: door.promise });
+		const outcome = await mount();
+		await click(byTest("delete-confirm"));
+		assert.equal(server.deletesMade().length, 1, "sent");
+		assert.equal(cancelButton()?.disabled, true);
+		await escape();
+		assert.equal(outcome.closed, 0, "Esc is blocked");
+		await act(async () => door.open());
+		await settle();
+		assert.equal(outcome.deleted.length, 1, "the sent DELETE finished as usual");
+	});
+
+	it("folder box: a cancel while the net moves after a refusal sends no retry", async () => {
+		cookie = "lh_cloud=1";
+		const server = script({ held: {}, take: () => ({ status: "waiting", reason: "reply" }), deletes: [{ status: 409, body: { code: "session_held_elsewhere", error: "This session is held by another device. Take it over to continue it here." } }] });
+		const outcome = await mount();
+		await click(byTest("delete-confirm"));
+		assert.equal(server.deletesMade().length, 1);
+		assert.equal(cancelButton()?.disabled, false, "moving again: Cancel is usable");
+		await click(cancelButton());
+		assert.equal(outcome.closed, 1);
+		await fireTimeout(move.MOVE_ASK_AGAIN_MS);
+		assert.equal(server.deletesMade().length, 1, "no retry");
+		assert.ok(SCOPE.chatIds.every((chatId) => !move.isMoveFailed(chatId)));
+		assert.equal(byTest("delete-failure"), null);
+	});
+
+	it("folder box: a move a lesson shares isn't abandoned; it arrives after the cancel", async () => {
+		cookie = "lh_cloud=1";
+		let asks = 0;
+		const server = script({ held: { chat_3: holder }, take: () => (asks++ === 0 ? { status: "waiting", reason: "reply" } : { status: "moved" }) });
+		const outcome = await mount();
+		const lessonSend = move.ensureSessionHere("chat_3"); // the lesson's own send waits on the same move
+		await click(byTest("delete-confirm"));
+		await click(cancelButton());
+		assert.equal(outcome.closed, 1);
+		await fireTimeout(move.MOVE_ASK_AGAIN_MS);
+		assert.equal(await lessonSend, "here", "the shared move went on and arrived");
+		assert.equal(server.takes().length, 2);
+		assert.equal(server.deletesMade().length, 0);
+	});
+
+	it("folder box: a lesson's pre-warm counts as sharing too", async () => {
+		cookie = "lh_cloud=1";
+		const server = script({ held: { chat_3: holder }, take: () => ({ status: "waiting", reason: "reply" }) });
+		await mount();
+		move.prewarmSessionMove("chat_3");
+		await click(byTest("delete-confirm"));
+		await click(cancelButton());
+		await fireTimeout(move.MOVE_ASK_AGAIN_MS);
+		assert.equal(server.takes().length, 2, "still asking");
+		assert.equal(server.deletesMade().length, 0);
+	});
+
+	it("folder box where sync isn't in use: upstream's lock from the press on", async () => {
+		const door = gate();
+		const server = script({ deleteGate: door.promise });
+		const outcome = await mount();
+		await click(byTest("delete-confirm"));
+		assert.equal(cancelButton()?.disabled, true);
+		await escape();
+		assert.equal(outcome.closed, 0);
+		await act(async () => door.open());
+		await settle();
+		assert.deepEqual(server.calls.map((c) => c.method), ["DELETE"]);
+		assert.equal(outcome.deleted.length, 1);
+	});
+
+	it("session box: Cancel closes it while its move waits; no DELETE, no flag", async () => {
+		cookie = "lh_cloud=1";
+		const server = script({ held: { chat_1: holder }, take: () => ({ status: "waiting", reason: "reply" }) });
+		const outcome = await mountSession();
+		await click(byTest("delete-confirm"));
+		assert.equal(byTest("delete-confirm")?.textContent, "Deleting…");
+		assert.equal(cancelButton()?.disabled, false);
+		await click(cancelButton());
+		assert.equal(outcome.closed, 1);
+		await fireTimeout(move.MOVE_ASK_AGAIN_MS);
+		assert.equal(server.deletesMade().length, 0);
+		assert.equal(server.takes().length, 1);
+		assert.equal(move.isMoveFailed("chat_1"), false);
+		assert.equal(byTest("delete-failure"), null);
+	});
+
+	it("session box: Esc closes it too, and once the DELETE is sent it is locked", async () => {
+		cookie = "lh_cloud=1";
+		let server = script({ held: { chat_1: holder }, take: () => ({ status: "waiting", reason: "reply" }) });
+		let outcome = await mountSession();
+		await click(byTest("delete-confirm"));
+		await escape();
+		assert.equal(outcome.closed, 1);
+		assert.equal(server.deletesMade().length, 0);
+		for (const { root, host } of roots.splice(0)) { await act(async () => root.unmount()); host.remove(); }
+		move.resetSessionMoveForTests();
+
+		const door = gate();
+		server = script({ held: { chat_1: holder }, deleteGate: door.promise, deletes: [{ status: 200, body: { ok: true, graphRevision: 3 } }] });
+		outcome = await mountSession();
+		await click(byTest("delete-confirm"));
+		assert.equal(server.deletesMade().length, 1);
+		assert.equal(cancelButton()?.disabled, true);
+		await escape();
+		assert.equal(outcome.closed, 0);
+		await act(async () => door.open());
+		await settle();
+		assert.deepEqual(outcome.deleted, ["chat_1"]);
+	});
+
+	it("session box: a cancel during its net sends no retry", async () => {
+		cookie = "lh_cloud=1";
+		const server = script({ held: {}, take: () => ({ status: "waiting", reason: "reply" }), deletes: [{ status: 409, body: { code: "session_held_elsewhere", error: "This session is held by another device. Take it over to continue it here." } }] });
+		const outcome = await mountSession();
+		await click(byTest("delete-confirm"));
+		assert.equal(server.deletesMade().length, 1);
+		await click(cancelButton());
+		assert.equal(outcome.closed, 1);
+		await fireTimeout(move.MOVE_ASK_AGAIN_MS);
+		assert.equal(server.deletesMade().length, 1);
+		assert.equal(move.isMoveFailed("chat_1"), false);
+	});
+
+	it("fetchHere without a cancel behaves as before: it waits for the move and raises the flag on failure", async () => {
+		cookie = "lh_cloud=1";
+		let asks = 0;
+		const server = script({ held: { chat_5: holder }, take: () => (asks++ === 0 ? { status: "waiting", reason: "reply" } : { status: "refused" }) });
+		await mount();
+		const pending = move.fetchHere("chat_5", "/api/chats/chat_5", { method: "DELETE" });
+		await settle();
+		await fireTimeout(move.MOVE_ASK_AGAIN_MS);
+		const response = await pending;
+		assert.equal(response.status, 409);
+		assert.equal(move.isMoveFailed("chat_5"), true);
+		assert.equal(server.deletesMade().length, 0);
 	});
 });
