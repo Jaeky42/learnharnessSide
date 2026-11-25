@@ -214,3 +214,13 @@ Status: **Phases 1–4 done (server mode, sign-in on the server, phone layouts, 
 - **Way back:** `git revert a14973f`; the server image built from `dce63584`, the one before this round.
 - **The owner's word:** the plan approved ("Approved, build it"); shipped at the owner's word. Not yet confirmed in use: no real ChatGPT model was run before the ship.
 
+### A hidden nudge replaces the empty-reply retries (release 0.6.53)
+
+- **Why:** the plain retry of releases 0.6.51 and 0.6.52 did not help in use. On the owner's server GPT-6.2 Astra answered the identical request with an empty reply every time: two turns, three requests each, then the red line. The log lines read `thinking: no; phases before: commentary`.
+- **What:** on the first empty reply the app drops it and asks once more with a hidden instruction added to that one request only; the page gives the empty attempt's place to the reply that follows; still empty, the failed-reply line with Retry (`docs/fork/models-and-agents.md`, "ChatGPT and OpenAI: an empty reply is asked again").
+- **Built on** `claude/modest-euler-dy4rc7`, from `1953209`: `7ea21dc` (the code, tests and docs), `28ed5d0` and `993fa11` (docs).
+- **Checked before the ship:** the full suite, typecheck and lint; an independent check with the nudge and the page rule each switched off in a scratch copy; a browser run in server mode with a stand-in model that returns a completed response with no output, on a computer and at iPhone size. No real model.
+- **Shipped** with the owner's word given with the plan ("Approved, build and ship": ship without asking again if every check passes): `993fa11` to `claude/pensive-goldberg-7dty2m`, then to `side-tutor`, both plain fast-forwards. The Windows workflow published **release 0.6.53**; the server images `:dev` and `:latest` were published from the same commit.
+- **Way back:** `git revert 7ea21dc`.
+- **The owner's word:** asked for by the owner ("remove the silent retries and nudge the model and make sure the user is unaware of this behavior"); the instruction's words chosen by the owner ("Both together"). Not yet confirmed in use.
+
