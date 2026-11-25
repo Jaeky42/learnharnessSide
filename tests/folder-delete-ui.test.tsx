@@ -91,7 +91,7 @@ const okSync = { state: "ok", message: null, lastContactAt: Date.now() };
 
 type Call = { method: string; url: string; body: unknown };
 /** The server, scripted. `deletes` answers each DELETE in turn (the last one repeats). */
-function script(opts: { held?: Record<string, unknown>; take?: (chatId: string) => unknown; deletes?: Array<{ status: number; body: unknown }> }) {
+function script(opts: { held?: Record<string, unknown>; take?: (chatId: string) => unknown; deletes?: Array<{ status: number; body: unknown }>; check?: string; deleteUrl?: string }) {
 	const calls: Call[] = [];
 	let deleteIndex = 0;
 	const deletes = opts.deletes ?? [{ status: 200, body: { ok: true, deletedChatIds: SCOPE.chatIds, graphRevision: 7 } }];
@@ -101,6 +101,9 @@ function script(opts: { held?: Record<string, unknown>; take?: (chatId: string) 
 		const body = init?.body === undefined ? undefined : JSON.parse(String(init.body)) as unknown;
 		calls.push({ method, url, body });
 		if (url === "/api/cloud" && method === "GET") return Response.json({ role: "desktop", held: opts.held ?? {}, sync: okSync, notices: [] });
+		if (url === "/api/cloud" && method === "POST" && (body as { op?: string }).op === "check") {
+			return Response.json({ role: "desktop", paired: true, sync: { state: opts.check ?? "ok", message: null, lastContactAt: null, offlineSince: null } });
+		}
 		if (url === "/api/cloud" && method === "POST") {
 			const reply = (opts.take ?? (() => ({ status: "moved" })))(String((body as { chatId: string }).chatId));
 			return reply === null ? new Response("{}", { status: 500 }) : Response.json(reply);
@@ -112,9 +115,10 @@ function script(opts: { held?: Record<string, unknown>; take?: (chatId: string) 
 		throw new Error(`unexpected request ${method} ${url}`);
 	}) as typeof fetch;
 	const work = () => calls.filter((c) => !(c.url === "/api/cloud" && c.method === "GET"));
-	const takes = () => work().filter((c) => c.method === "POST").map((c) => c.body);
+	const takes = () => work().filter((c) => c.method === "POST" && (c.body as { op?: string }).op === "take-over").map((c) => c.body);
+	const checks = () => work().filter((c) => c.method === "POST" && (c.body as { op?: string }).op === "check").length;
 	const deletesMade = () => work().filter((c) => c.method === "DELETE");
-	return { calls, work, takes, deletesMade };
+	return { calls, work, takes, checks, deletesMade };
 }
 
 async function mount() {
@@ -161,7 +165,7 @@ describe("the folder Delete where sync is in use", () => {
 		const server = script({ held: { chat_2: holder } });
 		const outcome = await mount();
 		await click(byTest("delete-confirm"));
-		assert.deepEqual(server.work().map((c) => `${c.method} ${c.url}`), ["POST /api/cloud", `DELETE ${FOLDER_URL}`], "the move first, then the delete");
+		assert.deepEqual(server.work().map((c) => `${c.method} ${c.url} ${(c.body as { op?: string } | undefined)?.op ?? ""}`), ["POST /api/cloud check", "POST /api/cloud take-over", `DELETE ${FOLDER_URL} `], "the server is reached, the move, then the delete");
 		assert.deepEqual(server.takes(), [{ op: "take-over", chatId: "chat_2", force: true }], "only the held session moves");
 		assert.deepEqual(server.deletesMade()[0]!.body, SCOPE, "the reviewed scope, unchanged");
 		assert.equal(outcome.deleted.length, 1);
@@ -204,7 +208,8 @@ describe("the folder Delete where sync is in use", () => {
 		const outcome = await mount();
 		const cloudReads = server.calls.filter((c) => c.url === "/api/cloud" && c.method === "GET").length;
 		await click(byTest("delete-confirm"));
-		assert.deepEqual(server.work().map((c) => c.method), ["DELETE", "POST", "POST", "POST", "DELETE"]);
+		assert.deepEqual(server.work().map((c) => c.method), ["DELETE", "POST", "POST", "POST", "POST", "DELETE"]);
+		assert.equal(server.checks(), 1);
 		assert.deepEqual(server.takes().map((b) => (b as { chatId: string }).chatId).sort(), SCOPE.chatIds);
 		assert.ok(server.calls.filter((c) => c.url === "/api/cloud" && c.method === "GET").length > cloudReads, "the cloud state is asked again");
 		assert.deepEqual(outcome.deleted, [{ deletedChatIds: SCOPE.chatIds, graphRevision: 9 }]);
@@ -246,5 +251,105 @@ describe("the folder Delete where sync is in use", () => {
 		await click(byTest("delete-confirm"));
 		assert.deepEqual(server.work(), [{ method: "DELETE", url: FOLDER_URL, body: SCOPE }]);
 		assert.equal(outcome.deleted.length, 1);
+	});
+});
+
+describe("the folder Delete while the PC can't reach its server (owner's decision)", () => {
+	it("a folder with a session another device holds deletes nothing, and nothing is asked to move", async () => {
+		cookie = "lh_cloud=1";
+		const server = script({ held: { chat_2: holder }, check: "offline" });
+		const outcome = await mount();
+		await click(byTest("delete-confirm"));
+		assert.equal(server.checks(), 1);
+		assert.deepEqual(server.takes(), [], "no take-over: nothing is marked this PC's");
+		assert.equal(server.deletesMade().length, 0);
+		assert.equal(failureText(), FOLDER_DELETE_FAILED_TEXT);
+		assert.equal(byTest("delete-retry")?.textContent, "Try again");
+		assert.deepEqual(outcome.deleted, []);
+	});
+
+	it("paused or removed by the server counts the same", async () => {
+		for (const state of ["paused", "needs-pairing"]) {
+			cookie = "lh_cloud=1";
+			const server = script({ held: { chat_2: holder }, check: state });
+			await mount();
+			await click(byTest("delete-confirm"));
+			assert.equal(server.deletesMade().length, 0, state);
+			assert.equal(failureText(), FOLDER_DELETE_FAILED_TEXT, state);
+			for (const { root, host } of roots.splice(0)) { await act(async () => root.unmount()); host.remove(); }
+			move.resetSessionMoveForTests();
+		}
+	});
+
+	it("a move that answers continued-offline (the server went away in between) deletes nothing", async () => {
+		cookie = "lh_cloud=1";
+		const server = script({ held: { chat_1: holder, chat_2: holder }, take: (chatId) => (chatId === "chat_2" ? { status: "continued-offline" } : { status: "moved" }) });
+		await mount();
+		await click(byTest("delete-confirm"));
+		assert.equal(server.takes().length, 2);
+		assert.equal(server.deletesMade().length, 0);
+		assert.equal(failureText(), FOLDER_DELETE_FAILED_TEXT);
+	});
+
+	it("a folder whose sessions all live on this PC still deletes offline, with no extra request", async () => {
+		cookie = "lh_cloud=1";
+		const server = script({ held: { chat_elsewhere: holder }, check: "offline" });
+		const outcome = await mount();
+		await click(byTest("delete-confirm"));
+		assert.deepEqual(server.work(), [{ method: "DELETE", url: FOLDER_URL, body: SCOPE }]);
+		assert.equal(outcome.deleted.length, 1);
+	});
+});
+
+describe("a folder Delete's failure stays in its box", () => {
+	it("no session is left flagged, so no lesson shows a failed move afterwards", async () => {
+		cookie = "lh_cloud=1";
+		script({ held: { chat_1: holder, chat_2: holder }, take: () => ({ status: "refused" }) });
+		await mount();
+		await click(byTest("delete-confirm"));
+		assert.equal(failureText(), FOLDER_DELETE_FAILED_TEXT);
+		assert.equal(move.isMoveFailed("chat_1"), false);
+		assert.equal(move.isMoveFailed("chat_2"), false);
+	});
+
+	it("nor after the net's move fails", async () => {
+		cookie = "lh_cloud=1";
+		script({ held: {}, take: () => ({ status: "refused" }), deletes: [{ status: 409, body: { code: "session_held_elsewhere", error: "This session is held by another device. Take it over to continue it here." } }] });
+		await mount();
+		await click(byTest("delete-confirm"));
+		assert.ok(SCOPE.chatIds.every((chatId) => !move.isMoveFailed(chatId)));
+	});
+});
+
+describe("the single-session Delete's net (fetchHere)", () => {
+	it("a refusal whose move then fails shows the approved sentence, never the retired one", async () => {
+		cookie = "lh_cloud=1";
+		const { DeleteSessionDialog } = await import("../components/delete-session-dialog.tsx");
+		const { SESSION_MOVE_FAILED_TEXT } = await import("../src/core/sync/screens.ts");
+		const server = script({ held: {}, take: () => ({ status: "refused" }), deletes: [{ status: 409, body: { code: "session_held_elsewhere", error: "This session is held by another device. Take it over to continue it here." } }] });
+		const host = document.createElement("div");
+		document.body.appendChild(host);
+		const root = createRoot(host);
+		roots.push({ root, host });
+		await act(async () => root.render(<InteractionLayersProvider><ServerEventsProvider connect={channel()}><CloudProvider>
+			<DeleteSessionDialog chat={{ id: "chat_1", title: "Circuits" }} onClose={() => {}} onDeleted={() => {}} />
+		</CloudProvider></ServerEventsProvider></InteractionLayersProvider>));
+		await settle();
+		await click(byTest("delete-confirm"));
+		assert.equal(server.deletesMade().length, 1, "tried once; the move failed, so not again");
+		assert.equal(failureText(), SESSION_MOVE_FAILED_TEXT);
+		assert.doesNotMatch(document.body.textContent ?? "", /held by another device|Take it over/);
+	});
+
+	it("fetchHere answers the made-up refusal: same status and code, the approved sentence", async () => {
+		cookie = "lh_cloud=1";
+		const { SESSION_MOVE_FAILED_TEXT } = await import("../src/core/sync/screens.ts");
+		script({ held: {}, take: () => ({ status: "refused" }), deletes: [{ status: 409, body: { code: "session_held_elsewhere", error: "This session is held by another device. Take it over to continue it here." } }] });
+		await mount(); // connects the cloud state
+		const response = await move.fetchHere("chat_9", "/api/chats/chat_9", { method: "DELETE" });
+		assert.equal(response.status, 409);
+		assert.equal(await move.isHeldRefusal(response), true, "callers that look for the refusal (manual extraction) still see one");
+		assert.deepEqual(await response.json(), { code: "session_held_elsewhere", error: SESSION_MOVE_FAILED_TEXT });
+		assert.equal(move.isMoveFailed("chat_9"), true, "a single session's failed move still raises its flag, as before");
 	});
 });

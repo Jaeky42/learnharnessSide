@@ -64,7 +64,12 @@ let source: CloudSource | null = null;
 /** The cloud state's snapshot when a move arrived: until it changes, the
  *  session counts as here whatever that (older) snapshot says. */
 const arrivedAt = new Map<string, unknown>();
-interface Move { promise: Promise<MoveResult | "abandoned">; abandon: () => void }
+interface Move {
+	promise: Promise<MoveResult | "abandoned">;
+	abandon: () => void;
+	/** The server's status that brought the session here ("yours", "moved", "continued-offline"), once it has. */
+	arrival: () => string | null;
+}
 const moves = new Map<string, Move>();
 const arrivalHandlers = new Map<string, () => Promise<boolean>>();
 
@@ -113,6 +118,7 @@ function startMove(chatId: string): Move {
 	let abandoned = false;
 	let timer: ReturnType<typeof setTimeout> | null = null;
 	let wake: (() => void) | null = null;
+	let arrival: string | null = null;
 	const abandon = () => {
 		abandoned = true;
 		if (timer) clearTimeout(timer);
@@ -123,7 +129,7 @@ function startMove(chatId: string): Move {
 			const answer = await askToMove(chatId);
 			if (abandoned) return "abandoned";
 			const status = answer?.status;
-			if (typeof status === "string" && HERE_STATUSES.has(status)) break;
+			if (typeof status === "string" && HERE_STATUSES.has(status)) { arrival = status; break; }
 			if (status !== "waiting") return "failed";
 			await new Promise<void>((resolve) => { wake = resolve; timer = setTimeout(resolve, MOVE_ASK_AGAIN_MS); });
 			wake = null; timer = null;
@@ -140,6 +146,7 @@ function startMove(chatId: string): Move {
 	};
 	const move: Move = {
 		abandon,
+		arrival: () => arrival,
 		promise: run().then((result) => {
 			if (result === "here" || result === "here-changed") failed.delete(chatId);
 			return result;
@@ -225,7 +232,9 @@ export async function fetchHere(chatId: string, input: string, init?: RequestIni
 	}
 	const response = await fetch(input, init);
 	if (!(await isHeldRefusal(response))) return response;
-	if ((await moveAfterRefusal(chatId)) === "failed") return response;
+	// The net's move failed too: the approved sentence, never the server's
+	// retired "held by another device" text.
+	if ((await moveAfterRefusal(chatId)) === "failed") return moveFailedResponse();
 	return fetch(input, init);
 }
 
@@ -237,6 +246,17 @@ export async function fetchHere(chatId: string, input: string, init?: RequestIni
  * comes back (code `session_held_elsewhere`). Where nothing has to move this
  * is a plain fetch: an unpaired app makes no other request.
  *
+ * Owner's decision: a PC that can't reach its server deletes nothing that
+ * lives on another device. So, for this write only, "continued-offline"
+ * counts as a failure, and before any move a PC contacts its server
+ * (`{op:"check"}`): when that doesn't read "ok", nothing is asked, because
+ * a take-over that can't reach the server marks the session this PC's
+ * (desktop-sync.ts, `carryOn`), and the folder's next Try again would then
+ * delete it here. (Single sessions and typing keep carrying on offline.)
+ *
+ * A failure here belongs to the dialog: it never raises a session's "move
+ * failed" flag, so no lesson shows it afterwards.
+ *
  * The safety net: the server may still refuse because a session is held
  * elsewhere (the page's `held` can be up to 10 s old). The refusal doesn't
  * say which session, so every one of them is moved (the cloud state asked
@@ -244,15 +264,38 @@ export async function fetchHere(chatId: string, input: string, init?: RequestIni
  */
 export async function fetchAllHere(chatIds: readonly string[], input: string, init?: RequestInit): Promise<Response> {
 	const needed = chatIds.filter((chatId) => moves.has(chatId) || sessionNeedsMove(chatId));
-	if (needed.length > 0) {
-		const results = await Promise.all(needed.map((chatId) => ensureSessionHere(chatId)));
-		if (results.includes("failed")) return moveFailedResponse();
-	}
+	if (needed.length > 0 && !(await allHere(needed, false))) return moveFailedResponse();
 	const response = await fetch(input, init);
 	if (!(await isHeldRefusal(response))) return response;
-	const again = await Promise.all(chatIds.map((chatId) => moveAfterRefusal(chatId)));
-	if (again.includes("failed")) return response;
+	if (!(await allHere(chatIds, true))) return moveFailedResponse();
 	return fetch(input, init);
+}
+
+/** Can a PC reach its server right now? The server's own site always can. */
+async function serverReachable(): Promise<boolean> {
+	const role = (source?.snapshot() as { role?: unknown } | null | undefined)?.role;
+	if (role === "server") return true;
+	try {
+		const response = await fetch("/api/cloud", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ op: "check" }) });
+		if (!response.ok) return false;
+		const status = (await response.json()) as { sync?: { state?: unknown } } | null;
+		return status?.sync?.state === "ok";
+	} catch {
+		return false;
+	}
+}
+
+/** Move these sessions here for a write to all of them, raising no flag; true when every one arrived from the server. */
+async function allHere(chatIds: readonly string[], afterRefusal: boolean): Promise<boolean> {
+	if (!(await serverReachable())) return false;
+	if (afterRefusal) source?.refresh();
+	const arrived = await Promise.all(chatIds.map(async (chatId) => {
+		if (afterRefusal) arrivedAt.delete(chatId);
+		const move = afterRefusal ? startMove(chatId) : moves.get(chatId) ?? startMove(chatId);
+		const result = await settle(chatId, move, false);
+		return result !== "failed" && move.arrival() !== "continued-offline";
+	}));
+	return arrived.every(Boolean);
 }
 
 /** SessionModel's gate (session-core.ts), for the session hook. */
