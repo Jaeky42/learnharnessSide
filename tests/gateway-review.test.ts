@@ -179,7 +179,7 @@ describe("review 2: a shutdown waits for a redeem under way", () => {
 		assert.equal(gatewayMain.SHUTDOWN_GRACE_MS, 75_000);
 		const code = await invite();
 		const slow = slowMaker();
-		const gateway = await gatewayMain.startGateway(config(h.deps.store.file), { maker: slow.maker, relay: h.deps.relay, loop: false, log: () => {} });
+		const gateway = await gatewayMain.startGateway(config(h.deps.store.file), { maker: slow.maker, relay: h.deps.relay, loop: false, log: () => {}, now: () => h.clock.now });
 		const port = (gateway.server.address() as net.AddressInfo).port;
 		const redeeming = send(port, "/api/server-auth/invite", { code, name: "newbie", password: NEW_PASSWORD });
 		await slow.creating;
@@ -203,7 +203,7 @@ describe("review 2: a shutdown waits for a redeem under way", () => {
 	it("gives up after its limit", async () => {
 		const code = await invite();
 		const slow = slowMaker();
-		const gateway = await gatewayMain.startGateway(config(h.deps.store.file), { maker: slow.maker, relay: h.deps.relay, loop: false, log: () => {} });
+		const gateway = await gatewayMain.startGateway(config(h.deps.store.file), { maker: slow.maker, relay: h.deps.relay, loop: false, log: () => {}, now: () => h.clock.now });
 		const port = (gateway.server.address() as net.AddressInfo).port;
 		const redeeming = send(port, "/api/server-auth/invite", { code, name: "newbie", password: NEW_PASSWORD }).catch(() => null);
 		await slow.creating;
