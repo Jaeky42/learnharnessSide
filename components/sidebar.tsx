@@ -30,7 +30,7 @@ import { fetchHere } from "@/components/cloud/session-move";
 import type { ChatListItem } from "@/src/core";
 import { kbdEventForAction } from "@/src/core";
 import { notifySettingsSaved } from "@/components/settings-signal";
-import { useIsPhone } from "@/components/phone/use-phone";
+import { useIsPhone, useIsTouchScreen } from "@/components/phone/use-phone"; // FORK (touch folders): useIsTouchScreen
 import { useSidebarSwipe } from "@/components/phone/sidebar-swipe"; // PHONE (swipe the drawer away)
 import { PluginWidgets } from "@/components/plugins";
 import { PluginSidebarActions } from "@/components/plugin-chrome";
@@ -440,6 +440,11 @@ function SessionsSidebar() {
 	const interactions = useInteractionLayers();
 	const { open, toggle } = useSidebar();
 	const phone = useIsPhone();
+	// FORK (touch folders): on a touch screen in a browser the rows' mouse drag
+	// is off, so the browser's own drag can't compete with press and hold
+	// (components/phone/long-press.ts). A computer, and the desktop app even on
+	// a touch-screen PC, keep upstream's drag.
+	const touchScreen = useIsTouchScreen();
 	// PHONE (swipe the drawer away): a swipe left on the open drawer closes it. Only ever closes.
 	const drawerRef = useRef<HTMLElement | null>(null);
 	const dimRef = useRef<HTMLDivElement | null>(null);
@@ -786,7 +791,7 @@ function SessionsSidebar() {
 			const c = node.session;
 			const placedIn = organization ? placementOf(organization, c.id)?.folderId ?? null : null;
 			return (
-				<SourceDragRow key={c.id} kind="source" id={c.id} name={c.title} enabled={Boolean(organization) && renamingId !== c.id}
+				<SourceDragRow key={c.id} kind="source" id={c.id} name={c.title} enabled={Boolean(organization) && renamingId !== c.id && !touchScreen /* FORK (touch folders) */}
 					className="relative" style={{ marginLeft: sidebarRowBox(depth).marginLeft }} {...folderDrop.dropProps(placedIn)}>
 					{renamingId === c.id ? (
 						<RenameRow
@@ -832,7 +837,7 @@ function SessionsSidebar() {
 					depth={depth}
 					open={folderOpen}
 					compact={compactSessionList}
-					draggable={Boolean(organization)}
+					draggable={Boolean(organization) && !touchScreen /* FORK (touch folders) */}
 					dropActive={folderDrop.dropTarget === folder.id}
 					renaming={renamingFolderId === folder.id}
 					onToggle={() => toggleFolder(folder.id)}
