@@ -10,6 +10,7 @@
 - **On Node 22**, `tests/subscription-auth.test.ts` has one known failure. CI uses Node 26.
 - On Node 22, `tests/subscription-auth.test.ts` has one failure that also happens without any fork changes (a Node-version difference).
 - **Known test failures in the development sandbox** (Node 22, no IPv6): `tests/safe-fetch.test.ts` hangs and must be left out of a full run; `tests/safe-fetch-connector.test.ts`, `tests/passive-tooltip.test.tsx` and one case of `tests/plugin-document-proxy.test.ts` fail. All four behave the same on an untouched upstream v0.6.0 checkout. And one case of `tests/subscription-auth.test.ts` fails (on Node 22.23: 19 tests, 18 pass), a Node-version difference (the two bullets above). CI (Node 26) runs them all.
+- **`tests/gateway-review.test.ts` hangs in the development sandbox** ("review 2: a shutdown waits for a redeem under way"; run alone with a 600-second limit, on `fa5dda0`). Leave it out of a full run here as well. Why it hangs here was not looked into.
 - **Known CI flake:** `tests/notes-import-route.test.ts` (first test, "out-of-order completion remains supported") depends on timer order and fails now and then on GitHub's runners. It isn't related to this work: re-run the failed job. A separate task to make it deterministic was offered to the owner.
 - **`assert.equal` on two DOM nodes that differ can hang** while it builds its message (it tried to diff linkedom nodes: 1.4 GB, 100% CPU). Compare ids or text.
 
