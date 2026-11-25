@@ -37,6 +37,7 @@ import {
 	type QuestionDraft,
 	type TurnUsage,
 	type SessionPricing,
+	isGuardedEmptyReply, // FORK (empty reply)
 } from "../src/core";
 
 import { copyImmutableData, pendingPluginQuestionOf, pluginQuestionCallsOf } from "../src/core/index.ts";
@@ -830,9 +831,17 @@ export class SessionModel {
 				} else this.incompleteUsageIds.add(id);
 				if (agent.type === "message_start") {
 					this.streamingMessageId = id;
+					// FORK (empty reply): the server dropped an empty ChatGPT/OpenAI
+					// attempt and asked again; the new message takes its place in the
+					// live view (docs/fork/models-and-agents.md). Only a message this
+					// consume streamed, still in the tail; never a failed reply.
+					const previous = this.tail.findLastIndex((m) => m.role === "assistant");
+					const dropped = previous === -1 ? undefined : this.tail[previous]!;
+					const hideEmpty = dropped !== undefined && this.streamingIds.has(dropped.id) && isGuardedEmptyReply(dropped);
+					if (hideEmpty) this.streamingIds.delete(dropped.id);
 					this.streamingIds.add(id);
 					this.mutate(() => {
-						this.tail = [...this.tail, withId];
+						this.tail = [...(hideEmpty ? this.tail.toSpliced(previous, 1) : this.tail), withId];
 					});
 				} else {
 					this.mutate(() => {

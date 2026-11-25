@@ -3,9 +3,10 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import {
-	EMPTY_REPLY_MAX_RETRIES, EMPTY_REPLY_TEXT, emptyReplyGuardApplies, emptyReplyLogLine, hasOutput, isEmptyReply,
+	EMPTY_REPLY_NUDGE_TEXT, EMPTY_REPLY_TEXT, emptyReplyGuardApplies, emptyReplyLogLine, hasOutput, isEmptyReply,
 	makeEmptyReplyGuard, textPhases,
 } from "../src/agent/empty-reply-guard.ts";
+import { isGuardedEmptyReply } from "../src/core/index.ts";
 
 const thinking = { type: "thinking", thinking: "Private reasoning about Mercury." };
 const text = (t: string, textSignature?: string) => ({ type: "text", text: t, ...(textSignature ? { textSignature } : {}) });
@@ -55,8 +56,8 @@ describe("phase labels", () => {
 describe("the log line", () => {
 	it("has exactly the agreed facts", () => {
 		assert.equal(
-			emptyReplyLogLine({ provider: "chatgpt", modelId: "gpt-6.2-astra", kind: "teacher", count: 2, action: "retrying", thinking: true, phasesBefore: "final_answer" }),
-			"[LearnHarness] Empty reply: chatgpt:gpt-6.2-astra; teacher; empty reply 2; retrying; thinking: yes; phases before: final_answer",
+			emptyReplyLogLine({ provider: "chatgpt", modelId: "gpt-6.2-astra", kind: "teacher", count: 1, action: "nudging", thinking: false, phasesBefore: "commentary" }),
+			"[LearnHarness] Empty reply: chatgpt:gpt-6.2-astra; teacher; empty reply 1; nudging; thinking: no; phases before: commentary",
 		);
 	});
 });
@@ -74,35 +75,79 @@ function run(options: { provider?: string; background?: () => boolean } = {}) {
 		context.messages.push(message); newMessages.push(message); agent.state.messages = [...agent.state.messages, message];
 		return guard.finishTurn({ message, context, newMessages }, agent);
 	};
-	return { lines, turn, context, newMessages, agent };
+	return { lines, turn, context, newMessages, agent, guard };
 }
 
 describe("the decision", () => {
-	it("drops an empty reply and continues, up to the limit, then marks the last one failed", () => {
+	it("drops the first empty reply, arms the nudge for one request, then marks the nudged empty reply failed", () => {
 		const r = run();
-		const replies = Array.from({ length: EMPTY_REPLY_MAX_RETRIES + 1 }, () => reply([thinking]));
-		for (const [i, m] of replies.entries()) {
-			const decision = r.turn(m);
-			if (i < EMPTY_REPLY_MAX_RETRIES) {
-				assert.deepEqual(decision, { action: "continue" });
-				assert.ok(!r.context.messages.includes(m) && !r.newMessages.includes(m) && !r.agent.state.messages.includes(m), "dropped everywhere");
-			} else {
-				assert.deepEqual(decision, { action: "end" });
-				assert.equal((m as { stopReason: string }).stopReason, "error");
-				assert.equal((m as { errorMessage: string }).errorMessage, EMPTY_REPLY_TEXT);
-				assert.ok(r.context.messages.includes(m) && r.agent.state.messages.includes(m), "the last one stays, failed");
-			}
-		}
-		assert.equal(EMPTY_REPLY_MAX_RETRIES, 2);
-		assert.deepEqual(r.lines.map((l) => l.split("; ").slice(2, 4).join("; ")), ["empty reply 1; retrying", "empty reply 2; retrying", "empty reply 3; giving up"]);
+		const first = reply([thinking]);
+		assert.equal(r.guard.nudgePending, false);
+		assert.deepEqual(r.turn(first), { action: "continue" });
+		assert.ok(!r.context.messages.includes(first) && !r.newMessages.includes(first) && !r.agent.state.messages.includes(first), "dropped everywhere");
+		assert.equal(r.guard.nudgePending, true, "the next request carries the nudge");
+		const second = reply([]);
+		assert.deepEqual(r.turn(second), { action: "end" });
+		assert.equal(r.guard.nudgePending, false);
+		assert.equal((second as { stopReason: string }).stopReason, "error");
+		assert.equal((second as { errorMessage: string }).errorMessage, EMPTY_REPLY_TEXT);
+		assert.ok(r.context.messages.includes(second) && r.agent.state.messages.includes(second), "the nudged one stays, failed");
+		assert.deepEqual(r.lines.map((l) => l.split("; ").slice(2, 4).join("; ")), ["empty reply 1; nudging", "empty reply 2; giving up"]);
+		assert.ok(r.lines[0]!.endsWith("; thinking: yes; phases before: final_answer"), r.lines[0]);
+		assert.ok(r.lines[1]!.endsWith("; thinking: no; phases before: final_answer"), r.lines[1]);
 		for (const line of r.lines) {
 			assert.ok(line.startsWith("[LearnHarness] Empty reply: chatgpt:gpt-6.2-astra; teacher; "));
-			assert.ok(line.endsWith("; thinking: yes; phases before: final_answer"), line);
-			assert.ok(!/Mercury|idea|Learner|c1|msg_x|Private/.test(line), "no message text or ids");
+			assert.ok(!/Mercury|idea|Learner|c1|msg_x|Private|Continue/.test(line), "no message text, ids or the nudge");
 		}
 	});
 
-	it("an empty reply after a reply with output in this run is not retried", () => {
+	it("the instruction, word for word", () => {
+		assert.equal(EMPTY_REPLY_NUDGE_TEXT, "Continue. (Your previous reply was empty; respond to the learner's last input now and do not mention this note.)");
+	});
+
+	it("the nudge joins exactly one conversion, at the end, as a user message, and never the input", () => {
+		const r = run();
+		const convert = r.guard.withNudge((messages) => messages.map((m) => ({ role: "user", content: [{ type: "text", text: String((m as { role: string }).role) }], timestamp: 0 })) as never);
+		const input = [{ role: "user", content: "Teach me", timestamp: 0 }] as unknown as AgentMessage[];
+		assert.equal(convert(input).length, 1, "not armed: unchanged");
+		r.turn(reply([thinking]));
+		const nudged = convert(input);
+		assert.equal(nudged.length, 2);
+		assert.deepEqual({ ...nudged[1], timestamp: 0 }, { role: "user", content: [{ type: "text", text: EMPTY_REPLY_NUDGE_TEXT }], timestamp: 0 });
+		assert.equal(input.length, 1, "the context is never changed");
+		assert.equal(r.guard.nudgePending, false, "used up by its request");
+		assert.equal(convert(input).length, 1, "no later request carries it");
+	});
+
+	it("any reply clears an armed nudge (it can never ride a later request)", () => {
+		const r = run();
+		r.turn(reply([thinking]));
+		assert.equal(r.guard.nudgePending, true);
+		assert.equal(r.turn(reply([call], "toolUse")), undefined, "a nudged reply with a tool call");
+		assert.equal(r.guard.nudgePending, false);
+		const convert = r.guard.withNudge(() => []);
+		assert.deepEqual(convert([]), []);
+		const after = reply([]);
+		assert.equal(r.turn(after), undefined, "an empty reply after it follows output: not nudged");
+		assert.equal(r.lines.at(-1)!.split("; ")[3], "not retried: follows other output in this turn");
+		const errored = run();
+		errored.turn(reply([thinking]));
+		errored.turn(reply([thinking], "error"));
+		assert.equal(errored.guard.nudgePending, false);
+	});
+
+	it("the agent guard and the page agree on what is empty", () => {
+		const samples = [reply([thinking]), reply([]), reply([text("  ")]), reply([text("Hi.")]), reply([call]), reply([thinking], "error"), reply([thinking], "toolUse"), reply([thinking], "length"), reply([thinking], "aborted"),
+			{ role: "user", content: [] } as unknown as AgentMessage];
+		for (const sample of samples) {
+			for (const provider of ["chatgpt", "openai", "anthropic", "openrouter", "faux"]) {
+				const m = { ...sample, provider } as unknown as AgentMessage;
+				assert.equal(isGuardedEmptyReply(m as never), isEmptyReply(m) && emptyReplyGuardApplies({ provider }), `${provider} ${JSON.stringify(sample)}`);
+			}
+		}
+	});
+
+	it("an empty reply after a reply with output in this run is not nudged", () => {
 		for (const earlier of [reply([call], "toolUse"), reply([text("Some words.")])]) {
 			const r = run();
 			assert.equal(r.turn(earlier), undefined);
@@ -119,15 +164,17 @@ describe("the decision", () => {
 		assert.deepEqual(r.turn(reply([thinking])), { action: "continue" });
 		assert.equal(r.turn(reply([text("Now real words.")])), undefined);
 		assert.equal(r.lines.length, 1);
+		assert.equal(r.guard.nudgePending, false);
 	});
 
-	it("an automatic (background) request: not retried, not logged", () => {
+	it("an automatic (background) request: not nudged, not logged", () => {
 		const r = run({ background: () => true });
 		const empty = reply([thinking]);
 		assert.equal(r.turn(empty), undefined);
 		assert.ok(r.agent.state.messages.includes(empty));
 		assert.equal((empty as { stopReason: string }).stopReason, "stop");
 		assert.deepEqual(r.lines, []);
+		assert.equal(r.guard.nudgePending, false);
 	});
 
 	it("the purpose is read at each reply", () => {

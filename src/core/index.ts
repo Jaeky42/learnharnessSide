@@ -125,3 +125,6 @@ export * from "./plugin-submissions.ts";
 export type * from "./plugin-ui.ts";
 export type * from "./plugin-tree.ts";
 export * from "./plugin-agents.ts";
+// FORK (empty reply): the page hides a dropped empty ChatGPT/OpenAI attempt
+// with the agent guard's own definition. Pure, browser-safe.
+export { isGuardedEmptyReply } from "./empty-reply.ts";

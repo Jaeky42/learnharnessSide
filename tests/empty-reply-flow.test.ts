@@ -11,7 +11,7 @@ import path from "node:path";
 import { piModels } from "../src/agent/models.ts";
 import { refreshChatGPTModels } from "../src/agent/chatgpt-bridge.ts";
 import { bareQuestionTools, createTeacherAgent } from "../src/agent/teacher-agent.ts";
-import { EMPTY_REPLY_TEXT } from "../src/agent/empty-reply-guard.ts";
+import { EMPTY_REPLY_NUDGE_TEXT, EMPTY_REPLY_TEXT } from "../src/agent/empty-reply-guard.ts";
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "lh-empty-reply-"));
 process.env.LH_DATA_DIR = path.join(scratch, "data");
 process.env.LH_AUTH_FILE = path.join(scratch, "auth.json");
@@ -19,6 +19,7 @@ process.env.OPENROUTER_API_KEY ??= "test-key-presence-gate";
 fs.writeFileSync(process.env.LH_AUTH_FILE, "{}");
 import { newUserMessage, needsContinuation, type LhMessage } from "../src/core/native-messages.ts";
 import { retryDrops } from "../src/core/input-events.ts";
+import { SessionModel } from "../components/session-core.ts";
 
 const model = piModels().getModel("openai", "gpt-5") as Model<"openai-responses">;
 let epoch = 1, revision = 1;
@@ -104,49 +105,72 @@ async function setup(name: string, shapes: Shape[], settingsModel = { provider: 
 }
 const brief = (m: any) => ({ role: m.role, stopReason: m.stopReason, errorMessage: m.errorMessage, blocks: Array.isArray(m.content) ? m.content.map((b: any) => b.type) : undefined });
 
-test("(a) answer -> empty -> normal reply: the lesson goes on, the empty reply is dropped", async () => {
+/** The request body's last input item, if it is a plain user message: its text. */
+const lastUserText = (body: string): string | undefined => {
+	const last = (JSON.parse(body) as { input: any[] }).input.at(-1);
+	if (last?.role !== "user") return undefined;
+	return Array.isArray(last.content) ? last.content.map((c: any) => c.text ?? "").join("") : String(last.content);
+};
+const carriesNudge = (body: string) => body.includes("Your previous reply was empty");
+
+test("(a) answer -> empty -> nudged request -> normal reply: the lesson goes on, nothing of it is kept", async () => {
 	const { chatStore, chatId, base } = await setup("a", ["empty", "text"]);
 	const { events } = await runTurn(chatId, answer, chatGPTBuild);
 	assert.equal(bodies.length, 2);
 	assert.deepEqual(leases, [false, false], "each request takes its own lease");
-	assert.ok(!bodies[1]!.includes("enc-1") && !bodies[1]!.includes("rs_1"), "the dropped reply is not in the retry's request");
-	assert.equal(JSON.parse(bodies[1]!).input.length, JSON.parse(bodies[0]!).input.length, "the same request again");
+	assert.equal(carriesNudge(bodies[0]!), false);
+	assert.equal(lastUserText(bodies[1]!), EMPTY_REPLY_NUDGE_TEXT, "the nudged request ends with the instruction as a user input");
+	assert.ok(!bodies[1]!.includes("enc-1") && !bodies[1]!.includes("rs_1"), "the dropped reply is not in the nudged request");
+	assert.equal(JSON.parse(bodies[1]!).input.length, JSON.parse(bodies[0]!).input.length + 1, "the same request plus the one instruction");
 	const saved = chatStore.getChat(chatId)!;
 	assert.deepEqual(saved.messages.slice(base).map(brief), [
 		{ role: "toolResult", stopReason: undefined, errorMessage: undefined, blocks: ["text"] },
 		{ role: "assistant", stopReason: "stop", errorMessage: undefined, blocks: ["thinking", "text"] },
 	]);
 	assert.ok(JSON.stringify(saved.messages).includes("Reply 2.") && !JSON.stringify(saved.messages).includes("Thought 1."));
-	assert.equal(events.filter((e) => e.type === "turn_start").length, 2, "the retry's events reach the wire");
+	const file = fs.readFileSync(path.join((await import("../config.ts")).PATHS.chats, `${chatId}.json`), "utf8");
+	assert.ok(!carriesNudge(file) && !file.includes("Continue."), "no nudge text anywhere in the saved file");
+	assert.ok(!events.some((e) => carriesNudge(JSON.stringify(e))), "no wire event carries the instruction");
+	assert.equal(events.filter((e) => e.type === "turn_start").length, 2, "the nudged request's events reach the wire");
+	// The page, fed this very wire, never shows the dropped attempt beside the reply.
+	const page = new SessionModel({ chatId, initialMessages: [] });
+	const counts: number[] = [];
+	for (const e of events) { page.applyWireEvent(e); counts.push(page.getState().nativeMessages.filter((x) => x.role === "assistant").length); }
+	assert.equal(Math.max(...counts), 1, "at most one assistant message on the page at any moment");
+	assert.ok(JSON.stringify(page.getState().nativeMessages).includes("Reply 2.") && !JSON.stringify(page.getState().nativeMessages).includes("Thought 1."));
 	assert.ok(events.some((e) => e.type === "message_end" && e.message.role === "assistant" && JSON.stringify(e.message).includes("Reply 2.")));
-	assert.equal(saved.turns?.at(-1)?.steps.length, 2, "(f) usage for both requests");
-	assert.deepEqual(logs, ["[LearnHarness] Empty reply: chatgpt:gpt-5; teacher; empty reply 1; retrying; thinking: yes; phases before: none"]);
+	assert.equal(saved.turns?.at(-1)?.steps.length, 2, "(e) usage for both requests");
+	assert.deepEqual(logs, ["[LearnHarness] Empty reply: chatgpt:gpt-5; teacher; empty reply 1; nudging; thinking: yes; phases before: none"]);
 });
 
-test("(b) answer -> empty x3: a failed reply with the approved sentence, and Retry works", async () => {
-	const { chatStore, chatId, base } = await setup("b", ["empty", "empty", "empty"]);
+test("(b) answer -> empty -> nudged reply empty: a failed reply with the approved sentence, and Retry works without the nudge", async () => {
+	const { chatStore, chatId, base } = await setup("b", ["empty", "empty"]);
 	const { events } = await runTurn(chatId, answer, chatGPTBuild);
-	assert.equal(bodies.length, 3);
-	assert.deepEqual(leases, [false, false, false]);
-	assert.ok(!bodies[2]!.includes("enc-1") && !bodies[2]!.includes("enc-2"));
+	assert.equal(bodies.length, 2);
+	assert.deepEqual(leases, [false, false]);
+	assert.equal(lastUserText(bodies[1]!), EMPTY_REPLY_NUDGE_TEXT);
+	assert.ok(!bodies[1]!.includes("enc-1"));
 	const saved = chatStore.getChat(chatId)!;
 	const tail = saved.messages.slice(base);
 	assert.deepEqual(tail.map(brief), [
 		{ role: "toolResult", stopReason: undefined, errorMessage: undefined, blocks: ["text"] },
 		{ role: "assistant", stopReason: "error", errorMessage: EMPTY_REPLY_TEXT, blocks: ["thinking"] },
 	]);
-	assert.ok(JSON.stringify(tail.at(-1)).includes("Thought 3."), "the last empty reply is the one saved");
+	assert.ok(JSON.stringify(tail.at(-1)).includes("Thought 2."), "the nudged empty reply is the one saved");
+	assert.ok(!carriesNudge(JSON.stringify(saved)), "no nudge in the record");
 	assert.equal(retryDrops(saved.messages).size, 1);
 	assert.equal(needsContinuation(saved.messages), false);
-	assert.equal(events.filter((e) => e.type === "turn_start").length, 3);
+	assert.equal(events.filter((e) => e.type === "turn_start").length, 2);
+	assert.ok(!events.some((e) => carriesNudge(JSON.stringify(e))));
 	assert.ok(events.some((e) => e.type === "turn_end" && e.message.stopReason === "error" && e.message.errorMessage === EMPTY_REPLY_TEXT));
-	assert.equal(saved.turns?.at(-1)?.steps.length, 3, "(f) usage for all three requests");
-	assert.deepEqual(logs.map((l) => l.split("; ").slice(2, 4).join("; ")), ["empty reply 1; retrying", "empty reply 2; retrying", "empty reply 3; giving up"]);
+	assert.equal(saved.turns?.at(-1)?.steps.length, 2, "(e) usage for both requests");
+	assert.deepEqual(logs.map((l) => l.split("; ").slice(2, 4).join("; ")), ["empty reply 1; nudging", "empty reply 2; giving up"]);
 	for (const line of logs) assert.ok(!line.includes("Mercury") && !line.includes("planet") && !line.includes("Thought") && !line.includes("q_teacher"));
-	// Retry: a normal turn from the saved answer.
+	// Retry: a normal turn from the saved answer, whose first request has no nudge.
 	bodies = []; leases = []; logs = []; script = ["text"];
 	await runTurn(chatId, { type: "retry" }, chatGPTBuild);
 	assert.equal(bodies.length, 1);
+	assert.equal(carriesNudge(bodies[0]!), false, "Retry's first request does not carry the instruction");
 	const after = chatStore.getChat(chatId)!.messages.slice(base);
 	assert.deepEqual(after.map(brief).slice(-2), [
 		{ role: "assistant", stopReason: "error", errorMessage: EMPTY_REPLY_TEXT, blocks: ["thinking"] },
@@ -155,7 +179,27 @@ test("(b) answer -> empty x3: a failed reply with the approved sentence, and Ret
 	assert.deepEqual(logs, []);
 });
 
-test("(c) an automatic wake whose reply is empty: one request, saved as before, no error", async () => {
+test("(c) a nudged reply that makes a tool call: the request after the tool result has no nudge", async () => {
+	const { chatStore, chatId, base } = await setup("c-tool", ["empty", "tool", "text"]);
+	const { events } = await runTurn(chatId, answer, (opts) => createTeacherAgent(undefined, { ...opts, tools: { ...bareQuestionTools(), ...againTool } }));
+	assert.equal(bodies.length, 3);
+	assert.equal(lastUserText(bodies[1]!), EMPTY_REPLY_NUDGE_TEXT);
+	assert.equal(carriesNudge(bodies[0]!), false);
+	assert.equal(carriesNudge(bodies[2]!), false, "the request after the tool result does not carry the instruction");
+	const saved = chatStore.getChat(chatId)!;
+	assert.deepEqual(saved.messages.slice(base).map(brief), [
+		{ role: "toolResult", stopReason: undefined, errorMessage: undefined, blocks: ["text"] },
+		{ role: "assistant", stopReason: "toolUse", errorMessage: undefined, blocks: ["thinking", "toolCall"] },
+		{ role: "toolResult", stopReason: undefined, errorMessage: undefined, blocks: ["text"] },
+		{ role: "assistant", stopReason: "stop", errorMessage: undefined, blocks: ["thinking", "text"] },
+	]);
+	assert.ok(!carriesNudge(JSON.stringify(saved)));
+	assert.ok(!events.some((e) => carriesNudge(JSON.stringify(e))));
+	assert.equal(saved.turns?.at(-1)?.steps.length, 3, "(e) usage for every request");
+	assert.deepEqual(logs.map((l) => l.split("; ").slice(2, 4).join("; ")), ["empty reply 1; nudging"]);
+});
+
+test("(d) an automatic wake whose reply is empty: one request, no nudge, saved as before, no error", async () => {
 	const { chatStore, chatId, base } = await setup("c", ["empty"]);
 	const steer = { id: "auto_steer", role: "custom", customType: "subagent-steer", content: "Automatic result", details: { jobId: "dummy-job" }, display: true, timestamp: 2 } as unknown as LhMessage;
 	// A normal answer turn first; then the wake carries a helper's result.
@@ -164,6 +208,7 @@ test("(c) an automatic wake whose reply is empty: one request, saved as before, 
 	bodies = []; leases = []; logs = []; script = ["empty"];
 	await runTurn(chatId, { type: "steers", steers: [steer] }, chatGPTBuild);
 	assert.equal(bodies.length, 1);
+	assert.equal(carriesNudge(bodies[0]!), false);
 	assert.deepEqual(leases, [true], "an automatic request");
 	const tail = chatStore.getChat(chatId)!.messages.slice(afterAnswer);
 	assert.deepEqual(tail.map(brief), [
@@ -174,10 +219,11 @@ test("(c) an automatic wake whose reply is empty: one request, saved as before, 
 	assert.deepEqual(logs, [], "automatic empties are not logged");
 });
 
-test("(d) a tool call, then an empty reply: not retried, saved as before, logged", async () => {
+test("(d) a tool call, then an empty reply: not nudged, saved as before, logged", async () => {
 	const { chatStore, chatId, base } = await setup("d", ["tool", "empty"]);
 	await runTurn(chatId, answer, (opts) => createTeacherAgent(undefined, { ...opts, tools: { ...bareQuestionTools(), ...againTool } }));
 	assert.equal(bodies.length, 2);
+	assert.ok(!bodies.some(carriesNudge));
 	const saved = chatStore.getChat(chatId)!;
 	assert.deepEqual(saved.messages.slice(base).map(brief), [
 		{ role: "toolResult", stopReason: undefined, errorMessage: undefined, blocks: ["text"] },
@@ -185,20 +231,22 @@ test("(d) a tool call, then an empty reply: not retried, saved as before, logged
 		{ role: "toolResult", stopReason: undefined, errorMessage: undefined, blocks: ["text"] },
 		{ role: "assistant", stopReason: "stop", errorMessage: undefined, blocks: ["thinking"] },
 	]);
-	assert.equal(saved.turns?.at(-1)?.steps.length, 2, "(f) usage for both requests");
+	assert.equal(saved.turns?.at(-1)?.steps.length, 2, "(e) usage for both requests");
 	assert.deepEqual(logs, ["[LearnHarness] Empty reply: chatgpt:gpt-5; teacher; empty reply 1; not retried: follows other output in this turn; thinking: yes; phases before: none"]);
 });
 
-test("(e) the same empty reply from another provider's engine is not retried (scripted engine)", async () => {
+test("(d) the same empty reply from another provider's engine is not nudged (scripted engine)", async () => {
 	// Driven through the handler with a scripted (faux) engine labelled as
 	// Anthropic, not through the ChatGPT path: the guard reads the engine's provider.
 	for (const [provider, id, calls, retried] of [["anthropic", "claude-sonnet-5-5", 1, false], ["openai", "gpt-5", 2, true]] as const) {
 		const { chatStore, chatId, base } = await setup(`e-${provider}`, [], { provider: "openrouter", id: "z-ai/glm-5.3-flash" });
 		const faux = createFauxCore({ provider, models: [{ id, reasoning: true }] });
 		let made = 0;
+		const lastSeen: string[] = [];
+		const seen = (context: { messages: { role: string; content: unknown }[] }) => { lastSeen.push(JSON.stringify(context.messages.at(-1))); };
 		faux.setResponses([
-			() => { made++; return fauxAssistantMessage([fauxThinking("Only thinking.")]); },
-			() => { made++; return fauxAssistantMessage([{ type: "text", text: "Spoken." }]); },
+			(context) => { made++; seen(context as never); return fauxAssistantMessage([fauxThinking("Only thinking.")]); },
+			(context) => { made++; seen(context as never); return fauxAssistantMessage([{ type: "text", text: "Spoken." }]); },
 		]);
 		const engine = { model: faux.getModel(), streamFn: faux.streamSimple, level: "off" as const };
 		await runTurn(chatId, answer, (opts) => createTeacherAgent(undefined, { ...opts, engine, requestCycle: undefined }));
@@ -209,6 +257,9 @@ test("(e) the same empty reply from another provider's engine is not retried (sc
 			: { role: "assistant", stopReason: "stop", errorMessage: undefined, blocks: ["thinking"] }, provider);
 		assert.equal(tail.length, 2, provider);
 		assert.equal(logs.length, retried ? 1 : 0, provider);
-		assert.equal(chatStore.getChat(chatId)!.turns?.at(-1)?.steps.length, calls, `(f) usage for every request, ${provider}`);
+		assert.equal(carriesNudge(lastSeen[0]!), false, provider);
+		if (retried) assert.ok(lastSeen[1]!.includes(EMPTY_REPLY_NUDGE_TEXT.slice(0, 40)) && JSON.parse(lastSeen[1]!).role === "user", "the nudge is the engine's last message");
+		assert.ok(!carriesNudge(JSON.stringify(chatStore.getChat(chatId))), provider);
+		assert.equal(chatStore.getChat(chatId)!.turns?.at(-1)?.steps.length, calls, `(e) usage for every request, ${provider}`);
 	}
 });

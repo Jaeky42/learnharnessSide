@@ -39,3 +39,38 @@
   - The log lines read as built, for example `[LearnHarness] Empty reply: openai:gpt-5; teacher; empty reply 1; retrying; thinking: yes; phases before: none`, with no lesson text in them.
   - Seen: while the retry starts, the open thinking block shows an empty body for a moment before the second thought arrives.
   - Not run: a real OpenAI reply, and the ChatGPT sign-in path in a browser (the flow tests cover that path on the server side).
+
+### The plain retry, as it failed in use
+
+- **Shipped** as releases 0.6.51 (the guard, `a14973f`) and 0.6.52 (the test repair, the same app), and on the server image `:dev` from the same commit.
+- **On the owner's server, with GPT-6.2 Astra,** the same request came back empty every time: two turns, three requests each, six empty replies, then the red line in both turns. The log lines read:
+  - `[LearnHarness] Empty reply: chatgpt:gpt-6.2-astra; teacher; empty reply 1; retrying; thinking: no; phases before: commentary`
+  - then `empty reply 2; retrying` and `empty reply 3; giving up`, with the same other fields.
+- **What they showed:**
+  - the reply was completely empty, with no thinking block either (`thinking: no`);
+  - the text before the question was labelled `commentary`, so the earlier guess (`final_answer`) was wrong;
+  - an identical request gets the identical empty answer, so a plain retry cannot help.
+- **What did work,** by the owner's experience: a real user message ("continue") typed after the empty turn. The learner's answer reaches the model as the question tool's result, not as a user message. That led to the nudge (`models-and-agents.md`, "ChatGPT and OpenAI: an empty reply is asked again").
+
+### The nudge, what was run
+
+- **No real model.** Node 22, the development sandbox.
+- **`tests/empty-reply-flow.test.ts`** (6 tests, all pass), the real `handleChatInput` through the real ChatGPT stream with a scripted Responses backend:
+  - empty, then a normal reply: 2 requests with their own leases; the second request's last input item is a user message whose text is exactly the instruction, and it has one input item more than the first and none of the dropped reply; the saved record is the answer's result and the normal reply only; the saved file and every wire event are free of the instruction; a page model fed that wire never shows more than one assistant message; usage for both requests;
+  - empty twice: 2 requests; the record ends on the failed reply (the nudged reply's thinking); `retryDrops` accepts it; a `retry` input runs a normal turn whose one request has no nudge;
+  - a nudged reply that calls a tool: 3 requests; the third, after the tool result, has no nudge;
+  - an automatic wake (`steers`) whose reply is empty: 1 request, no nudge; a tool call then an empty reply: not nudged; an Anthropic-labelled scripted engine: not nudged; an OpenAI-labelled one: nudged, the nudge being the last message the engine saw.
+- **`tests/empty-reply-guard.test.ts`**: 28 tests, all pass (the nudge armed for one conversion, used up there and cleared by any reply; the instruction word for word; the log words; the guard and the page agreeing on what is empty).
+- **`tests/empty-reply-page.test.ts`**: 9 tests, all pass; 4 of them fail with the page's rule switched off in a scratch copy (the ones that expect the empty attempt hidden), the 5 that expect a message kept pass either way.
+- **The flow tests need the conversion's wrap:** with `convertToLlm` put back to plain `toLlmMessages` in a scratch copy, 4 of the 6 fail (the three nudged cases and the scripted OpenAI engine); the automatic wake and the tool call before an empty reply pass either way, as they should.
+- **The other runs:** `tests/chatgpt-request-cycle.test.ts` 18 of 18, `tests/chatgpt-stream.test.ts` 11 of 11, `tests/chat-flow.test.ts` 41 of 41, `tests/narration-guard.test.ts` 28 of 28, `tests/session-core.test.ts` 102 of 102, and every other test file that drives `components/session-core.ts` (24 files, among them `retry-failed-turn`, `send-to-user`, `session-stamp`, `session-move` and the plugin question and problem front-end tests), all passing. The whole suite without `tests/safe-fetch.test.ts` (it hangs here) and the seven `tests/plugin-*types.test.ts` files: 7,052 tests, 7,044 pass, 4 fail, 4 skipped; the 4 failures are the known sandbox ones (`passive-tooltip`, `safe-fetch-connector`, one case each of `plugin-document-proxy` and `subscription-auth`). The seven type test files, one at a time: all pass. Typecheck clean; lint with its one existing warning.
+- **Not run:** a browser run, a real model.
+- **The nudge's independent check:** 15 test files run one at a time, all passing (the guard 28, the flow 6, the page 9, `session-core` 102, and the request cycle, stream, chat flow, retry and gateway files). In a scratch copy, with the `convertToLlm` wrap made to do nothing 4 of the 6 flow tests fail, and with the page rule removed 4 of the 9 page tests fail. No defect found. Reasoned from the code, not run: a nudged request refused before it is sent is asked again without the nudge; an automatic wake's empty reply that the page hid comes back when the turn settles.
+- **The nudge's browser run** (Chromium against `next dev` in server mode, the same stand-in for `api.openai.com`, now also recording each request body, with two shapes of an empty reply: a completed response with no output items, as the owner's server logged, and a reasoning-only one; the page sampled every 100 ms from the click until the turn settled):
+  - **empty, then a reply** (both shapes; a computer and iPhone 13 size): 2 requests. The second is the first plus one item, a last user message with the instruction, word for word, and holds nothing of the empty attempt. The lesson went on with no typing and no error line. At no sample did the page show more thought blocks, assistant groups or dividers than the control (5, 11 and 18 on a computer; 3, 11 and 18 at iPhone size). The instruction was never in the page's text or HTML, nor in the saved chat file, before or after a reload;
+  - **empty twice:** 2 requests, only the second with the instruction, then the red line ("Something went wrong: The teacher returned an empty reply. Retry when ready.") with Retry; it survived a reload. Retry with a normal reply: 1 request without the instruction, and the lesson went on;
+  - **a normal reply:** 1 request, no instruction;
+  - **a nudged reply that calls a tool:** 3 requests; the second carries the instruction, the third does not;
+  - the log lines read `…; empty reply 1; nudging; thinking: no; …` and `…; empty reply 2; giving up; …`, with no lesson text.
+  - Not run: a real model; the two-empties run at iPhone size; the Windows app.
+
