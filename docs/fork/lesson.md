@@ -1,4 +1,4 @@
-# The lesson screen: checks, rendering, dictation and the highlight toolbar
+# The lesson screen: checks, resting point, rendering, dictation and the highlight toolbar
 
 ## Scrolling into a check
 
@@ -16,17 +16,20 @@
 
 ### The owner's decisions and approved words
 
-- **The owner's decisions:** a waiting check stays **folded, and scrolling opens it** (over "open on arrival, like other questions", which would have dropped the Open step); every device, as decided for the first attempt; and **built and shipped to both branches at once**, with no test page and no phone trial first (over the server branch first). The 0.7.0 merge left one question about it open, the adaptive question layout: the first item under "Rulings, limits and open items" below.
+- **The owner's decisions:** a waiting check stays **folded, and scrolling opens it** (over "open on arrival, like other questions", which would have dropped the Open step); every device, as decided for the first attempt; and **built and shipped to both branches at once**, with no test page and no phone trial first (over the server branch first).
+- **A check against upstream's adaptive question layout** (0.7.0 merge, decision 5). After the browser run below, the owner was shown the result and chose **"Leave it as it is"**, over "checks keep the normal width" and over "checks adapt, with the blank space measured to fit". So a check adapts like any other question, and the strip described under "Rulings, limits and open items" is an accepted limit. Nothing was changed in the code for it.
 
 ### Rulings, limits and open items
 
-- **OPEN, for the owner (0.7.0 merge, decision 5): a check waiting behind Open against upstream's adaptive question layout.** Upstream 0.7.0 can widen an expanded question and split it into two columns ("Adapt question layout" in Settings → Appearance, on by default; its row is hidden on a phone, `docs/fork/phone-and-tablet.md`). The owner chose to merge as it is and look afterwards, then choose between **"checks keep the normal width"** and **"checks adapt, with the blank space measured to fit"**. Not decided; nothing was changed in the code for it. What the code says (read, not seen in a browser):
-  - the layout request (`components/use-question-layout.ts`, `QuestionLayoutRequest`: the available width, the base width, the column floor and a font key) has no "expanded" term for a folded check, so the hidden folded form (`data-dock-open-form`, kept laid out at zero height) is laid out at the narrow dock width, while the open check, once opened, may widen and split into two columns (`components/question-layout.ts`; `data-question-layout="columns"` in `components/question-dock.tsx`);
-  - `measureOpenCheck` (`components/check-blank-space.ts`) reads the first `[data-dock-scroll-area]` inside the form; in two columns that attribute is on the question column only (`question-dock.tsx` puts it on the stacked area or on the columns' areas), so the open check's height, and with it the blank space kept under a waiting check, could be measured for a different shape than the one that opens;
-  - the likely effect on a wide screen is a blank space that doesn't match the opened check (too tall or too short). Whether it shows, and by how much, is not known: the browser run is still to do. Phone and narrow windows get no adaptive layout, so the rule there is as written above.
+- **Known limit, accepted by the owner (0.7.0 merge, decision 5): a check waiting behind Open against upstream's adaptive question layout.** Upstream 0.7.0 can widen an expanded question and split it into two columns ("Adapt question layout" in Settings → Appearance, on by default; its row is hidden on a phone, `docs/fork/phone-and-tablet.md`).
+  - **What the browser run showed** (a production build in headless Chromium, 14 runs across wide screens): a waiting check never shifted the lesson at the moment it opened, so the blank space held. On a wide screen a long check opens in two columns, and a blank strip of 96 to 120 px is then left above it, because the blank space was measured for the stacked, narrower form, which is taller.
+  - **Why, from the code:**
+    - the layout request (`components/use-question-layout.ts`, `QuestionLayoutRequest`: the available width, the base width, the column floor and a font key) has no "expanded" term for a folded check, so the hidden folded form (`data-dock-open-form`, kept laid out at zero height) is laid out at the narrow dock width, while the open check, once opened, may widen and split into two columns (`components/question-layout.ts`; `data-question-layout="columns"` in `components/question-dock.tsx`);
+    - `measureOpenCheck` (`components/check-blank-space.ts`) reads the first `[data-dock-scroll-area]` inside the form; in two columns that attribute is on the question column only (`question-dock.tsx` puts it on the stacked area or on the columns' areas), so the open check's height, and with it the blank space kept under a waiting check, is measured for the stacked shape, not the one that opens.
+  - Phone and narrow windows get no adaptive layout, so the rule there is as written above.
 - **Rulings made while building (for the owner to review):**
   - **"Moved down."** Without it, anything that clamps the lesson to its bottom (the keyboard closing, a taller window, content getting shorter) would have opened the check by itself; those all move the lesson up.
-  - **Back to the resting point** (`backToRest`). When the lesson or its scroller changes size (messages taking their real height after load under the off-screen rule, a taller or wider window, the blank space growing), a lesson that was resting at the end of the text is put back there, through the library's own setter. One the learner had scrolled into the blank space is left where it is. Found in the browser: at iPhone size the load left the lesson about 300 px into the blank space; and the independent check found a taller window doing the same, which was a rest point worked out from a half-updated layout (fixed: it is read from the spacer as it is in the page).
+  - **Back to the resting point** (`backToRest`). When the lesson or its scroller changes size (messages taking their real height after load under the off-screen rule, a taller or wider window, the blank space growing), a lesson that was resting at the end of the text is put back there, through the library's own setter. One the learner had scrolled into the blank space is left where it is. Found in the browser: at iPhone size the load left the lesson about 300 px into the blank space; and the independent check found a taller window doing the same, which was a rest point worked out from a half-updated layout (fixed: it is read from the spacer as it is in the page). A lesson that stopped short of its resting point at load, with no check involved, is a different fault with its own rule: "Rest on open" below.
   - **A plugin's check keeps upstream's behaviour** (Coding questions: no blank space, Open only). The owner was told with the plan.
   - **A lesson too short to scroll** keeps its check behind Open.
 - **Seen, not changed:** a hard flick from 1,500 px up ended 33 to 63 px short of the bottom, folded (3 of 3 in the second run, 1 of 3 in the first); scrolling on opens it. With the learner part-way into the blank space and the window then made taller, the two runs disagree on whether the lesson was moved (the implementer's: not moved; the verifier's: 118 px); it stayed folded in both and opened at the bottom afterwards.
@@ -37,6 +40,44 @@
 ### Code and tests
 
 - **Tests:** `tests/check-blank-space.test.ts` (the rules), `tests/dock-touch-reveal.test.tsx` (the scripted lesson with the real `use-stick-to-bottom`: folded and at rest on load and on arrival, never opening with no input, opening at the bottom with no change of the reserve and no fold after, a lesson too short to scroll, Open from rest and from far up, a stopped glide then a scroll to the bottom by hand, a taller viewport at rest and in the blank space, the reserve growing at rest, a normal question unchanged).
+
+## Rest on open
+
+- **What the learner gets:** a lesson opens at its resting point and stays there until the learner first scrolls, taps or presses a key. The resting point is the bottom of the lesson, or, for a lesson whose check waits folded, the end of the text ("Scrolling into a check"). Before this, a lesson could open 12 to 135 px above its resting point and stay there, with the slide to the bottom no longer following the lesson as it grew. Seen in Chromium; whether Safari does it is not known.
+- **The cause** (measured, production builds, with the library's state, every `scrollTop` write with its stack, every scroll event and the library's 1 ms timeouts logged):
+  - the off-screen rule (`docs/fork/performance.md`, "The off-screen rule") gives older messages an estimated height until they are drawn. When one above the screen takes its real height and is shorter than its estimate, the browser's scroll anchoring lowers `scrollTop` with it;
+  - `use-stick-to-bottom`'s scroll handler takes a decrease of `scrollTop` for the learner scrolling up, unless its one shared `resizeDifference` is non-zero when its 1 ms timeout runs. On the loading main thread that timeout ran 25 to 85 ms late, after a later ResizeObserver callback had set `resizeDifference` back to 0. The library then stops following (`escapedFromLock` true, `isAtBottom` false), and later growth is not followed;
+  - two logged loads: an ordinary lesson, timeout queued at 1931 ms and run at 1958 ms, after the reset at 1955.8 ms: 111 px short; a check lesson, queued at 1644 ms and run at 1729 ms: 30 px short. In the failing check-lesson loads the shifts came from older rows just above the newest turn (estimated 700 px, real 470 to 495 px);
+  - the fork's `backToRest`, `targetScrollTop` and growth mute were not involved. Inferred, not tested: why the check lesson failed only with the newest-turn exemption.
+  - The library is unchanged; the fork's rule works around it.
+- **The rule** (`components/rest-on-open.ts`, fork-owned; the pure rules are `restOnOpenStep` and `viewMovedByOther`, wired by `installRestOnOpen`):
+  - from the moment a lesson opens until the learner's first wheel, touch, pointer press or key press anywhere on the page (`REST_END_EVENTS`), a lesson more than 2 px above its resting point (`REST_TOLERANCE_PX`), with no library slide under way, is put back through the library's own setter, and the library is set following again (`scrollToBottom("instant")`). The resting point is the library's own target: the bottom, or the end of the text while a check waits folded. A lesson at rest whose library had let go is set following again without moving. A lesson below its resting point is never moved, and one too short to scroll neither;
+  - it looks 5 ms after each scroll event of the lesson (`REST_CHECK_DELAY_MS`, after the library's 1 ms decision) and after each resize of the lesson or its content, and waits frame by frame while a slide runs;
+  - **it ends for good:**
+    - at the first input above;
+    - at a scroll event that moved what is on screen other than by the library's setter (`viewMovedByOther`: scroll anchoring moves `scrollTop` and leaves the rows on screen still, where a real scroll moves every row's edges the same way by more than 2 px). This is needed because Chromium scrolls a wheel on the compositor, and the page can see the scroll with a late wheel event or none. A scroll up found this way also calls the library's `stopScroll`;
+    - at any jump (Find, a citation, the Tutor's "Show in the lesson", a link to a message: all go through `revealOffscreenTarget` in `components/offscreen-target.ts`, which calls `noteLessonJump()`);
+    - it never starts when the lesson opens on a `#message-…` link (`opensOnMessageLink`);
+  - a put-back is noted in the check space as not a move down (`onPutBack`), so a waiting check still never opens by itself;
+  - while it is active it wraps the `scrollTop` setter of the library's state object, so the library's own moves are not taken for the learner's, and gives the setter back as it was when it ends;
+  - the off-screen rule, its size estimates and the newest-turn exemption are unchanged. No size estimate cured the fault in the runs (the measurements are in `docs/fork/history/performance.md`, "Rest on open").
+- **Why it was needed now:** the fault is older than the 0.7.0 merge for ordinary lessons (the fork's own off-screen rule, in the releases since the performance round). The newest-turn exemption (decision 6 of the 0.7.0 merge) made it show on check lessons at 1366 wide too.
+
+### The owner's decisions and approved words
+
+- **The owner's word on the fault:** "fix it first then ship".
+
+### Rulings, limits and open items
+
+- **The recommendation for decision 6 was wrong in this one respect.** It said the newest-turn exemption had no cost; for check lessons at 1366 wide it made the fault show. The owner has been told. The exemption stays: with the fix every measured case is 30 of 30.
+- **Rulings made while building (for the owner to review):** it runs on every device, the desktop app included (it acts only when a lesson stopped short with no input); any key press ends it, not only a scrolling key; the wrapped setter (above).
+- **Known limits:** a scroll that moves nothing visible on screen (some assistive-technology scrolls) is not seen as the learner's; a misread the other way only ends the rule early, and the lesson then behaves as before.
+- **Not checked:** Safari, a real iPhone or iPad, the Windows app. Only the owner's devices can show whether Safari's anchoring behaves like Chromium's.
+
+### Code and tests
+
+- **Code:** `components/rest-on-open.ts`; one effect and one import in `DockOverlay` in `components/chat.tsx` (`FORK (rest on open)`); one call in `revealOffscreenTarget`, `components/offscreen-target.ts` (fork-owned).
+- **Tests:** `tests/rest-on-open.test.tsx` (the rules; a control that reproduces the library's fault; the sequence from the frame logs: a jump, heights settling, a 24 px anchoring shift, then 413 px of growth; the learner's input, a jump and a message link ending it; a waiting check not opened).
 
 ## Money is not math
 

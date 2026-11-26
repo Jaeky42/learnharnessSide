@@ -61,7 +61,7 @@ Newest first. "Not recorded": the docs give none.
 - `server.md`: "Accounts on one server", "Rulings made while building (for the owner to review)"; "The Obsidian vault on the server", "From the Phase 4 handoff" (wording added while building).
 - `phone-and-tablet.md`: "Plugins on a phone", "Built beyond the plan's letter, for the owner to review".
 - `side-tutor.md`: "The Tutor on upstream's side conversations" ("Remove the passage"); "On a phone" (the swipe's readings); "The window and the bubble" (the bubble's 20 px).
-- `lesson.md`: "Scrolling into a check", "Rulings, limits and open items"; "Dictation" (the numbers of dictation after the app was away).
+- `lesson.md`: "Scrolling into a check", "Rulings, limits and open items"; "Rest on open" (it runs on every device; any key press ends it); "Dictation" (the numbers of dictation after the app was away).
 - `performance.md`: "Rulings made while building (for the owner to review)".
 
 **Left in the code until the owner answers**
@@ -74,7 +74,7 @@ Newest first. "Not recorded": the docs give none.
 - `server.md`: "Accounts on one server", "State" ("Concurrent worker requests" lowered to 3, the recovery codes kept); "What only the real server can show".
 - `cloud-sync.md`: "Flashcards sync", "Only the real PC and server can confirm"; "Seamless sessions", "Known limits" (not checked on real devices).
 - `phone-and-tablet.md`: the "Only the owner's iPhone can show" lists in "Screens" (the session list's swipe, the keyboard marker), "Touch and typing" (a tap on the confidence bar's line with the keyboard up, the glide) and "Plugins on a phone"; the keyboard's jerkiness at the focus, still open, under "How it's built".
-- `lesson.md`: "Highlight, then Ask on a touch screen" and "Scrolling into a check" (what only the owner's devices can show); "Dictation" (Firefox on the owner's Android phone; dictation after the iPhone's home-screen app was away, and what the red line reads if it still fails).
+- `lesson.md`: "Highlight, then Ask on a touch screen", "Scrolling into a check" and "Rest on open" (what only the owner's devices can show: Safari's anchoring, for the last); "Dictation" (Firefox on the owner's Android phone; dictation after the iPhone's home-screen app was away, and what the red line reads if it still fails).
 - `side-tutor.md`: "Speaking to the tutor" (the Tutor's Dictate has never met a real microphone); "On a phone" (the swipe's feel).
 - `performance.md`: "Known faults with the rule on" (Safari's anchoring and Find, the scrollbar, the slide to the bottom).
 - `models-and-agents.md`: a lesson with GPT-6.2 not reported yet; the research wrap-up with a real model; "ChatGPT and OpenAI: an empty reply is asked again": no real ChatGPT or OpenAI model was run and the cause of the empty reply is not known, and how often a plain retry is enough only the owner's use and the server log can show.

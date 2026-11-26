@@ -43,3 +43,51 @@ In a browser, after the build (headless Chromium, software rendering, a producti
 - `?only=stamp` costs the server about half a full read (38 ms against 78 ms at 950 messages): it parses the file once.
 - **With the per-kind estimates and the jump fix** (a second analyst's runs, another day's machine load, so compare on with off, not with the table): opening 6.9 s on against 8.3 s off; 60 wheel steps at 4×: main thread 3.2 s against 4.7–5.8 s, hit-testing 0.13 s against 2.4–3.1 s. A Find step takes about 520 ms on against 490 ms off.
 - No run of the new build at 2,850 messages, and none with a real model.
+
+## Rest on open
+
+Chromium, production builds, headless; 30 loads per cell, mouse, lessons at rest. "Check" is the test lesson with a check waiting behind Open, "ordinary" the one without. A load counts as a failure when the lesson stopped above its resting point and stayed there (12 to 135 px in the runs).
+
+**Before the fix** (loads that rested correctly, out of 30):
+
+| Build and width | check | ordinary |
+|---|---|---|
+| Before the merge (`108331b`, the code of release 0.6.54), 1366 | 30 | 18 |
+| The same, 1440 | 30 | 24 |
+| Merged build, 1280 | 30 | 30 |
+| Merged, 1366 | 11 | 3 |
+| Merged, 1440 | 30 | 21 |
+| Merged, 1680 | 30 | 6 |
+| Merged, iPad-sized touch screen | 26 | 24 |
+| Merged at 1366 with the fork's rule put back on every message (no newest-turn exemption) | 30 | 4 |
+| Merged with the off-screen rule neutralised | 30 | 30 |
+
+- No size estimate cured it. So the fault predates the merge for ordinary lessons, and the newest-turn exemption made it show on check lessons at 1366 as well. The recommendation for decision 6 had said the exemption had no cost; that was wrong for this case.
+
+**The diagnosis** (init scripts hooking the library's state, every `scrollTop` write with its stack, every scroll event, and when the library's 1 ms timeouts were queued and ran):
+
+- Ordinary lesson: timeout queued at 1931 ms, ran at 1958 ms, after the reset of `resizeDifference` at 1955.8 ms: 111 px short.
+- Check lesson: queued at 1644 ms, ran at 1729 ms: 30 px short. The shifts came from older rows just above the newest turn (estimated 700 px, real 470 to 495 px).
+- Not tested, inferred: why the check lesson failed only with the exemption.
+
+**After the fix** (30 loads per cell, check / ordinary):
+
+| | check | ordinary |
+|---|---|---|
+| 1280 × 800 | 30 | 30 |
+| 1366 × 1024 | 30 | 30 |
+| 1440 × 900 | 30 | 30 |
+| 1680 × 1000 | 30 | 30 |
+| iPad-sized touch screen at 1366 | 30 | 30 |
+| iPhone 13 size | 30 | 30 |
+| A 570-message lesson, 1366 and iPhone size | 30 each | 30 each |
+
+- **A control:** the same build with the rule ended by a zero wheel event every 20 ms failed again at 1366 (check 10 of 30, ordinary 2 of 30).
+- **No-regression runs on the final build:**
+  - a waiting check, 9 runs (1366 mouse, iPad, iPhone): folded at rest through 10 s of idling, no movement, opened only on scrolling to the bottom, and the spacer and scroll height the same before, at and after opening;
+  - a wheel up 1.3 to 2.6 s after navigation: not undone in 40 of 40 (20 per lesson);
+  - a `#message` link: 10 of 10 landed on the message;
+  - Find: 20 of 20 steps on screen;
+  - a lesson scrolled up by hand: not pulled back in 10 of 10.
+- **Two faults in the implementer's earlier builds, found by those runs and fixed:** build 1 put back 12 of 20 check lessons the learner had wheeled up (the scroll arrived with no wheel event, which led to the view-moved test); build 3 still let a pending re-arm pull 3 of 20 back (which led to calling the library's `stopScroll`).
+- **Not run:** Safari, a real iPhone or iPad, the Windows app.

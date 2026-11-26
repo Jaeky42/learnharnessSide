@@ -18,7 +18,7 @@ Everything in `docs/fork/` is the fork's. Every other file under `docs/` is the 
 | the release workflows, the Windows packaging, which branch gets a push, the order of updating the server and the PC | `releases.md` |
 | the Tutor: its window, bubble, look, Dictate button, conversations, phone sheet | `side-tutor.md` |
 | the notes drawer | `notes.md` |
-| the lesson screen: a check that opens by scrolling, money and formulas, demos and the theme, the highlight toolbar on touch, dictation | `lesson.md` |
+| the lesson screen: a check that opens by scrolling, where a lesson rests when it opens, money and formulas, demos and the theme, the highlight toolbar on touch, dictation | `lesson.md` |
 | sync: pairing, sessions and leases, seamless sessions, the graph log, settings, session folders, deleting a folder with its sessions, timing, the sync screens, Flashcards sync, the protocol number | `cloud-sync.md` |
 | server mode: the login, model sign-ins, the Obsidian vault on the server, the image and hosting, accounts on one server, server updates | `server.md` |
 | the phone layout, touch behaviour on a phone or a tablet (session folders included), the keyboard, the home-screen app, plugins on a phone | `phone-and-tablet.md` |
