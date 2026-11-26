@@ -31,6 +31,8 @@
  * has no computed styles or animation frames (the tests' DOMs).
  */
 
+import { noteLessonJump } from "./rest-on-open";
+
 /** The messages app/offscreen.css lets the browser skip: older rows only
  *  (upstream's `data-older-transcript-row`; the newest turn is never skipped,
  *  so never needs drawing). The same two selectors as the stylesheet;
@@ -92,6 +94,8 @@ function topIn(target: Range | HTMLElement, main: HTMLElement): number {
  * lesson's scroller; `place` may run a second time, for the correction.
  */
 export function revealOffscreenTarget(target: Range | HTMLElement, main: HTMLElement | null, place: () => void): void {
+	// A jump: the lesson is no longer kept at its resting point (rest-on-open.ts).
+	noteLessonJump();
 	active?.cancel();
 	active = null;
 	const element = targetElement(target);

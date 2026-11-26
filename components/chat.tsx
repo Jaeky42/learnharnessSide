@@ -46,6 +46,8 @@ import { useAppearance } from "@/components/settings/appearance";
 import { dockContainerMax, layoutFontKey, questionCardGeometry, rootRem, type QuestionLayout } from "@/components/question-layout";
 // FORK (scroll into a check)
 import { OPEN_FORM_ATTR, backToRest, blankSpaceExtra, bottomTarget, checkOpensOnScroll, createCheckSpace, measureOpenCheck, noteCheckPlace, offerCheckSpace, resetCheckSpace, restingTarget } from "@/components/check-blank-space";
+// FORK (rest on open)
+import { installRestOnOpen, opensOnMessageLink } from "@/components/rest-on-open";
 import { QueuedSteersBody, type QueuedSteerLine } from "@/components/queued-steers";
 import { DictationBar, finishDictation, joinDictation, useDictation, type Dictation } from "@/components/dictation";
 import { useFieldCycle } from "@/components/field-cycle";
@@ -2830,6 +2832,25 @@ export function DockOverlay({
 		ro.observe(el);
 		return () => ro.disconnect();
 	}, [scrollRef]);
+	// FORK (rest on open): until the learner's first scroll, tap or key press
+	// (or a jump to a passage), a lesson that messages taking their real height
+	// left short of its resting point is put back there, and use-stick-to-bottom
+	// follows the bottom again (components/rest-on-open.ts). A put-back is not
+	// a move down for the waiting check (it never opens by itself).
+	const restEndedRef = useRef(false);
+	useEffect(() => {
+		const el = scrollRef.current;
+		const content = el?.firstElementChild;
+		if (!el || !content) return;
+		const guard = installRestOnOpen({
+			scroller: el, content, state: stickState,
+			rearm: () => { void scrollToBottom("instant"); },
+			release: stopScroll,
+			onPutBack: (top) => { const s = checkSpaceRef.current; s.lastTop = top; s.movedDown = false; },
+			ended: restEndedRef.current || opensOnMessageLink(window.location.hash),
+		});
+		return () => { restEndedRef.current = guard.ended; guard.dispose(); };
+	}, [scrollRef, stickState, scrollToBottom, stopScroll]);
 	// FORK (scroll into a check): use-stick-to-bottom aims at the end of the
 	// text while a check waits, not at the real bottom (it only ever slides
 	// down, so a learner already in the blank space is never pulled back up).
