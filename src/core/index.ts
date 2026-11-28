@@ -129,3 +129,6 @@ export * from "./plugin-agents.ts";
 // FORK (empty reply): the page hides a dropped empty ChatGPT/OpenAI attempt
 // with the agent guard's own definition. Pure, browser-safe.
 export { isGuardedEmptyReply } from "./empty-reply.ts";
+// FORK (voice): the GPT-Live trial's pure rules (models, voices, prices, the
+// trial's words, captions, which option was said). Pure, browser-safe.
+export * from "./voice/live.ts";

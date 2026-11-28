@@ -96,6 +96,8 @@ export { accountExportResponse } from "./account-export.ts";
 // FORK (server mode): Claude sign-in on the cloud server (cloud sync Phase 2).
 export { claudeLoginStatusResponse, claudeLoginControlResponse, claudeLoginOpenResponse } from "./claude-login-http.ts";
 export { obsidianStatusResponse, obsidianControlResponse } from "./obsidian-sync-http.ts";
+// FORK (voice): the GPT-Live trial page's two routes, server mode only (Phase 0 of the voice plan).
+export { voiceTrialAvailable, voiceTrialSessionResponse, voiceTrialHangupResponse } from "./voice-trial.ts";
 // FORK (cloud sync): Phase 5, pairing, and this copy's own sync control.
 export { desktopsResponse, pairResponse, helloResponse, unpairSelfResponse, sessionsExchangeResponse, sessionBundleResponse, sessionTakeResponse, sessionPictureResponse, graphLogResponse, mapsExchangeResponse, flashcardsExchangeResponse } from "./sync/http.ts";
 export { heldElsewhereResponse, holdsSession } from "./sync/engine.ts";
