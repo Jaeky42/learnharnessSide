@@ -109,9 +109,9 @@ A page on the server's site, reached only by its address, behind the login, serv
 - **It goes to the server's branch only**, with the owner's approval, and is removed or kept hidden afterwards. The Windows app gets nothing; the sync protocol is untouched.
 - **Then the owner decides:** go on, go on with a change (decision 7 has its own fallback), or stop. Also chosen then, by ear: which voice, and the larger or the mini voice model.
 
-#### Phase 0 as built (not shipped yet)
+#### Phase 0 as built (on the server's branch, not tried yet)
 
-Built on `claude/brave-knuth-kt24vk` (`548b88a`); not on the server's branch and never run against the live service. It follows the Phase 0 text above with GPT-Live in place of Realtime ("GPT-Live" above), and these points:
+Built on `claude/brave-knuth-kt24vk` (`548b88a`) and pushed to the server's branch at the owner's word ("yes"; `docs/fork/history/ship-log.md`); never run against the live service. It follows the Phase 0 text above with GPT-Live in place of Realtime ("GPT-Live" above), and these points:
 
 - **Where:** the page `/voice-trial` and the routes under `/api/voice-trial/` exist in server mode only (404 elsewhere), behind the login like every page. **A link "Voice trial" at the foot of Settings → Cloud on the server's site opens it** (a home-screen app has no address bar; the plan had said "reached only by its address"; the owner was told and hasn't objected).
 - **The call:** the browser makes the offer; the server posts it to `POST /v1/live/sessions` with the key and returns the answer. The page creates a data channel named `oai-events` before the offer, as OpenAI's own helper code does, also listens for one the server opens, and its readout says which carried events.
