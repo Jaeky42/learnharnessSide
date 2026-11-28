@@ -50,6 +50,7 @@ Newest first. "Not recorded": the docs give none.
 - The owner's own copy under the account copies' limits: "For the owner to confirm". `server.md`, "Rulings made while building (for the owner to review)".
 - The plugin security options (five, none chosen). `plugins.md`, "Plugin security: the facts, and options not yet chosen".
 - The fork's own coding-questions plugin: a draft plan, not approved. `plans/own-coding-plugin-plan.md`.
+- Voice sessions (a spoken lesson on the phone, the learner's model preparing and OpenAI Realtime delivering): the owner's eight decisions are made; the plan and its smaller rules are not approved, and nothing is built. `plans/voice-session-plan.md`.
 - The iPhone status bar style on light themes (left `black-translucent` for now). `upstream.md`, "Asked after it was built (owner's answers)", item 4.
 - Moving the server to the `latest` channel, so one branch feeds both: not asked yet. `releases.md`, "Which branch feeds what".
 - The performance audit's remaining decisions. `performance.md`, "Not built (the audit's other recommendations)", "Decisions still the owner's".

@@ -34,7 +34,7 @@ Those files are loaded into every Claude Code session through `CLAUDE.md`. These
 | `development.md` | development notes and recipes: commands, Node versions, known test failures, running server mode, two copies for a sync run, browser runs at phone size, the stand-ins for Obsidian and for the accounts stack |
 | `history/<topic>.md` | for each topic file: how it got built (rounds, attempts, reverts) and the records of what was run and measured; also text about screens that no longer exist, each marked with what retired it |
 | `history/ship-log.md` | each round's ship record, as written at the time: branch, commits, release, way back, what the owner said |
-| `plans/` | the approved plans (`multi-account-plan.md`, `multi-account-build.md`, `phone-plugins-plan.md`) and one draft that is not approved (`own-coding-plugin-plan.md`, with its spike in `spikes/`) |
+| `plans/` | the approved plans (`multi-account-plan.md`, `multi-account-build.md`, `phone-plugins-plan.md`) and two drafts that are not approved (`own-coding-plugin-plan.md`, with its spike in `spikes/`; `voice-session-plan.md`, a spoken lesson as its own kind of session, with the owner's eight decisions) |
 | `review-policy.md` | the operator reference for the review policy in `CLAUDE.md` |
 
 ## How each topic file is laid out
