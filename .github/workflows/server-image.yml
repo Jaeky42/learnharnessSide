@@ -186,3 +186,71 @@ jobs:
           echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
           docker push "$IMAGE:$CHANNEL"
           docker push "$IMAGE:$CHANNEL-${GITHUB_SHA::7}"
+
+  # After the image of the server's own channel is published, ask the server
+  # to update itself. The server's SSH key can run exactly one script
+  # (deploy/ci-update.sh, set as the key's forced command in authorized_keys),
+  # which brings the checkout up to date, runs update.sh and checks the site.
+  # This repository and its logs are public: nothing the server answers is
+  # printed except the four fixed result lines, and ssh's own errors (which
+  # name the host) are discarded. Not set up (no secrets): skipped, and the
+  # job still succeeds.
+  deploy:
+    name: Update the server
+    needs: image
+    if: github.event_name == 'push' && github.ref == 'refs/heads/claude/pensive-goldberg-7dty2m'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions: {}
+    concurrency:
+      group: server-deploy
+      cancel-in-progress: false
+    steps:
+      - name: Check that deploy is set up
+        id: setup
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
+          DEPLOY_SSH_USER: ${{ secrets.DEPLOY_SSH_USER }}
+          DEPLOY_SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
+        run: |
+          if [ -n "$DEPLOY_SSH_KEY" ] && [ -n "$DEPLOY_SSH_HOST" ] && [ -n "$DEPLOY_SSH_USER" ] && [ -n "$DEPLOY_SSH_KNOWN_HOSTS" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::Deploy is not set up; skipping."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Update the server
+        if: steps.setup.outputs.ready == 'true'
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
+          DEPLOY_SSH_USER: ${{ secrets.DEPLOY_SSH_USER }}
+          DEPLOY_SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
+          DEPLOY_SSH_PORT: ${{ secrets.DEPLOY_SSH_PORT }}
+        run: |
+          umask 077
+          key="$RUNNER_TEMP/deploy_key"
+          known="$RUNNER_TEMP/deploy_known_hosts"
+          answer="$RUNNER_TEMP/deploy_answer"
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$key"
+          printf '%s\n' "$DEPLOY_SSH_KNOWN_HOSTS" > "$known"
+          chmod 600 "$key" "$known"
+          port="${DEPLOY_SSH_PORT:-22}"
+          [ -n "$port" ] || port=22
+          status=0
+          ssh -T -a -x \
+            -i "$key" -p "$port" -l "$DEPLOY_SSH_USER" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o PasswordAuthentication=no \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$known" -o GlobalKnownHostsFile=/dev/null \
+            -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=8 \
+            "$DEPLOY_SSH_HOST" < /dev/null > "$answer" 2> /dev/null || status=$?
+          # Only the four result lines are shown; anything else is dropped unseen.
+          grep -E '^(files|update|site|result): [a-z ]+$' "$answer" || true
+          if [ "$status" -ne 0 ] || ! grep -qx 'result: ok' "$answer"; then
+            echo "::error::The server update failed, or the server could not be reached."
+            exit 1
+          fi
+      - name: Remove the key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/deploy_key" "$RUNNER_TEMP/deploy_known_hosts" "$RUNNER_TEMP/deploy_answer"
