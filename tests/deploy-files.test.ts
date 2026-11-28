@@ -646,7 +646,7 @@ describe("deploy/update.sh", () => {
 // .github/workflows/server-image.yml). The repository and its logs are public.
 describe("the deploy job in server-image.yml", () => {
 	type Step = { name?: string; id?: string; if?: string; uses?: string; run?: string; env?: Record<string, string> };
-	type Job = { needs?: string; if?: string; permissions?: unknown; concurrency?: { group: string; "cancel-in-progress": boolean }; "timeout-minutes"?: number; steps: Step[] };
+	type Job = { needs?: string; if?: string; environment?: string; permissions?: unknown; concurrency?: { group: string; "cancel-in-progress": boolean }; "timeout-minutes"?: number; steps: Step[] };
 	const text = read(".github/workflows/server-image.yml");
 	const workflow = yaml.load(text) as { permissions: Record<string, string>; jobs: Record<"quality" | "image" | "deploy", Job> };
 	const job = workflow.jobs.deploy;
@@ -705,9 +705,49 @@ describe("the deploy job in server-image.yml", () => {
 		assert.match(updateScript, /umask 077/);
 	});
 
-	it("prints only the four result lines, and fails with a generic message", () => {
-		assert.ok(updateScript.includes(`grep -E '^(files|update|site|result): [a-z ]+$' "$answer"`));
-		assert.ok(updateScript.includes("grep -qx 'result: ok'"));
+	it("keeps its secrets in the GitHub Environment named server", () => {
+		assert.equal(job.environment, "server");
+		assert.match(text, /secrets live in the GitHub Environment "server"/);
+	});
+
+	it("cleans pasted values: no carriage returns in the key, the known hosts, the host, the user or the port", () => {
+		assert.match(updateScript, /"\$DEPLOY_SSH_KEY" \| tr -d '\\r' > "\$key"/);
+		assert.match(updateScript, /"\$DEPLOY_SSH_KNOWN_HOSTS" \| tr -d '\\r' > "\$known"/);
+		assert.match(updateScript, /clean\(\) \{[^\n]*tr -d '\\r'[^\n]*sed -e 's\/\^\[\[:space:\]\]\*\/\/' -e 's\/\[\[:space:\]\]\*\$\/\/'/);
+		for (const name of ["HOST", "USER"]) assert.ok(updateScript.includes(`clean "$DEPLOY_SSH_${name}"`), name);
+		assert.ok(updateScript.includes('clean "${DEPLOY_SSH_PORT:-22}"'));
+		// ssh gets the cleaned values, and a host or user that could read as an option is refused unprinted.
+		assert.match(updateScript, /-l "\$user"/);
+		assert.match(updateScript, /\n\s+"\$host" < \/dev\/null/);
+		assert.match(updateScript, /case "\$host" in ''\|-\*\) host= ;; esac/);
+		assert.match(updateScript, /case "\$user" in ''\|-\*\) user= ;; esac/);
+		assert.match(updateScript, /case "\$port" in \*\[!0-9\]\*\) port= ;; esac/);
+	});
+
+	it("shows only the exact lines the server's script prints, the last of each kind", () => {
+		const patterns = [...updateScript.matchAll(/show '([^']+)'/g)].map((m) => m[1] as string);
+		assert.equal(patterns.length, 4);
+		const regexes = patterns.map((p) => new RegExp(p));
+		const good: string[][] = [
+			["files: ok", "files: unchanged", "files: failed", "files: not run"],
+			["update: ok", "update: failed", "update: skipped"],
+			["site: answers", "site: no answer", "site: not checked"],
+			["result: ok", "result: failed"],
+		];
+		good.forEach((lines, kind) => {
+			for (const line of lines) {
+				assert.ok((regexes[kind] as RegExp).test(line), line);
+				regexes.forEach((r, other) => assert.equal(r.test(line), other === kind, `${line} against pattern ${other}`));
+			}
+		});
+		const bad = ["files: ok.", "Files: ok", "files: OK", "result: ok ", " result: ok", "result: ok\r", "result: ok extra", "::error::result: ok", "::set-output name=x::y", "files: not  run", "files: ok\nrest", "site: answers!", "update: done", "result:ok", "files: ok result: ok", "site: learn.example.com", ""];
+		for (const line of bad) for (const r of regexes) assert.ok(!r.test(line), `${JSON.stringify(line)} is refused`);
+		assert.ok(updateScript.includes(`show() { grep -E "$1" "$answer" | tail -n 1 || true; }`), "one line of each kind, the last");
+		assert.ok(!updateScript.includes("[a-z ]+"), "no looser pattern is left");
+	});
+
+	it("succeeds only on ssh's exit status 0 and a final `result: ok`, and fails with a generic message", () => {
+		assert.ok(updateScript.includes('if [ "$status" -ne 0 ] || [ "$result" != "result: ok" ]; then'));
 		assert.ok(updateScript.includes("The server update failed, or the server could not be reached."));
 		assert.ok(!/\b(echo|printf)\b[^\n]*"\$\{?DEPLOY_SSH_(HOST|USER|PORT)/.test(updateScript), "no variable printed");
 		assert.ok(!/\bcat\b[^\n]*\$answer/.test(updateScript), "the answer is never shown whole");
@@ -885,10 +925,78 @@ describe("deploy/ci-update.sh", { skip: !haveGit && "git is not installed here" 
 		assert.ok(fs.existsSync(s.lockDir));
 	}));
 
-	it("takes over a stale lock", withSandbox({}, (s) => {
+	it("takes over a stale lock whose owner is gone", withSandbox({}, (s) => {
 		s.holdLock(3600);
 		expectFour(s.run(), ALL_OK);
 		assert.ok(!fs.existsSync(s.lockDir));
+	}));
+
+	it("takes over an old lock with no usable owner", withSandbox({}, (s) => {
+		s.holdLock(3600, "not-a-pid");
+		expectFour(s.run(), ALL_OK);
+		assert.ok(!fs.existsSync(s.lockDir));
+	}));
+
+	it("does not take over an old lock whose owner is still running: it waits, then gives up", withSandbox({}, (s) => {
+		s.holdLock(3600, String(process.pid)); // this test process is alive
+		const r = s.run({ LH_CI_LOCK_WAIT_SECONDS: "1" });
+		expectFour(r, ["files: not run", "update: skipped", "site: not checked", "result: failed"]);
+		assert.notEqual(r.status, 0);
+		assert.equal(s.calls("update-calls").length, 0);
+		assert.ok(fs.existsSync(s.lockDir), "a live run's lock is left alone");
+		assert.equal(fs.readFileSync(path.join(s.lockDir, "owner"), "utf8").trim(), String(process.pid));
+	}));
+
+	it("an old lock with a live owner is waited for, and the run goes on once it is released", withSandbox({}, async (s) => {
+		s.holdLock(3600, String(process.pid));
+		const run = s.start();
+		await sleep(1200);
+		assert.equal(s.calls("update-calls").length, 0, "still waiting");
+		fs.rmSync(s.lockDir, { recursive: true });
+		const r = await run.done;
+		expectFour(r, ALL_OK);
+	}));
+
+	it("follows the branch of its channel: no LH_CHANNEL and latest mean side-tutor, dev means the server's own branch", async () => {
+		await withSandbox({}, (s) => {
+			s.push({ README: "two\n" });
+			expectFour(s.run(), ["files: ok", "update: ok", "site: answers", "result: ok"]);
+		})();
+		await withSandbox({ channel: "latest" }, (s) => {
+			expectFour(s.run(), ALL_OK);
+		})();
+		await withSandbox({ channel: "dev", branch: "claude/pensive-goldberg-7dty2m" }, (s) => {
+			s.push({ README: "two\n" });
+			expectFour(s.run(), ["files: ok", "update: ok", "site: answers", "result: ok"]);
+			assert.equal(fs.readFileSync(path.join(s.checkout, "README"), "utf8"), "two\n");
+		})();
+	});
+
+	it("a checkout on the wrong branch for its channel: files failed and update.sh is not run", async () => {
+		const failed = ["files: failed", "update: skipped", "site: not checked", "result: failed"];
+		for (const [branch, channel] of [["claude/pensive-goldberg-7dty2m", undefined], ["claude/pensive-goldberg-7dty2m", "latest"], ["side-tutor", "dev"], ["main", "dev"], ["main", undefined], ["side-tutor", "stable"], ["side-tutor", "Dev"]] as [string, string | undefined][]) {
+			await withSandbox({ branch, channel }, (s) => {
+				s.push({ README: "two\n" });
+				const r = s.run();
+				expectFour(r, failed);
+				assert.notEqual(r.status, 0, `${branch} with ${channel}`);
+				assert.equal(s.calls("update-calls").length, 0, `${branch} with ${channel}`);
+				assert.equal(s.calls("curl-calls").length, 0);
+				assert.equal(fs.readFileSync(path.join(s.checkout, "README"), "utf8"), "one\n", "nothing was pulled");
+				leaks(s, r);
+			})();
+		}
+	});
+
+	it("runs when started as `sh <path>` without the executable bit, from another folder, by a relative path", withSandbox({}, (s) => {
+		fs.chmodSync(s.scriptPath, 0o644);
+		s.git("config", "core.fileMode", "false");
+		const r = s.runVia([path.join("..", "my checkout", "deploy", "ci-update.sh")], s.home);
+		expectFour(r, ALL_OK);
+		assert.equal(r.status, 0);
+		assert.equal(s.calls("update-calls").length, 1);
+		// And the forced command the owner's key uses: sh with the path as the shell expands it.
+		expectFour(s.runVia([s.scriptPath], s.base), ALL_OK);
 	}));
 
 	it("releases the lock when the files stage fails too", withSandbox({}, (s) => {

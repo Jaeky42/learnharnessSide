@@ -194,12 +194,15 @@ jobs:
   # This repository and its logs are public: nothing the server answers is
   # printed except the four fixed result lines, and ssh's own errors (which
   # name the host) are discarded. Not set up (no secrets): skipped, and the
-  # job still succeeds.
+  # job still succeeds. The secrets live in the GitHub Environment "server"
+  # (limited to the server's own branch), not in the repository's secrets, so
+  # a workflow on another branch cannot read them.
   deploy:
     name: Update the server
     needs: image
     if: github.event_name == 'push' && github.ref == 'refs/heads/claude/pensive-goldberg-7dty2m'
     runs-on: ubuntu-24.04
+    environment: server
     timeout-minutes: 30
     permissions: {}
     concurrency:
@@ -233,21 +236,40 @@ jobs:
           key="$RUNNER_TEMP/deploy_key"
           known="$RUNNER_TEMP/deploy_known_hosts"
           answer="$RUNNER_TEMP/deploy_answer"
-          printf '%s\n' "$DEPLOY_SSH_KEY" > "$key"
-          printf '%s\n' "$DEPLOY_SSH_KNOWN_HOSTS" > "$known"
+          # Secrets pasted from Windows may carry carriage returns and
+          # spaces. Nothing here prints a value.
+          clean() { printf '%s' "$1" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'; }
+          printf '%s\n' "$DEPLOY_SSH_KEY" | tr -d '\r' > "$key"
+          printf '%s\n' "$DEPLOY_SSH_KNOWN_HOSTS" | tr -d '\r' > "$known"
           chmod 600 "$key" "$known"
-          port="${DEPLOY_SSH_PORT:-22}"
+          host=$(clean "$DEPLOY_SSH_HOST")
+          user=$(clean "$DEPLOY_SSH_USER")
+          port=$(clean "${DEPLOY_SSH_PORT:-22}")
           [ -n "$port" ] || port=22
+          # A host or user that starts with a dash could be read by ssh as an option.
+          case "$host" in ''|-*) host= ;; esac
+          case "$user" in ''|-*) user= ;; esac
+          case "$port" in *[!0-9]*) port= ;; esac
+          if [ -z "$host" ] || [ -z "$user" ] || [ -z "$port" ]; then
+            echo "::error::The deploy settings are not valid."
+            exit 1
+          fi
           status=0
           ssh -T -a -x \
-            -i "$key" -p "$port" -l "$DEPLOY_SSH_USER" \
+            -i "$key" -p "$port" -l "$user" \
             -o BatchMode=yes -o IdentitiesOnly=yes -o PasswordAuthentication=no \
             -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$known" -o GlobalKnownHostsFile=/dev/null \
             -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=8 \
-            "$DEPLOY_SSH_HOST" < /dev/null > "$answer" 2> /dev/null || status=$?
-          # Only the four result lines are shown; anything else is dropped unseen.
-          grep -E '^(files|update|site|result): [a-z ]+$' "$answer" || true
-          if [ "$status" -ne 0 ] || ! grep -qx 'result: ok' "$answer"; then
+            "$host" < /dev/null > "$answer" 2> /dev/null || status=$?
+          # Only the exact lines the server's script can print are shown, the
+          # last of each kind; anything else is dropped unseen.
+          show() { grep -E "$1" "$answer" | tail -n 1 || true; }
+          show '^files: (ok|unchanged|failed|not run)$'
+          show '^update: (ok|failed|skipped)$'
+          show '^site: (answers|no answer|not checked)$'
+          result=$(show '^result: (ok|failed)$')
+          [ -z "$result" ] || printf '%s\n' "$result"
+          if [ "$status" -ne 0 ] || [ "$result" != "result: ok" ]; then
             echo "::error::The server update failed, or the server could not be reached."
             exit 1
           fi

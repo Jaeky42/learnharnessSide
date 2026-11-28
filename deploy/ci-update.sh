@@ -21,7 +21,9 @@
 # connection cannot stop an update halfway, and waits for the result (up to
 # 25 minutes; it then reports failure without stopping the work). The work
 # takes a lock (one run at a time), then runs the `files` stage: fetch the
-# branch the checkout is on and fast-forward only. If that fails nothing else
+# branch the server's channel follows (LH_CHANNEL in .env: dev is the server's
+# own branch, latest or unset is side-tutor) and fast-forward only. The
+# checkout must be on that branch. If that fails nothing else
 # runs (a new image with old deploy files could be a mismatch). Otherwise the
 # `files` stage replaces itself (exec) with the checked-out script's `update`
 # stage, so the newest logic runs and no shell ever reads a script that git
@@ -122,7 +124,8 @@ cleanup() {
 }
 
 # Take the lock: an atomic mkdir. A lock held less than the stale age is
-# waited for (up to the lock wait); an older one is taken over.
+# waited for (up to the lock wait); an older one is taken over only when the
+# process that took it is gone.
 acquire() {
 	stale="${LH_CI_STALE_SECONDS:-1800}"
 	max="${LH_CI_LOCK_WAIT_SECONDS:-600}"
@@ -149,11 +152,19 @@ acquire() {
 			fi
 		fi
 		if [ -n "$since" ] && [ $(( now - since )) -ge "$stale" ]; then
-			log "taking over a stale lock"
-			if mv "$lock_dir" "$lock_dir.old.$$" 2>/dev/null; then
-				rm -rf "$lock_dir.old.$$"
+			# Old enough, but only a lock whose owner is gone is taken over: a run
+			# that is still going, however long, is waited for like any other.
+			owner=$(cat "$lock_dir/owner" 2>/dev/null || true)
+			case "$owner" in
+				''|*[!0-9]*) owner= ;;
+			esac
+			if [ -z "$owner" ] || ! kill -0 "$owner" 2>/dev/null; then
+				log "taking over a stale lock"
+				if mv "$lock_dir" "$lock_dir.old.$$" 2>/dev/null; then
+					rm -rf "$lock_dir.old.$$"
+				fi
+				continue
 			fi
-			continue
 		fi
 		if [ $(( now - started )) -ge "$max" ]; then
 			return 1
@@ -193,18 +204,36 @@ stage_work() {
 
 # ---- the stages ------------------------------------------------------------
 
-# Bring this checkout up to date with its own branch on origin, fast-forward
-# only, then hand over to the checked-out script for the rest.
+# The branch this server follows: LH_CHANNEL in .env, "dev" (the server's own
+# branch) or "latest" (also when it is not set). Anything else is no branch.
+expected_branch() {
+	channel=$(env_value LH_CHANNEL || true)
+	case "${channel:-latest}" in
+		dev) printf '%s\n' claude/pensive-goldberg-7dty2m ;;
+		latest) printf '%s\n' side-tutor ;;
+		*) return 1 ;;
+	esac
+}
+
+# Bring this checkout up to date with the branch its channel follows,
+# fast-forward only, then hand over to the checked-out script for the rest.
+# A checkout on any other branch is a failure: nothing else runs.
 stage_files() {
 	out=${1:-}
 	log "files stage start"
 	status=failed
 	if branch=$(git -C "$here" symbolic-ref --short -q HEAD) && [ -n "$branch" ]; then
-		before=$(git -C "$here" rev-parse HEAD)
-		if git -C "$here" -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=60 fetch --quiet origin "$branch" \
-			&& git -C "$here" merge --ff-only --quiet FETCH_HEAD; then
-			after=$(git -C "$here" rev-parse HEAD)
-			if [ "$before" = "$after" ]; then status=unchanged; else status=ok; fi
+		if ! expected=$(expected_branch); then
+			log "LH_CHANNEL in .env is not dev or latest"
+		elif [ "$branch" != "$expected" ]; then
+			log "the checkout is on $branch, but this server's channel follows $expected"
+		else
+			before=$(git -C "$here" rev-parse HEAD)
+			if git -C "$here" -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=60 fetch --quiet origin "$branch" \
+				&& git -C "$here" merge --ff-only --quiet FETCH_HEAD; then
+				after=$(git -C "$here" rev-parse HEAD)
+				if [ "$before" = "$after" ]; then status=unchanged; else status=ok; fi
+			fi
 		fi
 	else
 		log "the checkout is not on a branch"
@@ -220,9 +249,9 @@ stage_files() {
 	exec sh "$script" update "$out"
 }
 
-# LH_DOMAIN from .env, read as one line (the file holds secrets: never sourced).
-site_domain() {
-	sed -n 's/^LH_DOMAIN=//p' "$here/.env" 2>/dev/null | tail -n 1 | tr -d '\r' \
+# One value from .env, read as one line (the file holds secrets: never sourced).
+env_value() {
+	sed -n "s/^$1=//p" "$here/.env" 2>/dev/null | tail -n 1 | tr -d '\r' \
 		| sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^"\(.*\)"$/\1/' -e "s/^'\\(.*\\)'\$/\\1/"
 }
 
@@ -252,7 +281,7 @@ stage_update() {
 	log "update: $update_status"
 	record update "$update_status"
 	site_status="not checked"
-	domain=$(site_domain || true)
+	domain=$(env_value LH_DOMAIN || true)
 	case "$domain" in
 		''|-*|*[!A-Za-z0-9.-]*) domain= ;;
 	esac
