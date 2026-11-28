@@ -1,8 +1,8 @@
-# Voice sessions: a draft plan (not approved, nothing built)
+# Voice sessions: the plan (approved; Phase 0 under way)
 
 A third kind of session, beside Teaching and Practice: a lesson held as a spoken conversation on the phone. The learner's chosen model prepares the lesson; a speech-to-speech model delivers it; the lesson's questions show in the app's question box and are answered by voice or by tap.
 
-**State:** the owner has made the eight decisions below, one question each. The plan itself (the phases, and the smaller rules proposed with it) is waiting for the owner's approval. Change a decision only with the owner's approval.
+**State:** the owner made the eight decisions below, one question each, and then approved the plan and the smaller rules proposed with it ("i approve the plan, start with phase 0"). Before Phase 0 was built the owner changed decision 2 from OpenAI's Realtime API to its GPT-Live API (decision 2b). **What that changes in this plan is in "GPT-Live" below; wherever the two disagree, that section is newer.** The voice side of Phases 1 and 2 is written again after Phase 0 and shown to the owner before it is built. Change a decision only with the owner's approval.
 
 ## The owner's decisions
 
@@ -10,6 +10,7 @@ A third kind of session, beside Teaching and Practice: a lesson held as a spoken
 |---|---|---|
 | 1 | Who teaches | **"My model prepares, voice delivers."** The learner's chosen model (GPT-6.2 Astra, Sol, Fable, …) decides what is taught: the plan, the content of each step and the questions with their correct answers. A voice model speaks it and handles the back-and-forth; what goes off-script is put to the learner's model, with a wait of a few seconds. Chosen over the voice model teaching alone (the owner: "wouldn't that mean i'd have no underlying control of which model is being used to teach me?"), over the learner's model answering every turn (waits of 5 to 30 seconds), and over a pipeline with no speech-to-speech model. |
 | 2 | The voice model | **OpenAI Realtime.** Chosen over Gemini Live, over Deepgram's Voice Agent (a managed pipeline, not speech-to-speech; the owner asked "does deepgram have a voice model?"), and over trying two on the iPhone first. |
+| 2b | Which OpenAI voice product | **GPT-Live only** (it replaces "OpenAI Realtime" in decision 2). Found while preparing Phase 0: OpenAI has two voice products on one API key, and its docs have a guide for moving from Realtime to GPT-Live. Chosen over a trial of both on the iPhone (the recommendation) and over Realtime only. The owner was told: GPT-Live costs 3 dollars an hour while talking and 1.20 while paused; in the mode that uses the learner's own model it cannot call tools, so the app's own code must work out which option was said; and it is known here only from OpenAI's code library. |
 | 3 | Where it lives | **Its own kind of session**, a third choice beside Teaching and Practice. Not a switch inside a teaching lesson; a typed lesson can't be continued by voice or the other way round. |
 | 4 | What it is for | **A full lesson on a new topic:** it checks what the learner knows, the learner's model makes a plan, and it teaches step by step with questions. Chosen over a review of earlier sessions, and over both. |
 | 5 | Answering a question | **Sent at once; the voice asks back when unsure.** A clear spoken answer is marked in the question box and submitted straight away. A tap on the box always works. The owner was told that a misheard answer can be submitted and graded. Chosen over "marked, then I confirm" and over tap only. |
@@ -55,6 +56,21 @@ Asked by the owner ("what happens if you say 'i don't understand, can you go ove
 - **While a question is open,** something that isn't an answer ("wait, what does secondary mean?") is handled as 1 or 2 and the question stays open in the box. The voice model can't give the answer away: it doesn't have it until the answer is submitted.
 - **Who draws the line between 1 and 2 is the voice model,** following its instructions. It may answer from its own knowledge where it should have asked. How strictly it is told to ask is a setting of the prompt, and the prompt's wording is the owner's to approve in Phase 1: stricter means more waits of a few seconds, looser means more answers that aren't the learner's model's.
 - **Not settled:** whether a formula or a diagram in an answer from case 2 goes on the board; whether the voice returns to exactly where it was in the step after an interruption (it keeps its own place; unproven until tried).
+
+## GPT-Live (decision 2b): what was read, and what it changes
+
+Read from the type definitions of OpenAI's own Node library (`openai` 7.65.0, `resources/live/`), which carry the API's doc comments. OpenAI's documentation site could not be opened from the development sandbox. Nothing here has met the live service; Phase 0 is the first contact.
+
+- **Models:** `gpt-live-1`, `gpt-live-1.1`. 23 built-in voices (default `marin`); the voice and the instructions can't change after a session starts.
+- **Connecting from a browser:** the browser makes a WebRTC offer; **the app's server** posts it to `POST /v1/live/sessions` (`{session, transport: {type: "webrtc", sdp}}`) with the API key and hands the answer back (`{session: {id}, transport: {sdp}}`). There is no client secret: the key never leaves the server and the browser gets nothing but the SDP answer. Events travel on the call's data channel; what the browser may send and receive there can be limited (`client.data_channel`). `POST /v1/live/sessions/<id>/hangup` ends a session.
+- **Full duplex:** the model listens while it speaks. There is no turn-detection setting and no "speech started" event; the user's and the model's words arrive as `session.input_transcript.delta` and `session.output_transcript.delta`.
+- **Delegation** is how the model hands work to something that thinks: to the app (`client`, the default), to a model OpenAI runs (`responses`), or to OpenAI's Decisions API (`decisions`). With `client`, the app gets `session.delegation.created` (an id, not the task's text; the app reads the transcript) and answers with `session.commentary.append` (up to 500 tokens for the model to say, in its own words) or `session.thinking.append` (silent context). `session.instructions.append` adds instructions during a session.
+- **No function tools with `client` delegation.** So the tools this plan gave the voice model (show the board, pose the question, submit the answer, ask the teacher) don't exist there. The app decides when the question shows, and **the app's own code works out which option was said** from the transcript. (OpenAI's Decisions API, which evaluates configured questions with choices over the conversation, may be a way to do that; not read yet.)
+- **Pausing:** with `idle_timeout_s` and a speech wake policy the session pauses inference after silence and wakes on speech (`session.paused`, `session.resumed`), keeping the connection and the conversation. This is what rule 7 below asked for.
+- **Cost** is per minute of session, reported by the session itself (`session.usage.updated`: seconds, active seconds, paused seconds): 0.05 dollars a minute active, 0.02 paused, as listed.
+- **Limits read:** 16,384 tokens of instructions; a starting history of at most 128 messages; 500 tokens per appended commentary. A maximum session length was not found.
+
+**Superseded in this plan by the above:** the client secret and the `oai-events` channel in "How it works" and in the Realtime facts below; the voice model's tools in Phases 1 and 2; "the result of its submit tool" (the app itself tells the voice the verdict and the explanation, as commentary, once it has graded the answer); the 60-minute limit; the per-token prices; "the larger or the mini voice model" in rule 3 and Phase 0 (the choice is between `gpt-live-1` and `gpt-live-1.1`, at one price).
 
 ## What the investigation found
 
