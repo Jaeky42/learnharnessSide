@@ -364,6 +364,9 @@ describe("Settings → Cloud on the server's site", () => {
 		assert.match(host.textContent ?? "", /Desktop apps/i);
 		assert.equal(byTest(host, "cloud-no-desktops")?.textContent, "No desktop app is paired.");
 		assert.equal(byTest(host, "cloud-add")?.textContent, "Add a desktop app");
+		// The voice trial's way in (a home-screen app has no address bar).
+		assert.equal(byTest(host, "cloud-voice-trial")?.textContent, "Voice trial");
+		assert.equal(byTest(host, "cloud-voice-trial")?.getAttribute("href"), "/voice-trial");
 		assert.equal(byTest(host, "cloud-code-box"), null);
 		assert.deepEqual(requests, ["GET /api/cloud"]);
 	});

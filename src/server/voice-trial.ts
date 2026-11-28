@@ -6,6 +6,7 @@
  *
  *   POST /api/voice-trial/session {sdp, model, voice} → {sessionId, sdp}
  *   POST /api/voice-trial/hangup  {sessionId}         → {ok: true}
+ *   GET  /api/voice-trial/chatgpt-models               → {signedIn, live}
  *
  * GPT-Live has no client secret: this server posts the browser's WebRTC
  * offer to OpenAI with the API key and hands back only the answer SDP and
@@ -16,7 +17,11 @@
  */
 
 import { isLiveModel, isLiveVoice, trialSessionConfig } from "../core/voice/live.ts";
+import { chatGPTRequest } from "../agent/chatgpt-bridge.ts";
+import { webSubscriptionsEnabled } from "../agent/subscription-runtime.ts";
 import { keyValue } from "./keys.ts";
+// Loaded for its side effect: it gives the ChatGPT bridge this server's own sign-in owner.
+import "./web-subscriptions.ts";
 import { serverModeEnabled } from "./server-auth.ts";
 
 export const OPENAI_LIVE_SESSIONS_URL = "https://api.openai.com/v1/live/sessions";
@@ -161,4 +166,34 @@ export async function voiceTrialHangupResponse(request: Request, deps: VoiceTria
 		timer.done();
 	}
 	return json({ ok: true, sent });
+}
+
+// ─── A hint for the readout: does the ChatGPT plan list a GPT-Live model? ────
+
+/** The account's model listing as the app's model menu gets it (the sign-in owner's own `models`). */
+export type ChatGPTListing = () => Promise<{ accountId: string | null; models: Array<{ id: string; name: string }> }>;
+
+const defaultListing: ChatGPTListing = () => chatGPTRequest("models");
+
+/**
+ * Read-only: the ids in the signed-in ChatGPT account's model list that
+ * contain "live". It goes through the same listing the model menu uses (the
+ * owner's `models`, which calls OpenAI's /models with the plan's sign-in on
+ * the server's side); no token or credential is read here or answered.
+ */
+export async function voiceTrialChatGPTModelsResponse(request: Request, deps: { listing?: ChatGPTListing; enabled?: () => boolean } = {}): Promise<Response> {
+	const refused = gate(request);
+	if (refused) return refused;
+	if (!(deps.enabled ?? webSubscriptionsEnabled)()) return json({ signedIn: false, live: [] });
+	try {
+		const value = await (deps.listing ?? defaultListing)();
+		if (!value || value.accountId === null) return json({ signedIn: false, live: [] });
+		const live = (Array.isArray(value.models) ? value.models : [])
+			.map((model) => (typeof model?.id === "string" ? model.id : ""))
+			.filter((id) => id.toLowerCase().includes("live"))
+			.slice(0, 20);
+		return json({ signedIn: true, live });
+	} catch {
+		return json({ error: "The ChatGPT model list couldn't be read." }, 502);
+	}
 }

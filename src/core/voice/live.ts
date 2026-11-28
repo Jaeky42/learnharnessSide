@@ -309,7 +309,9 @@ function namedOptions(tokens: Token[], count: number): Set<number> {
 			const alone = meaningful.length === 1;
 			const capitalInside = token.raw === "A" && !token.start;
 			const ends = token.stop || next === undefined || BOUNDARY.has(next);
-			if (cued || alone || capitalInside || (ends && (token.stop || (prev !== undefined && A_CUES.has(prev))))) named.add(index);
+			// "A or B": a letter beside another letter is a letter too.
+			const besideLetter = (next === "or" || next === "and") && /^[a-z]$/.test(tokens[i + 2]?.word ?? "");
+			if (cued || alone || capitalInside || besideLetter || (ends && (token.stop || (prev !== undefined && A_CUES.has(prev))))) named.add(index);
 			return;
 		}
 		// A position.
@@ -338,7 +340,8 @@ function overlapOption(text: string, options: readonly string[]): number | null 
 	const best = scores.reduce((top, s, i) => (s.matched > scores[top]!.matched ? i : top), 0);
 	const top = scores[best];
 	if (!top || top.matched < 2 || top.share < 0.3) return null;
-	const rival = scores.some((s, i) => i !== best && s.matched >= 2);
+	// Clear means no other option shares two of its words, and none comes within one word of it.
+	const rival = scores.some((s, i) => i !== best && (s.matched >= 2 || top.matched - s.matched < 2));
 	return rival ? null : best;
 }
 

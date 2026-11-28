@@ -190,6 +190,9 @@ export function CloudServerSection() {
 						{error && <p role="alert" className="text-xs text-error" data-testid="cloud-error">{error}</p>}
 					</div>
 				)}
+			{/* VOICE (fork, Phase 0 of the voice plan): the GPT-Live trial page. A link
+			    here because a home-screen app has no address bar. */}
+			<a href="/voice-trial" className="self-start font-ui text-sm text-muted-foreground underline underline-offset-2 hover:text-foreground" data-testid="cloud-voice-trial">Voice trial</a>
 		</SettingsGroup>
 	);
 }
