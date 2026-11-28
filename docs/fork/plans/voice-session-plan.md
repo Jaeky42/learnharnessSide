@@ -39,10 +39,22 @@ Earlier in the same conversation the owner chose the direction: "i'd want it to 
 
 - **The lesson underneath is an ordinary lesson loop.** The prober and the teacher run on the learner's chosen model through the existing turn machinery (`handleChatInput`), with prompt fragments written for a lesson that will be spoken. Each turn produces a step: what to teach (a brief for the voice model, not polished prose), anything for the board, and usually a question through the existing question tools (`probe`, `recall`, `quiz`, `explain`, `ask_user_question`), which already commit the correct answer and an explanation before the learner sees the question.
 - **The voice model delivers the step.** It is told the step, speaks it in its own words, shows board items when it reaches them, reads the question, and takes the answer.
-- **How the wait is hidden.** A question's correct answer and explanation are already in the step, so the voice responds to an answer at once ("right, because …"). The answer goes to the server at the same moment, and the learner's model prepares the next step while the voice is still talking. When the next step isn't ready in time, the voice says so and bridges. Some waits of a few seconds will remain; how often is not known until it is tried.
+- **How the wait is hidden.** A question's correct answer and explanation are already written when the question is posed. The app holds them and hands them to the voice model the moment an answer is submitted (the result of its submit tool), so the voice responds at once ("right, because …") and never knows the answer while the question is open. The answer goes to the server at the same moment, and the learner's model prepares the next step while the voice is still talking. When the next step isn't ready in time, the voice says so and bridges. Some waits of a few seconds will remain; how often is not known until it is tried.
 - **Off-script questions** go to the learner's model through upstream's side-question machinery (`src/server/side-chat.ts`: one model call, no tools, the lesson as context). The teacher receives each such exchange with its next turn, as it does for the Tutor.
 - **What was said** (both sides, as text) is saved in the record for the captions, the read-only view and resuming. What the learner said outside a question reaches the teacher with its next turn, as a marker message.
 - **The key.** `OPENAI_API_KEY` already has a row in Settings (it is one of the model-provider keys, `AUTH_PROVIDER_KEYS` in `src/core/auth-keys.ts`). The server mints a one-minute client secret per call, as it mints a Deepgram token today (`app/api/stt/token/route.ts`); the browser never holds the key. Sound travels between the phone and OpenAI directly.
+
+### When the learner doesn't understand, or asks a question
+
+Asked by the owner ("what happens if you say 'i don't understand, can you go over x' or if you start asking it questions"). The learner can cut in at any moment (decision 7); the voice stops and listens. Then one of three things, and the third always:
+
+1. **About the step being taught** ("go over that again", "I don't get the turns ratio"): the voice model explains it again in other words, at once, from the step the learner's model wrote and from what has been said in this call. No wait, and nothing new is invented.
+2. **Beyond the step** (a new question, something from an earlier sitting, anything the step doesn't cover): the voice says it is checking, puts the question to the learner's model through the side-question machinery, and speaks the answer a few seconds later.
+3. **The teacher hears all of it.** What the learner said, and what was answered, reaches the learner's model with its next turn, so the next step can slow down, go back over the point or change course.
+
+- **While a question is open,** something that isn't an answer ("wait, what does secondary mean?") is handled as 1 or 2 and the question stays open in the box. The voice model can't give the answer away: it doesn't have it until the answer is submitted.
+- **Who draws the line between 1 and 2 is the voice model,** following its instructions. It may answer from its own knowledge where it should have asked. How strictly it is told to ask is a setting of the prompt, and the prompt's wording is the owner's to approve in Phase 1: stricter means more waits of a few seconds, looser means more answers that aren't the learner's model's.
+- **Not settled:** whether a formula or a diagram in an answer from case 2 goes on the board; whether the voice returns to exactly where it was in the step after an interruption (it keeps its own place; unproven until tried).
 
 ## What the investigation found
 
