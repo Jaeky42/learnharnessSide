@@ -61,7 +61,7 @@ class FakePeer extends Emitter {
 
 interface Reply { status: number; body: unknown }
 
-function harness(options: { reply?: Reply; micRefused?: boolean } = {}) {
+function harness(options: { reply?: Reply; micRefused?: boolean; holdSession?: boolean } = {}) {
 	const log: string[] = [];
 	let clock = 1000;
 	let timers: Array<{ at: number; run: () => void; id: number }> = [];
@@ -70,6 +70,8 @@ function harness(options: { reply?: Reply; micRefused?: boolean } = {}) {
 	const stream = { getTracks: () => [track], getAudioTracks: () => [track] };
 	let peer: FakePeer | null = null;
 	const requests: Array<{ url: string; body: Record<string, unknown>; headers: Record<string, string> }> = [];
+	const remoteStreams: unknown[] = [];
+	let releaseSession: (() => void) | null = null;
 	const reply = options.reply ?? { status: 200, body: { sessionId: "live_1", sdp: "v=0 answer" } };
 	const deps: LiveCallDeps = {
 		createPeerConnection: () => { log.push("createPeerConnection"); peer = new FakePeer(log); return peer; },
@@ -80,13 +82,18 @@ function harness(options: { reply?: Reply; micRefused?: boolean } = {}) {
 		},
 		fetch: async (url, init) => {
 			log.push(`fetch:${url}`);
-			requests.push({ url, body: JSON.parse(init.body), headers: init.headers });
-			const r = url.endsWith("/hangup") ? { status: 200, body: { ok: true } } : reply;
+			requests.push({ url, body: JSON.parse(init.body ?? "null"), headers: init.headers });
+			if (url.endsWith("/session") && options.holdSession) await new Promise<void>((resolve) => { releaseSession = resolve; });
+			const r = url.endsWith("/hangup") ? { status: 200, body: { ok: true } }
+				: url.endsWith("/chatgpt-models") ? { status: 200, body: { signedIn: true, live: ["gpt-live-1.1"] } }
+				: reply;
 			return { ok: r.status < 400, status: r.status, json: async () => r.body };
 		},
 		setTimeout: (run, ms) => { const id = nextId++; timers.push({ at: clock + ms, run, id }); return id; },
 		clearTimeout: (id) => { timers = timers.filter((t) => t.id !== id); },
 		now: () => clock,
+		onRemoteStream: (stream) => { remoteStreams.push(stream); },
+		streamFromTrack: (track) => ({ madeFrom: track }),
 	};
 	const call = new LiveCall(deps);
 	const advance = (ms: number) => {
@@ -101,8 +108,11 @@ function harness(options: { reply?: Reply; micRefused?: boolean } = {}) {
 		clock = end;
 	};
 	const flush = () => new Promise<void>((r) => setTimeout(r, 0));
+	/** Moves the clock without running timers: what iOS does to a page in the background. */
+	const skip = (ms: number) => { clock += ms; };
 	return {
-		call, log, track, requests, advance, flush,
+		call, log, track, requests, advance, flush, skip, remoteStreams,
+		release: () => releaseSession?.(),
 		get peer() { return peer!; },
 		get channel() { return peer!.channels[0]!; },
 		timers: () => timers.length,
@@ -297,6 +307,62 @@ describe("during the call", () => {
 		assert.equal(h.call.getState().phase, "ended");
 		assert.equal(h.call.getState().endedText, VOICE_TRIAL_TEXT.timeLimit);
 		assert.ok(h.track.stopped);
+		assert.equal(sentTypes(h.channel).at(-1), "session.close");
+		assert.deepEqual(h.requests.find((r) => r.url === "/api/voice-trial/hangup")?.body, { sessionId: "live_1" });
+	});
+
+	it("ends at once on coming back past the limit when the timer was held in the background", async () => {
+		const h = harness();
+		await live(h);
+		h.call.noteVisibility("hidden");
+		h.skip(VOICE_TRIAL_MAX_MS - 1000);
+		h.call.noteVisibility("visible");
+		assert.equal(h.call.getState().phase, "live", "not yet past the limit");
+		h.call.noteVisibility("hidden");
+		h.skip(1000);
+		h.call.noteVisibility("visible");
+		await h.flush();
+		assert.equal(h.call.getState().phase, "ended");
+		assert.equal(h.call.getState().endedText, VOICE_TRIAL_TEXT.timeLimit);
+		assert.equal(sentTypes(h.channel).at(-1), "session.close");
+		assert.ok(h.requests.some((r) => r.url === "/api/voice-trial/hangup"));
+	});
+
+	it("hangs up a session whose id arrives after the call was ended", async () => {
+		const h = harness({ holdSession: true });
+		const starting = h.call.start({ model: "gpt-live-1.1", voice: "marin" });
+		await h.flush();
+		assert.ok(h.requests.some((r) => r.url === "/api/voice-trial/session"), "the session request is in flight");
+		await h.call.end();
+		assert.equal(h.call.getState().phase, "ended");
+		assert.ok(!h.requests.some((r) => r.url === "/api/voice-trial/hangup"), "no id known yet");
+		h.release();
+		await starting;
+		await h.flush();
+		assert.deepEqual(h.requests.filter((r) => r.url === "/api/voice-trial/hangup").map((r) => r.body), [{ sessionId: "live_1" }]);
+		assert.equal(h.peer.remote, null, "the late answer is not applied");
+		assert.equal(h.call.getState().phase, "ended");
+	});
+
+	it("plays a remote track that came without a stream through a stream made around it", async () => {
+		const h = harness();
+		await live(h);
+		const remote = { kind: "audio" };
+		h.peer.emit("track", { track: remote, streams: [] });
+		assert.deepEqual(h.remoteStreams, [{ madeFrom: remote }]);
+		const own = { id: "theirs" };
+		h.peer.emit("track", { track: remote, streams: [own] });
+		assert.equal(h.remoteStreams[1], own);
+	});
+
+	it("checks the ChatGPT plan only when asked", async () => {
+		const h = harness();
+		await live(h);
+		assert.ok(!h.requests.some((r) => r.url.includes("chatgpt-models")));
+		assert.equal(h.call.getState().diag.chatgptLive, "not checked");
+		await h.call.checkChatGPTPlan();
+		assert.equal(h.requests.filter((r) => r.url.includes("chatgpt-models")).length, 1);
+		assert.equal(h.call.getState().diag.chatgptLive, "gpt-live-1.1");
 	});
 
 	it("records visibility changes with their times, and keeps them across a new call", async () => {

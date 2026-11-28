@@ -16,7 +16,7 @@
  * line, and nothing that identifies the learner is sent to OpenAI.
  */
 
-import { isLiveModel, isLiveVoice, trialSessionConfig } from "../core/voice/live.ts";
+import { isLiveModel, isLiveVoice, trialSessionConfig, VOICE_TRIAL_MAX_MS } from "../core/voice/live.ts";
 import { chatGPTRequest } from "../agent/chatgpt-bridge.ts";
 import { webSubscriptionsEnabled } from "../agent/subscription-runtime.ts";
 import { keyValue } from "./keys.ts";
@@ -40,6 +40,8 @@ export interface VoiceTrialDeps {
 	/** The OpenAI key; the server's key store by default. */
 	key?: () => string | undefined;
 	timeoutMs?: number;
+	/** The server-side limit's timers (real, unref'd timers by default). */
+	timers?: VoiceTrialTimers;
 }
 
 function json(body: unknown, status = 200): Response {
@@ -62,6 +64,8 @@ function gate(request: Request): Response | null {
 }
 
 async function readBody(request: Request): Promise<Record<string, unknown> | Response> {
+	const declared = Number(request.headers.get("content-length"));
+	if (Number.isFinite(declared) && declared > MAX_BODY_CHARS) return json({ error: "Request too large." }, 413);
 	const text = await request.text().catch(() => "");
 	if (text.length > MAX_BODY_CHARS) return json({ error: "Request too large." }, 413);
 	try {
@@ -80,8 +84,8 @@ function scrub(message: string, key: string): string {
 	return out.slice(0, MAX_UPSTREAM_MESSAGE);
 }
 
-async function upstreamMessage(response: Response, key: string): Promise<string> {
-	const text = await response.text().catch(() => "");
+async function upstreamMessage(response: Response, key: string, signal: AbortSignal): Promise<string> {
+	const text = await within(response.text(), signal).catch(() => "");
 	let message = "";
 	try {
 		const body = JSON.parse(text) as { error?: { message?: unknown } | string; message?: unknown };
@@ -94,11 +98,110 @@ async function upstreamMessage(response: Response, key: string): Promise<string>
 	return scrub(message.trim() || `OpenAI answered ${response.status}.`, key);
 }
 
+/** A body read that gives up when the signal does, whether or not the stream itself is tied to it. */
+function within<T>(read: Promise<T>, signal: AbortSignal): Promise<T> {
+	if (signal.aborted) return Promise.reject(new Error("timeout"));
+	return new Promise<T>((resolve, reject) => {
+		const stop = () => reject(new Error("timeout"));
+		signal.addEventListener("abort", stop, { once: true });
+		read.then(
+			(value) => { signal.removeEventListener("abort", stop); resolve(value); },
+			(error: unknown) => { signal.removeEventListener("abort", stop); reject(error); },
+		);
+	});
+}
+
 function withTimeout(ms: number): { signal: AbortSignal; done: () => void } {
 	const controller = new AbortController();
 	const timer = setTimeout(() => controller.abort(), ms);
 	return { signal: controller.signal, done: () => clearTimeout(timer) };
 }
+
+// ─── The server's own cost limit ─────────────────────────────────────────────
+
+/**
+ * The page ends a call after VOICE_TRIAL_MAX_MS, but its timers can be held
+ * while iOS has the page in the background, and a closed tab says nothing.
+ * So this process remembers each session it opened and hangs it up itself a
+ * minute after the page's limit, unless the page's own hangup came first.
+ * In memory only (a restart forgets them); the timers never keep the process
+ * alive. At most VOICE_TRIAL_MAX_TRACKED at once: a new session is refused
+ * rather than opened unguarded.
+ */
+export const VOICE_TRIAL_SERVER_LIMIT_MS = VOICE_TRIAL_MAX_MS + 60_000;
+export const VOICE_TRIAL_MAX_TRACKED = 8;
+
+export interface VoiceTrialTimers {
+	set(run: () => void, ms: number): unknown;
+	clear(handle: unknown): void;
+}
+
+const realTimers: VoiceTrialTimers = {
+	set: (run, ms) => {
+		const handle = setTimeout(run, ms);
+		(handle as { unref?: () => void }).unref?.();
+		return handle;
+	},
+	clear: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+};
+
+interface Tracked { handle: unknown; timers: VoiceTrialTimers }
+const TRACKED_KEY = Symbol.for("lh.voiceTrial.sessions");
+
+function tracked(): Map<string, Tracked> {
+	const global = globalThis as typeof globalThis & { [TRACKED_KEY]?: Map<string, Tracked> };
+	return (global[TRACKED_KEY] ??= new Map());
+}
+
+function untrack(sessionId: string): void {
+	const entry = tracked().get(sessionId);
+	if (!entry) return;
+	entry.timers.clear(entry.handle);
+	tracked().delete(sessionId);
+}
+
+/** How many sessions this process is watching (tests). */
+export function voiceTrialTrackedSessions(): string[] {
+	return [...tracked().keys()];
+}
+
+/** Forget every watched session and its timer (tests). */
+export function resetVoiceTrialTracking(): void {
+	for (const id of voiceTrialTrackedSessions()) untrack(id);
+}
+
+/** POST …/hangup with the key. True when OpenAI answered at all. */
+async function hangupAtOpenAI(sessionId: string, key: string, doFetch: typeof fetch, timeoutMs: number): Promise<boolean> {
+	const timer = withTimeout(timeoutMs);
+	try {
+		const response = await doFetch(`${OPENAI_LIVE_SESSIONS_URL}/${encodeURIComponent(sessionId)}/hangup`, {
+			method: "POST",
+			headers: { Authorization: `Bearer ${key}` },
+			signal: timer.signal,
+		});
+		await response.body?.cancel().catch(() => undefined);
+		return true;
+	} catch {
+		return false;
+	} finally {
+		timer.done();
+	}
+}
+
+const keyOf = (deps: VoiceTrialDeps) => (deps.key ?? (() => keyValue("OPENAI_API_KEY")))();
+
+function track(sessionId: string, deps: VoiceTrialDeps): void {
+	const timers = deps.timers ?? realTimers;
+	untrack(sessionId);
+	const handle = timers.set(() => {
+		tracked().delete(sessionId);
+		const key = keyOf(deps);
+		if (key) void hangupAtOpenAI(sessionId, key, deps.fetch ?? fetch, HANGUP_TIMEOUT_MS);
+	}, VOICE_TRIAL_SERVER_LIMIT_MS);
+	tracked().set(sessionId, { handle, timers });
+}
+
+// ─── The routes ──────────────────────────────────────────────────────────────
 
 export async function voiceTrialSessionResponse(request: Request, deps: VoiceTrialDeps = {}): Promise<Response> {
 	const refused = gate(request);
@@ -109,35 +212,47 @@ export async function voiceTrialSessionResponse(request: Request, deps: VoiceTri
 	if (typeof sdp !== "string" || sdp.length === 0 || sdp.length > MAX_SDP_CHARS) return json({ error: "The offer is missing or too long." }, 400);
 	if (!isLiveModel(model)) return json({ error: "Unknown model." }, 400);
 	if (!isLiveVoice(voice)) return json({ error: "Unknown voice." }, 400);
-	const key = (deps.key ?? (() => keyValue("OPENAI_API_KEY")))();
+	const key = keyOf(deps);
 	if (!key) return json({ code: "no_key", message: VOICE_TRIAL_NO_KEY_MESSAGE }, 503);
+	if (tracked().size >= VOICE_TRIAL_MAX_TRACKED) {
+		return json({ code: "too_many", message: "Too many voice trial calls are open on this server. End one, or wait a few minutes." }, 429);
+	}
 
 	const doFetch = deps.fetch ?? fetch;
+	// One limit for the whole exchange: the request and the reading of OpenAI's answer.
 	const timer = withTimeout(deps.timeoutMs ?? SESSION_TIMEOUT_MS);
-	let response: Response;
+	let status = 0;
+	let answer: { session?: { id?: unknown }; transport?: { sdp?: unknown } } | null;
 	try {
-		response = await doFetch(OPENAI_LIVE_SESSIONS_URL, {
+		const response = await doFetch(OPENAI_LIVE_SESSIONS_URL, {
 			method: "POST",
 			headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
 			body: JSON.stringify({ session: trialSessionConfig({ model, voice }), transport: { type: "webrtc", sdp } }),
 			signal: timer.signal,
 		});
+		status = response.status;
+		if (!response.ok) {
+			const message = await upstreamMessage(response, key, timer.signal);
+			if (timer.signal.aborted) throw new Error("timeout");
+			return json({ code: "upstream", status, message }, 502);
+		}
+		const text = await within(response.text(), timer.signal);
+		try { answer = JSON.parse(text) as typeof answer; } catch { answer = null; }
 	} catch {
-		timer.done();
 		const timedOut = timer.signal.aborted;
 		return json({ code: "unreachable", message: timedOut ? "OpenAI didn't answer in time." : "OpenAI couldn't be reached." }, 502);
+	} finally {
+		timer.done();
 	}
-	timer.done();
-	if (!response.ok) {
-		return json({ code: "upstream", status: response.status, message: await upstreamMessage(response, key) }, 502);
-	}
-	const answer = (await response.json().catch(() => null)) as { session?: { id?: unknown }; transport?: { sdp?: unknown } } | null;
-	const sessionId = answer?.session?.id;
+	const sessionId = typeof answer?.session?.id === "string" && SESSION_ID.test(answer.session.id) ? answer.session.id : null;
 	const answerSdp = answer?.transport?.sdp;
 	if (typeof answerSdp !== "string" || answerSdp.length === 0) {
-		return json({ code: "upstream", status: response.status, message: "OpenAI's answer had no SDP." }, 502);
+		// A session was opened that the browser can never join: close it at once.
+		if (sessionId) await hangupAtOpenAI(sessionId, key, doFetch, HANGUP_TIMEOUT_MS);
+		return json({ code: "upstream", status, message: "OpenAI's answer had no SDP." }, 502);
 	}
-	return json({ sessionId: typeof sessionId === "string" ? sessionId : null, sdp: answerSdp });
+	if (sessionId) track(sessionId, deps);
+	return json({ sessionId, sdp: answerSdp });
 }
 
 export async function voiceTrialHangupResponse(request: Request, deps: VoiceTrialDeps = {}): Promise<Response> {
@@ -147,24 +262,11 @@ export async function voiceTrialHangupResponse(request: Request, deps: VoiceTria
 	if (body instanceof Response) return body;
 	const { sessionId } = body;
 	if (typeof sessionId !== "string" || !SESSION_ID.test(sessionId)) return json({ error: "Unknown session." }, 400);
-	const key = (deps.key ?? (() => keyValue("OPENAI_API_KEY")))();
+	untrack(sessionId);
+	const key = keyOf(deps);
 	if (!key) return json({ ok: true, sent: false });
-	const doFetch = deps.fetch ?? fetch;
-	const timer = withTimeout(deps.timeoutMs ?? HANGUP_TIMEOUT_MS);
-	let sent = false;
-	try {
-		const response = await doFetch(`${OPENAI_LIVE_SESSIONS_URL}/${encodeURIComponent(sessionId)}/hangup`, {
-			method: "POST",
-			headers: { Authorization: `Bearer ${key}` },
-			signal: timer.signal,
-		});
-		sent = true;
-		await response.body?.cancel().catch(() => undefined);
-	} catch {
-		// OpenAI's answer changes nothing here: the browser has already closed its side.
-	} finally {
-		timer.done();
-	}
+	// OpenAI's answer changes nothing here: the browser has already closed its side.
+	const sent = await hangupAtOpenAI(sessionId, key, deps.fetch ?? fetch, deps.timeoutMs ?? HANGUP_TIMEOUT_MS);
 	return json({ ok: true, sent });
 }
 

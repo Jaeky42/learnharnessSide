@@ -92,12 +92,14 @@ export interface FetchReply {
 export interface LiveCallDeps {
 	createPeerConnection(): PeerConnectionLike;
 	getUserMedia(constraints: { audio: { echoCancellation: boolean; noiseSuppression: boolean; autoGainControl: boolean } }): Promise<StreamLike>;
-	fetch(url: string, init: { method: string; headers: Record<string, string>; body: string }): Promise<FetchReply>;
+	fetch(url: string, init: { method: string; headers: Record<string, string>; body?: string }): Promise<FetchReply>;
 	setTimeout(run: () => void, ms: number): unknown;
 	clearTimeout(handle: unknown): void;
 	now(): number;
 	/** The remote audio, for the page's <audio> element. */
 	onRemoteStream?(stream: unknown): void;
+	/** A stream around one track, for a remote track that arrives without one (new MediaStream([track]) in the browser). */
+	streamFromTrack?(track: unknown): unknown;
 	standalone?: boolean;
 	userAgent?: string;
 }
@@ -233,6 +235,8 @@ export class LiveCall {
 	private eventChannel: DataChannelLike | null = null;
 	private timers = new Set<unknown>();
 	private limitTimer: unknown = null;
+	/** The clock at Start: iOS can hold timers while the page is hidden, so the limit is checked again on return. */
+	private startedWall: number | null = null;
 	private helloTimer: unknown = null;
 	private explanationTimer: unknown = null;
 	private answerTimer: unknown = null;
@@ -291,6 +295,10 @@ export class LiveCall {
 
 	noteVisibility(visibility: string): void {
 		this.set({}, { visibility: push(this.state.diag.visibility, { t: this.at(), what: visibility }) });
+		// Back on screen past the limit (a timer held in the background): end it now.
+		if (visibility === "visible" && this.active && this.startedWall !== null && this.deps.now() - this.startedWall >= VOICE_TRIAL_MAX_MS) {
+			void this.end("limit");
+		}
 	}
 
 	/** What the page knows about the device, read in the browser after hydration. */
@@ -299,8 +307,24 @@ export class LiveCall {
 		this.set({}, device);
 	}
 
-	/** The account's ChatGPT model ids that mention "live", read by the page (a hint only). */
-	noteChatGPTLive(text: string): void {
+	/**
+	 * The readout's hint: the signed-in ChatGPT account's model ids that
+	 * mention "live". Only ever run from a tap: the listing refreshes the
+	 * account's model catalog, which a failed listing clears, so it must not
+	 * run by itself while a lesson elsewhere may be using that catalog.
+	 */
+	async checkChatGPTPlan(): Promise<void> {
+		this.set({}, { chatgptLive: "checking…" });
+		let text: string;
+		try {
+			const reply = await this.deps.fetch("/api/voice-trial/chatgpt-models", { method: "GET", headers: { "x-learnharness-voice": "1" } });
+			const body = (await reply.json().catch(() => ({}))) as { signedIn?: unknown; live?: unknown };
+			if (!reply.ok) text = "couldn't be read";
+			else if (body.signedIn !== true) text = "not signed in";
+			else text = Array.isArray(body.live) && body.live.length ? body.live.filter((id) => typeof id === "string").join(", ") : "none";
+		} catch {
+			text = "couldn't be read";
+		}
 		this.set({}, { chatgptLive: text });
 	}
 
@@ -322,6 +346,7 @@ export class LiveCall {
 			phase: "starting", step: "waiting", model: options.model, voice: options.voice, sessionId: null, failure: null, endedText: null, hint: null,
 			muted: false, muteAck: null, paused: false, questionShown: false, answer: null, captions: [],
 		}, { ...diag, visibility: this.state.diag.visibility, audio: this.state.diag.audio, audioNotes: this.state.diag.audioNotes, chatgptLive: this.state.diag.chatgptLive, startedAt: this.at() });
+		this.startedWall = this.deps.now();
 		this.limitTimer = this.later(() => { void this.end("limit"); }, VOICE_TRIAL_MAX_MS);
 
 		let stream: StreamLike;
@@ -372,7 +397,11 @@ export class LiveCall {
 			return;
 		}
 		const body = (await reply.json().catch(() => ({}))) as { code?: unknown; message?: unknown; error?: unknown; sessionId?: unknown; sdp?: unknown };
-		if (generation !== this.generation) return;
+		if (generation !== this.generation) {
+			// Ended, failed or left while OpenAI was opening the session: never leave it open there.
+			if (reply.ok && typeof body.sessionId === "string") await this.hangup(body.sessionId);
+			return;
+		}
 		if (!reply.ok) {
 			if (reply.status === 503 && body.code === "no_key") this.fail("no_key", VOICE_TRIAL_TEXT.noKey, null);
 			else {
@@ -420,8 +449,9 @@ export class LiveCall {
 		pc.addEventListener("track", (event) => {
 			if (generation !== this.generation) return;
 			const { streams, track } = (event ?? {}) as { streams?: unknown[]; track?: { kind?: string } };
-			this.noteAudio(`remote ${track?.kind ?? "track"} arrived`);
-			this.deps.onRemoteStream?.(streams?.[0] ?? null);
+			const stream = streams?.[0] ?? (track && this.deps.streamFromTrack ? this.deps.streamFromTrack(track) : null);
+			this.noteAudio(`remote ${track?.kind ?? "track"} arrived${streams?.[0] ? "" : " without a stream"}`);
+			if (stream) this.deps.onRemoteStream?.(stream);
 		});
 		pc.addEventListener("datachannel", (event) => {
 			if (generation !== this.generation) return;

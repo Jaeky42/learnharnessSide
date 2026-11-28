@@ -9,6 +9,11 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import { trialSessionConfig } from "../src/core/index.ts";
 import {
 	OPENAI_LIVE_SESSIONS_URL,
+	resetVoiceTrialTracking,
+	VOICE_TRIAL_MAX_TRACKED,
+	VOICE_TRIAL_SERVER_LIMIT_MS,
+	voiceTrialTrackedSessions,
+	type VoiceTrialTimers,
 	voiceTrialChatGPTModelsResponse,
 	voiceTrialHangupResponse,
 	voiceTrialSessionResponse,
@@ -20,7 +25,18 @@ const OFFER = "v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\ns=-\r\n";
 
 let before: string | undefined;
 beforeEach(() => { before = process.env.LH_SERVER_MODE; process.env.LH_SERVER_MODE = "1"; });
-afterEach(() => { if (before === undefined) delete process.env.LH_SERVER_MODE; else process.env.LH_SERVER_MODE = before; });
+afterEach(() => { resetVoiceTrialTracking(); if (before === undefined) delete process.env.LH_SERVER_MODE; else process.env.LH_SERVER_MODE = before; });
+
+/** Timers run by hand. */
+function handTimers() {
+	const pending = new Map<number, { run: () => void; ms: number }>();
+	let next = 1;
+	const timers: VoiceTrialTimers = {
+		set: (run, ms) => { const id = next++; pending.set(id, { run, ms }); return id; },
+		clear: (id) => { pending.delete(id as number); },
+	};
+	return { timers, pending, fire: () => { for (const [id, t] of [...pending]) { pending.delete(id); t.run(); } } };
+}
 
 interface Call { url: string; init: RequestInit }
 function scripted(answer: () => Response | Promise<Response>) {
@@ -196,5 +212,69 @@ describe("GET /api/voice-trial/chatgpt-models (a read-only hint)", () => {
 		assert.deepEqual(await (await voiceTrialChatGPTModelsResponse(get(), { enabled: () => true, listing: async () => ({ accountId: null, models: [] }) })).json(), { signedIn: false, live: [] });
 		assert.equal((await voiceTrialChatGPTModelsResponse(get(), { enabled: () => true, listing: async () => { throw new Error("down"); } })).status, 502);
 		assert.equal((await voiceTrialChatGPTModelsResponse(new Request("http://localhost/x"), { enabled: () => true })).status, 403);
+	});
+});
+
+describe("never leaving a session open at OpenAI", () => {
+	it("hangs up a session that came with an id but no SDP, before answering the error", async () => {
+		const openai = scripted(() => Response.json({ session: { id: "live_nosdp" }, transport: { type: "webrtc" } }));
+		const response = await voiceTrialSessionResponse(sessionRequest({ sdp: OFFER, model: "gpt-live-1.1", voice: "marin" }), { fetch: openai.fetch, key: () => KEY });
+		assert.equal(response.status, 502);
+		assert.deepEqual(openai.calls.map((c) => c.url), [OPENAI_LIVE_SESSIONS_URL, `${OPENAI_LIVE_SESSIONS_URL}/live_nosdp/hangup`]);
+		assert.equal(voiceTrialTrackedSessions().length, 0);
+	});
+
+	it("hangs a session up itself a minute after the page's limit, and a client hangup cancels that", async () => {
+		const hand = handTimers();
+		const openai = scripted(() => Response.json({ session: { id: "live_a" }, transport: { sdp: "v=0 answer" } }));
+		await voiceTrialSessionResponse(sessionRequest({ sdp: OFFER, model: "gpt-live-1.1", voice: "marin" }), { fetch: openai.fetch, key: () => KEY, timers: hand.timers });
+		assert.deepEqual(voiceTrialTrackedSessions(), ["live_a"]);
+		assert.deepEqual([...hand.pending.values()].map((t) => t.ms), [VOICE_TRIAL_SERVER_LIMIT_MS]);
+		assert.equal(VOICE_TRIAL_SERVER_LIMIT_MS, 11 * 60 * 1000);
+		hand.fire();
+		await new Promise((r) => setTimeout(r, 0));
+		assert.equal(openai.calls.at(-1)?.url, `${OPENAI_LIVE_SESSIONS_URL}/live_a/hangup`);
+		assert.deepEqual(openai.calls.at(-1)?.init.headers, { Authorization: `Bearer ${KEY}` });
+		assert.equal(voiceTrialTrackedSessions().length, 0);
+
+		const second = scripted(() => Response.json({ session: { id: "live_b" }, transport: { sdp: "v=0 answer" } }));
+		await voiceTrialSessionResponse(sessionRequest({ sdp: OFFER, model: "gpt-live-1.1", voice: "marin" }), { fetch: second.fetch, key: () => KEY, timers: hand.timers });
+		assert.equal(hand.pending.size, 1);
+		await voiceTrialHangupResponse(hangupRequest({ sessionId: "live_b" }), { fetch: second.fetch, key: () => KEY });
+		assert.equal(hand.pending.size, 0, "the client's hangup clears the server's timer");
+		assert.equal(voiceTrialTrackedSessions().length, 0);
+	});
+
+	it("refuses a new session rather than open one it can't watch", async () => {
+		const hand = handTimers();
+		let n = 0;
+		const openai = scripted(() => Response.json({ session: { id: `live_${n++}` }, transport: { sdp: "v=0 answer" } }));
+		for (let i = 0; i < VOICE_TRIAL_MAX_TRACKED; i++) {
+			assert.equal((await voiceTrialSessionResponse(sessionRequest({ sdp: OFFER, model: "gpt-live-1.1", voice: "marin" }), { fetch: openai.fetch, key: () => KEY, timers: hand.timers })).status, 200);
+		}
+		const refused = await voiceTrialSessionResponse(sessionRequest({ sdp: OFFER, model: "gpt-live-1.1", voice: "marin" }), { fetch: openai.fetch, key: () => KEY, timers: hand.timers });
+		assert.equal(refused.status, 429);
+		assert.equal(openai.calls.length, VOICE_TRIAL_MAX_TRACKED);
+	});
+});
+
+describe("time and size limits", () => {
+	it("the time limit also covers reading OpenAI's answer", async () => {
+		const stalled = (async () => new Response(new ReadableStream({ start(controller) { controller.enqueue(new TextEncoder().encode('{"session":')); } }), { status: 200 })) as unknown as typeof globalThis.fetch;
+		const response = await voiceTrialSessionResponse(sessionRequest({ sdp: OFFER, model: "gpt-live-1.1", voice: "marin" }), { fetch: stalled, key: () => KEY, timeoutMs: 30 });
+		assert.equal(response.status, 502);
+		assert.match((await response.json() as { message: string }).message, /in time/);
+	});
+
+	it("refuses an oversized request by its declared length before reading it", async () => {
+		const openai = scripted(() => Response.json({}));
+		let read = false;
+		const request = new Request("http://localhost/api/voice-trial/session", { method: "POST", headers: { ...APP, "content-length": "999999" }, body: "{}" });
+		const original = request.text.bind(request);
+		request.text = async () => { read = true; return original(); };
+		const response = await voiceTrialSessionResponse(request, { fetch: openai.fetch, key: () => KEY });
+		assert.equal(response.status, 413);
+		assert.equal(read, false);
+		assert.equal(openai.calls.length, 0);
 	});
 });

@@ -44,6 +44,7 @@ function browserDeps(onRemoteStream: (stream: unknown) => void): LiveCallDeps {
 		clearTimeout: (handle) => window.clearTimeout(handle as number),
 		now: () => Date.now(),
 		onRemoteStream,
+		streamFromTrack: (track) => new MediaStream([track as MediaStreamTrack]),
 	};
 }
 
@@ -85,7 +86,7 @@ export function VoiceTrial() {
 	const detailsRef = useRef<HTMLDetailsElement | null>(null);
 	const captionsRef = useRef<HTMLDivElement | null>(null);
 
-	// The device, the page's visibility, and the ChatGPT hint: recorded whether a call runs or not.
+	// The device and the page's visibility: recorded whether a call runs or not.
 	useEffect(() => {
 		call.noteDevice({ standalone: isStandalone(), userAgent: navigator.userAgent });
 		const visibility = () => call.noteVisibility(document.visibilityState);
@@ -94,18 +95,7 @@ export function VoiceTrial() {
 		document.addEventListener("visibilitychange", visibility);
 		window.addEventListener("pagehide", hide);
 		window.addEventListener("pageshow", show);
-		let alive = true;
-		fetch("/api/voice-trial/chatgpt-models", { headers: { "x-learnharness-voice": "1" }, credentials: "same-origin", cache: "no-store" })
-			.then((reply) => reply.json() as Promise<{ signedIn?: boolean; live?: string[]; error?: string }>)
-			.then((body) => {
-				if (!alive) return;
-				if (body.error) call.noteChatGPTLive("couldn't be read");
-				else if (!body.signedIn) call.noteChatGPTLive("not signed in");
-				else call.noteChatGPTLive(body.live?.length ? body.live.join(", ") : "none");
-			})
-			.catch(() => { if (alive) call.noteChatGPTLive("couldn't be read"); });
 		return () => {
-			alive = false;
 			document.removeEventListener("visibilitychange", visibility);
 			window.removeEventListener("pagehide", hide);
 			window.removeEventListener("pageshow", show);
@@ -265,6 +255,12 @@ export function VoiceTrial() {
 							<div className="flex items-center gap-3">
 								<button type="button" className={buttonClass} onClick={copy} data-testid="voice-copy">Copy report</button>
 								{copyNote && <span className="font-ui text-xs text-muted-foreground">{copyNote}</span>}
+							</div>
+							<div className="flex flex-col items-start gap-1">
+								<button type="button" className={buttonClass} disabled={state.diag.chatgptLive === "checking…"} onClick={() => void call.checkChatGPTPlan()} data-testid="voice-chatgpt-check">
+									Check my ChatGPT plan for voice models
+								</button>
+								<span className="font-ui text-xs text-muted-foreground [overflow-wrap:anywhere]" data-testid="voice-chatgpt-result">ChatGPT model ids with “live”: {state.diag.chatgptLive}</span>
 							</div>
 						</div>
 					</details>
