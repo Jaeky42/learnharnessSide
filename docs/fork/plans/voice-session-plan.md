@@ -2,7 +2,13 @@
 
 A third kind of session, beside Teaching and Practice: a lesson held as a spoken conversation on the phone. The learner's chosen model prepares the lesson; a speech-to-speech model delivers it; the lesson's questions show in the app's question box and are answered by voice or by tap.
 
-**State:** the owner made the eight decisions below, one question each, and then approved the plan and the smaller rules proposed with it ("i approve the plan, start with phase 0"). Before Phase 0 was built the owner changed decision 2 from OpenAI's Realtime API to its GPT-Live API (decision 2b). **What that changes in this plan is in "GPT-Live" below; wherever the two disagree, that section is newer.** The voice side of Phases 1 and 2 is written again after Phase 0 and shown to the owner before it is built. Change a decision only with the owner's approval.
+**State:** the owner made the eight decisions below, then approved the plan and the smaller rules proposed with it ("i approve the plan, start with phase 0"). Three things have changed since, each by the owner, and **each is newer than the text it touches**:
+
+- **Decision 2b:** OpenAI's GPT-Live in place of its Realtime API ("GPT-Live" below).
+- **Decision 3b:** voice is a view of a teaching lesson, not a kind of session of its own.
+- **Decision 9:** while the voice view is open the teacher is told so and writes shorter steps.
+
+Phase 0 is built, shipped to the server's branch and **tried by the owner on the iPhone: "the voice works"** ("Phase 0 as built" and "What the owner's trial showed" below). **Phases 1 to 3 as written below describe the separate session and are to be written again for decision 3b**, and shown to the owner for approval before anything is built. Change a decision only with the owner's approval.
 
 ## The owner's decisions
 
@@ -12,11 +18,16 @@ A third kind of session, beside Teaching and Practice: a lesson held as a spoken
 | 2 | The voice model | **OpenAI Realtime.** Chosen over Gemini Live, over Deepgram's Voice Agent (a managed pipeline, not speech-to-speech; the owner asked "does deepgram have a voice model?"), and over trying two on the iPhone first. |
 | 2b | Which OpenAI voice product | **GPT-Live only** (it replaces "OpenAI Realtime" in decision 2). Found while preparing Phase 0: OpenAI has two voice products on one API key, and its docs have a guide for moving from Realtime to GPT-Live. Chosen over a trial of both on the iPhone (the recommendation) and over Realtime only. The owner was told: GPT-Live costs 3 dollars an hour while talking and 1.20 while paused; in the mode that uses the learner's own model it cannot call tools, so the app's own code must work out which option was said; and it is known here only from OpenAI's code library. |
 | 3 | Where it lives | **Its own kind of session**, a third choice beside Teaching and Practice. Not a switch inside a teaching lesson; a typed lesson can't be continued by voice or the other way round. |
+| 3b | Where it lives (replaces 3) | **A voice view of the lesson, with its own board.** Asked for by the owner after the trial ("i think i want to have the voice mode to be within the lession"; then, of the sheet: "can this be done to have that separate board, but it maintains continuity by being within the lesson itself?"). In a teaching lesson a talk control switches the screen to a full-screen voice view: a board, live captions, the question box, mute and end. "Back to text" returns to the written lesson, which holds everything that was said: one lesson, two views, switched at any point. The board shows the formulas, diagrams, tables and figures of the step being spoken, taken from the lesson's own text. Chosen over a voice sheet over the lesson (the lesson above it as the board), over a talk button with no sheet and no board, and over keeping the separate session. The owner was told: the lesson's running text isn't visible in the voice view; a step with no formula or diagram gives the board nothing new; and, since the voice model can't signal the app in client delegation, a first version shows all of a step's visuals together. |
 | 4 | What it is for | **A full lesson on a new topic:** it checks what the learner knows, the learner's model makes a plan, and it teaches step by step with questions. Chosen over a review of earlier sessions, and over both. |
 | 5 | Answering a question | **Sent at once; the voice asks back when unsure.** A clear spoken answer is marked in the question box and submitted straight away. A tap on the box always works. The owner was told that a misheard answer can be submitted and graded. Chosen over "marked, then I confirm" and over tap only. |
 | 6 | The screen | **A board plus live captions.** The board shows a formula, a diagram or a figure the learner's model prepared, as the voice gets to it; under it both sides' words appear as text while they are spoken. Chosen over the board alone and over voice only. |
 | 7 | The microphone | **Always listening, and the learner can interrupt.** A mute button. If the iPhone trial shows that this misbehaves on the loudspeaker, the owner is asked again; nothing is switched quietly. Chosen over "no interrupting" and over tap to talk. |
 | 8 | Devices | **The server's site: phone, tablet and a computer's browser.** The screen is designed for the phone. The Windows app lists Voice sessions and shows their text, and can't start or continue one. One OpenAI key, on the server. Chosen over the Windows app too, and over the phone only. |
+
+| 9 | How the teacher writes while the voice view is open | **Told that voice is on; writes shorter steps.** For turns taken in the voice view the teacher gets a short added instruction (the step will be spoken: brief, one idea at a time, questions more often). The parts of a lesson taken by voice read terser in the text view. Its wording is the owner's to approve before it ships. Chosen over the teacher writing exactly as today (long steps for the voice to shorten by itself) and over two versions of every step. |
+
+**What decision 3b changes in decisions 4 and 6.** Decision 4 (a full lesson on a new topic) stands: a teaching session can be taken by voice from its first turn. Decision 6 (a board plus live captions) stands, with the board now filled from the lesson's own text and no longer by a tool of the teacher's. Nothing new is stored: a lesson taken by voice is an ordinary lesson (the teacher's messages, the answers, and, for what the learner asks aloud, upstream's side conversations, which the teacher already receives with its next turn).
 
 Earlier in the same conversation the owner chose the direction: "i'd want it to be like option c, where it's like a natural conversation. this would primarily be a phone feature".
 
@@ -123,6 +134,14 @@ Built on `claude/brave-knuth-kt24vk` (`548b88a`) and pushed to the server's bran
 - **Reviews:** an independent test run (pass) and an independent security review (no path for the key to a browser, a response, an error or a log; routes reachable only when signed in and not from another site; one account can't spend another's key). Its five findings are fixed in `548b88a`.
 - **Code:** `src/core/voice/live.ts` (the rules and the trial's words), `src/server/voice-trial.ts`, `app/api/voice-trial/{session,hangup,chatgpt-models}/route.ts`, `app/voice-trial/page.tsx`, `components/voice/live-call.ts` (the call), `components/voice/voice-trial.tsx` (the page), the link in `components/settings/cloud-server-section.tsx`, one export each in `src/core/index.ts` and `src/server/index.ts` (`FORK (voice)`). **Tests:** `tests/voice-live-core.test.ts`, `voice-trial-route.test.ts`, `voice-live-call.test.ts`, `voice-trial-ui.test.tsx`, and the link in `tests/cloud-ui.test.tsx`.
 - **Only the owner's iPhone can show** everything the trial is for: whether it connects at all on these shapes, hears and is heard, sounds clean on the loudspeaker, whether the voice's own sound is taken for an answer, what happens after the app is left or the phone locked, and what a minute really costs.
+
+#### What the owner's trial showed
+
+On the owner's iPhone, with an OpenAI API key saved on the server:
+
+- **"the voice works"**: the call connects and the conversation runs against the live service. So the shapes read from OpenAI's library hold at least that far (the session call from the server, the data channel, speech both ways). Which items the owner tried one by one (interrupting, the loudspeaker, an answer by voice, leaving the app) has not been said.
+- **"theyre speaking different languages"**: with some of the voices the tutor spoke another language. The trial's instructions name no language, and the voice speaks before it has heard the learner. A third-party write-up says several of the newer voices carry a regional style (German, French, Hindi, Japanese, Korean); OpenAI's own page was not read. The owner asked which voice to choose and was told `marin` (the default) or `cedar`. **To do:** the instructions state the language; rule 11 below ("the voice follows the language the learner speaks") did not hold as written.
+- **The ChatGPT sign-in lists no voice model** ("it said none"), and with no key saved the page said so in its sentence.
 
 ### Phase 1: the lesson underneath
 
