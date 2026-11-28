@@ -50,7 +50,7 @@ Newest first. "Not recorded": the docs give none.
 - The owner's own copy under the account copies' limits: "For the owner to confirm". `server.md`, "Rulings made while building (for the owner to review)".
 - The plugin security options (five, none chosen). `plugins.md`, "Plugin security: the facts, and options not yet chosen".
 - The fork's own coding-questions plugin: a draft plan, not approved. `plans/own-coding-plugin-plan.md`.
-- Voice sessions (a spoken lesson on the phone, the learner's model preparing and OpenAI's GPT-Live delivering): the plan is approved and Phase 0, the iPhone trial page, is being built; after the trial the owner decides whether the rest is built, and the voice side of Phases 1 and 2 is shown again first. `plans/voice-session-plan.md`.
+- Voice sessions (a spoken lesson on the phone, the learner's model preparing and OpenAI's GPT-Live delivering): the plan is approved and Phase 0, the iPhone trial page, is built and reviewed on `claude/brave-knuth-kt24vk` but not shipped; it needs the owner's approval to go to the server's branch, an OpenAI API key in the server's Settings, and then the owner's trial on the iPhone, after which the owner decides whether the rest is built. `plans/voice-session-plan.md`.
 - The iPhone status bar style on light themes (left `black-translucent` for now). `upstream.md`, "Asked after it was built (owner's answers)", item 4.
 - Moving the server to the `latest` channel, so one branch feeds both: not asked yet. `releases.md`, "Which branch feeds what".
 - The performance audit's remaining decisions. `performance.md`, "Not built (the audit's other recommendations)", "Decisions still the owner's".
